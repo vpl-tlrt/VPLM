@@ -351,8 +351,7 @@ export default function HomePage() {
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <p role="alert">{supabaseConfigurationError}</p>
-            <p>In GitHub Settings → Secrets and variables → Actions → Variables, set <code>{isDemoMode ? 'VITE_DEMO_SUPABASE_URL' : 'VITE_SUPABASE_URL'}</code> to the exact Project URL and <code>{isDemoMode ? 'VITE_DEMO_SUPABASE_ANON_KEY' : 'VITE_SUPABASE_ANON_KEY'}</code> to the exact publishable key shown in Supabase Project Settings → API. Replace the whole value; do not enter the variable name or an example placeholder. Then rerun the “Publish website” workflow.</p>
-            <p>The publishable key is intended for browser use; never use the Supabase service-role key or database password here.</p>
+            <p>Broken Page..</p>
             {isDemoMode && (
               <Button className="w-full" variant="outline" onClick={() => { window.location.assign(window.location.pathname); }}>
                 Back to live application
@@ -387,7 +386,7 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             <p className="mb-4 text-sm text-muted-foreground">
-              Setup instructions and the SQL schema are in the <a className="underline" href="https://github.com/anooptl01a-svg/VPLM#setup-secure-cloud-storage">repository README</a>.
+              Not Configred <a className="underline" href="Will Update Soon">.. README</a>.
             </p>
             <Button variant="outline" onClick={() => { void client.auth.signOut(); }}>Sign out</Button>
           </CardContent>
