@@ -207,6 +207,11 @@ function AuthScreen() {
           <div className="mt-6 flex items-center gap-2 rounded-2xl bg-muted p-3 text-muted-foreground">
             <ShieldCheck className="size-4 shrink-0" />
             <p className="text-xs font-medium">Protected by end-to-end cloud authentication & workspace authorization.</p>
+            <div className="pointer-events-none fixed bottom-4 right-4 z-50 select-none opacity-30 transition-opacity hover:opacity-60">
+  <p className="text-xs font-medium tracking-wider text-muted-foreground">
+    Presented by Anoop Chandran - AAM SGA 2026.
+  </p>
+</div>
           </div>
         </div>
       </motion.section>
