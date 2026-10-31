@@ -2,3 +2,6 @@ project_id = "vplm"
 
 [functions.admin-users]
 verify_jwt = true
+
+[functions.ai-assistant]
+verify_jwt = true
