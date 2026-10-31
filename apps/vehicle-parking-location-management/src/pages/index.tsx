@@ -95,7 +95,13 @@ function AuthScreen() {
               Sign in to manage vehicle locations, bay assignments, reservations, and road tests.
             </p>
           </div>
-          <p className="text-sm font-semibold">Authorized personnel only</p>
+          <div className="relative inline-flex items-center gap-2 px-4 py-2 rounded bg-black border border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.3)] font-mono">
+  <span className="text-emerald-500 text-xs animate-pulse">&gt;_</span>
+  <p className="text-sm font-medium text-emerald-400 tracking-tight drop-shadow-[0_0_5px_rgba(52,211,153,0.8)]">
+    Developed under AAM Small Group Activity - 2026
+  </p>
+  <span className="w-2 h-4 bg-emerald-400 animate-pulse inline-block"></span>
+</div>
         </div>
 
         {/* Right Form Container */}
