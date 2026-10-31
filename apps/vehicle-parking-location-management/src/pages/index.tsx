@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type { Session } from '@supabase/supabase-js';
+import { CarFront, Lock, Mail, ShieldCheck } from 'lucide-react';
+import { motion } from 'motion/react';
 import { ParkingApp } from '@/components/parking-app';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -68,38 +70,146 @@ function AuthScreen() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>{isDemoMode ? isResetRequest ? 'Demo password reset' : isSignUp ? 'Create demo account' : 'Demo workspace' : isResetRequest ? 'Reset password' : isSignUp ? 'Create account' : 'Sign in'}</CardTitle>
-          <CardDescription>{isDemoMode ? 'Demo data is isolated from the live workspace.' : isResetRequest ? 'Enter your email to receive a secure password reset link.' : 'Sign in to the secure shared parking workspace.'}</CardDescription>
-        </CardHeader>
-        <CardContent>
+    <main className="industrial-grid grid min-h-screen place-items-center bg-background px-4 py-8 text-foreground">
+      <motion.section
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: 'easeOut' as const }}
+        className="grid w-full max-w-4xl overflow-hidden rounded-3xl border border-border bg-card text-card-foreground shadow-2xl md:grid-cols-[1.05fr_0.95fr]"
+      >
+        {/* Left Branding Side Panel */}
+        <div className="hidden flex-col justify-between bg-primary p-10 text-primary-foreground md:flex">
+          <div className="flex items-center gap-3">
+            <div className="grid size-11 place-items-center rounded-2xl bg-background text-foreground">
+              <CarFront className="size-6" />
+            </div>
+            <div>
+              <p className="font-bold">Vehicle Parking</p>
+              <p className="text-sm">Location Management</p>
+            </div>
+          </div>
+          <div className="space-y-4">
+            <ShieldCheck className="size-10" />
+            <h1 className="text-3xl font-bold tracking-tight">Workshop operations, securely connected.</h1>
+            <p className="max-w-sm text-base font-medium">
+              Sign in to manage vehicle locations, bay assignments, reservations, and road tests.
+            </p>
+          </div>
+          <p className="text-sm font-semibold">Authorized personnel only</p>
+        </div>
+
+        {/* Right Form Container */}
+        <div className="p-6 sm:p-10">
+          <div className="mb-8 flex items-center gap-3 md:hidden">
+            <div className="grid size-11 place-items-center rounded-2xl bg-primary text-primary-foreground">
+              <CarFront className="size-6" />
+            </div>
+            <div>
+              <p className="font-bold">Vehicle Parking</p>
+              <p className="text-sm text-muted-foreground">Location Management</p>
+            </div>
+          </div>
+
+          <div className="mb-8 space-y-2">
+            <h2 className="text-2xl font-bold tracking-tight">
+              {isDemoMode
+                ? isResetRequest ? 'Demo password reset' : isSignUp ? 'Create demo account' : 'Demo workspace'
+                : isResetRequest ? 'Reset password' : isSignUp ? 'Create account' : 'Welcome back'}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {isDemoMode
+                ? 'Demo data is isolated from the live workspace.'
+                : isResetRequest
+                ? 'Enter your email to receive a secure password reset link.'
+                : 'Sign in to the secure shared parking workspace.'}
+            </p>
+          </div>
+
           <form className="space-y-4" onSubmit={(event) => void submit(event)}>
             <div className="space-y-2">
               <Label htmlFor="auth-email">Email</Label>
-              <Input id="auth-email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
+              <div className="relative">
+                <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="auth-email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="Enter your email"
+                  className="h-11 pl-10"
+                />
+              </div>
             </div>
-            {!isResetRequest && <div className="space-y-2">
-              <Label htmlFor="auth-password">Password</Label>
-              <Input id="auth-password" type="password" autoComplete={isSignUp ? 'new-password' : 'current-password'} minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} />
-            </div>}
+
+            {!isResetRequest && (
+              <div className="space-y-2">
+                <Label htmlFor="auth-password">Password</Label>
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="auth-password"
+                    type="password"
+                    autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                    minLength={8}
+                    required
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Enter your password"
+                    className="h-11 pl-10"
+                  />
+                </div>
+              </div>
+            )}
+
             {message && <p className="text-sm text-muted-foreground" role="status">{message}</p>}
             {errorMessage && <p className="text-sm text-destructive" role="alert">{errorMessage}</p>}
-            <Button className="w-full" disabled={busy} type="submit">{busy ? 'Please wait…' : isResetRequest ? 'Send reset link' : isSignUp ? 'Create account' : 'Sign in'}</Button>
+
+            <Button className="h-11 w-full" disabled={busy} type="submit">
+              {busy ? 'Please wait…' : isResetRequest ? 'Send reset link' : isSignUp ? 'Create account' : 'Sign in'}
+            </Button>
           </form>
-          {isDemoMode
-            ? <Button className="mt-3 w-full" variant="outline" onClick={() => { window.location.assign(window.location.pathname); }}>Back to live application</Button>
-            : <Button className="mt-3 w-full" variant="outline" onClick={() => { window.location.assign(`${window.location.pathname}?demo=1`); }}>Open demo workspace</Button>}
-          <Button className="mt-3 w-full" variant="outline" onClick={() => { window.location.assign(`${window.location.pathname}?guest=1`); }}>Continue as Guest · local only</Button>
-          {!isResetRequest && !isSignUp && <Button className="mt-3 w-full" variant="ghost" onClick={() => { setIsResetRequest(true); setMessage(''); setErrorMessage(''); }}>
-            Forgot password?
-          </Button>}
-          <Button className="mt-3 w-full" variant="ghost" onClick={() => { setIsResetRequest(false); setIsSignUp(isResetRequest ? false : (current) => !current); setMessage(''); setErrorMessage(''); }}>
+
+          {/* Guest Action */}
+          <Button
+            className="mt-3 h-11 w-full"
+            variant="outline"
+            onClick={() => { window.location.assign(`${window.location.pathname}?guest=1`); }}
+          >
+            Continue as Guest · local only
+          </Button>
+
+          {/* Account Navigation Toggles */}
+          {!isResetRequest && !isSignUp && (
+            <Button
+              className="mt-2 w-full"
+              variant="ghost"
+              onClick={() => { setIsResetRequest(true); setMessage(''); setErrorMessage(''); }}
+            >
+              Forgot password?
+            </Button>
+          )}
+
+          <Button
+            className="mt-1 w-full"
+            variant="ghost"
+            onClick={() => {
+              setIsResetRequest(false);
+              setIsSignUp(isResetRequest ? false : (current) => !current);
+              setMessage('');
+              setErrorMessage('');
+            }}
+          >
             {isResetRequest ? 'Back to sign in' : isSignUp ? 'Already have an account? Sign in' : 'Need an account? Sign up'}
           </Button>
-        </CardContent>
-      </Card>
+
+          <div className="mt-6 flex items-center gap-2 rounded-2xl bg-muted p-3 text-muted-foreground">
+            <ShieldCheck className="size-4 shrink-0" />
+            <p className="text-xs font-medium">Protected by end-to-end cloud authentication & workspace authorization.</p>
+          </div>
+        </div>
+      </motion.section>
     </main>
   );
 }
@@ -128,21 +238,34 @@ function PasswordRecoveryScreen({ onContinue }: { onContinue: () => void }) {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
+    <main className="industrial-grid grid min-h-screen place-items-center bg-background px-4 py-8 text-foreground">
+      <Card className="w-full max-w-md border-border bg-card shadow-2xl">
         <CardHeader>
           <CardTitle>{updated ? 'Password updated' : 'Choose a new password'}</CardTitle>
           <CardDescription>{updated ? 'Your password has been changed securely.' : 'Enter a new password for your account.'}</CardDescription>
         </CardHeader>
         <CardContent>
-          {updated ? <Button className="w-full" onClick={onContinue}>Continue to workspace</Button> : (
+          {updated ? <Button className="h-11 w-full" onClick={onContinue}>Continue to workspace</Button> : (
             <form className="space-y-4" onSubmit={(event) => void submit(event)}>
               <div className="space-y-2">
                 <Label htmlFor="recovery-password">New password</Label>
-                <Input id="recovery-password" type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} />
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="recovery-password"
+                    type="password"
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Enter your new password"
+                    className="h-11 pl-10"
+                  />
+                </div>
               </div>
               {errorMessage && <p className="text-sm text-destructive" role="alert">{errorMessage}</p>}
-              <Button className="w-full" disabled={busy} type="submit">{busy ? 'Please wait…' : 'Update password'}</Button>
+              <Button className="h-11 w-full" disabled={busy} type="submit">{busy ? 'Please wait…' : 'Update password'}</Button>
             </form>
           )}
         </CardContent>
@@ -230,9 +353,11 @@ export default function HomePage() {
             <p role="alert">{supabaseConfigurationError}</p>
             <p>In GitHub Settings → Secrets and variables → Actions → Variables, set <code>{isDemoMode ? 'VITE_DEMO_SUPABASE_URL' : 'VITE_SUPABASE_URL'}</code> to the exact Project URL and <code>{isDemoMode ? 'VITE_DEMO_SUPABASE_ANON_KEY' : 'VITE_SUPABASE_ANON_KEY'}</code> to the exact publishable key shown in Supabase Project Settings → API. Replace the whole value; do not enter the variable name or an example placeholder. Then rerun the “Publish website” workflow.</p>
             <p>The publishable key is intended for browser use; never use the Supabase service-role key or database password here.</p>
-            <Button className="w-full" variant="outline" onClick={() => { window.location.assign(isDemoMode ? window.location.pathname : `${window.location.pathname}?demo=1`); }}>
-              {isDemoMode ? 'Back to live application' : 'Open demo workspace'}
-            </Button>
+            {isDemoMode && (
+              <Button className="w-full" variant="outline" onClick={() => { window.location.assign(window.location.pathname); }}>
+                Back to live application
+              </Button>
+            )}
             <Button className="w-full" variant="outline" onClick={() => { window.location.assign(`${window.location.pathname}?guest=1`); }}>Continue as Guest · local only</Button>
           </CardContent>
         </Card>
