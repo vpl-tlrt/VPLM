@@ -64,7 +64,7 @@ Deno.serve(async (request) => {
 
     const apiKey = Deno.env.get('GEMINI_API_KEY');
     if (!apiKey) return respond({ error: 'The AI provider key is not configured. Ask the administrator to set GEMINI_API_KEY.' }, 503);
-    const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash';
+    const model = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash';
 
     const systemInstruction = [
       'You are the VPLM (Vehicle Parking Location Management) assistant in a prototype testing environment.',
