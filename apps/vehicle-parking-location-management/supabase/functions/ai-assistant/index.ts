@@ -88,29 +88,43 @@ Deno.serve(async (request) => {
       'Be concise, practical, and clear when information is uncertain.',
     ].join(' ');
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        contents: [{ role: 'user', parts: [{ text: message }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 700 },
-      }),
-      signal: AbortSignal.timeout(25000),
-    });
+    let response: Response | null = null;
+    let providerMessage = '';
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          contents: [{ role: 'user', parts: [{ text: message }] }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 700 },
+        }),
+        signal: AbortSignal.timeout(25000),
+      });
 
-    if (!response.ok) {
-      const status = response.status;
-      if (status === 429) return respond({ error: 'The AI free-tier request limit has been reached. Please try again later.' }, 429);
+      if (response.ok) break;
+
       const providerBody: unknown = await response.json().catch(() => null);
-      const providerMessage = typeof providerBody === 'object' && providerBody !== null &&
+      providerMessage = typeof providerBody === 'object' && providerBody !== null &&
         'error' in providerBody && typeof providerBody.error === 'object' && providerBody.error !== null &&
         'message' in providerBody.error && typeof providerBody.error.message === 'string'
         ? providerBody.error.message.slice(0, 400)
         : '';
+      const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === 2) break;
+
+      const delay = 1000 * (2 ** attempt) + Math.floor(Math.random() * 250);
+      console.warn('Gemini returned a transient error; retrying:', { status: response.status, model, attempt: attempt + 1, delay });
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+
+    if (!response) throw new Error('Gemini request did not produce a response.');
+    if (!response.ok) {
+      const status = response.status;
+      if (status === 429) return respond({ error: 'The AI free-tier request limit has been reached. Please try again later.' }, 429);
       console.error('Gemini request failed:', { status, model, message: providerMessage || 'No provider message.' });
       return respond({
         error: providerMessage
