@@ -59,7 +59,34 @@ const createParkingLayout = (): ParkingLocation[] => {
   const reception = receptionGroups.flatMap((group: { start: number; end: number; section: string; lane: string }, groupIndex: number) =>
     Array.from({ length: group.end - group.start + 1 }, (_: unknown, index: number) => createBay('Reception', group.start + index, group.lane, groupIndex % 2 === 0 ? 'Forward' : 'Reverse', group.section)),
   );
-  return [...zoneA, ...zoneB, ...zoneC, ...workshop, ...reception];
+  const liveGarageContainers: ParkingLocation[] = [
+    'Lexus Reception',
+    'Toyota Reception',
+    'Washing Area',
+    'BP1',
+    'BP2',
+    'BP3',
+  ].map((name) => ({
+    id: `loc-container-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    zone: name,
+    bayNumber: '',
+    lane: 'Container',
+    section: 'Live Parking Garage',
+    direction: 'Two-way',
+    capacity: 1,
+    status: 'Available',
+    remarks: 'Live Parking Garage container; no bay number.',
+  }));
+
+  return [...zoneA, ...zoneB, ...zoneC, ...workshop, ...reception, ...liveGarageContainers];
+};
+
+export const isLiveGarageContainer = (location?: ParkingLocation): boolean =>
+  location?.section === 'Live Parking Garage';
+
+export const parkingLocationLabel = (location?: ParkingLocation): string => {
+  if (!location) return '—';
+  return isLiveGarageContainer(location) ? location.zone : `${location.zone}-${location.bayNumber}`;
 };
 
 export const initialLocations: ParkingLocation[] = createParkingLayout();
