@@ -4,7 +4,7 @@ import { motion } from 'motion/react';
 import {
   ArrowDown, ArrowUp, ArchiveRestore, Bell, BellOff, CalendarDays, Camera, CarFront, ChevronDown, ChevronRight, CircleParking,
   ClipboardList, Crosshair, Download, Fuel, Gauge, GripVertical, History, Home, LayoutGrid, MapPin, Menu, Minus, MoveRight,
-  KeyRound, Plus, QrCode, Route, Save, ScanLine, Search, Settings, ShieldCheck, SlidersHorizontal, Trash2, Upload, UserCog, UserRound, Wifi, WifiOff, X, Lightbulb, LightbulbOff, LogOut, DoorOpen,
+  Plus, QrCode, Route, Save, ScanLine, Search, Settings, ShieldCheck, SlidersHorizontal, Trash2, Upload, UserCog, UserRound, Wifi, WifiOff, X, Lightbulb, LightbulbOff, LogOut, DoorOpen,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUser } from '@/hooks/use-user';
@@ -28,7 +28,7 @@ import { loadOfflineState, pruneExpiredAuditEventPhotos, pruneExpiredMovementPho
 import { notifyWorkspaceDataChanged } from '@/lib/workspace-sync-events';
 import { validateVehicle } from '@/lib/vehicle-validation';
 import { enqueueSync } from '@/lib/sync-queue';
-import { getAppAuthRedirectUrl, isDemoMode, supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { appStorageKey } from '@/lib/local-storage-scope';
 
 import { Badge } from '@/components/ui/badge';
@@ -66,8 +66,8 @@ const appRoles: Role[] = ['Administrator', 'Supervisor', 'TechnicalLeader', 'Ope
 const roleRank: Record<Role, number> = { Operator: 1, Drivers: 1, 'Guest Users': 1, Others: 1, TechnicalLeader: 2, Supervisor: 3, Administrator: 4 };
 const roleLabel = (role: Role) => role === 'TechnicalLeader' ? 'Technical Leader' : role;
 const rolesWithoutRoadTests: Role[] = ['Drivers', 'Guest Users', 'Others'];
-type ManagedUser = { id: string; name: string; email: string; role: Role };
-type UserAdminResponse = { users?: ManagedUser[]; invited?: boolean };
+type ManagedUser = { id: string; name: string; email: string; loginId: string; mobileNumber: string; role: Role | null };
+type UserAdminResponse = { users?: ManagedUser[]; existing?: boolean; loginId?: string; temporaryPassword?: string | null };
 
 const invokeUserAdmin = async (body: Record<string, unknown>): Promise<UserAdminResponse> => {
   if (!supabase) throw new Error('Supabase is not configured.');
@@ -180,7 +180,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const canAssignVehicle = access.data?.can('Vehicles', 'Assign') ?? false;
   const canRecoverDeliveredVehicle = role === 'Administrator' || role === 'Supervisor' || role === 'TechnicalLeader';
   const isAdministrator = role === 'Administrator' && (access.data?.can('ApplicationSettings', 'ManageSetting') ?? false);
-  const canAccessRoadTests = !rolesWithoutRoadTests.includes(role);
+  const canAccessRoadTests = Boolean(access.data && !rolesWithoutRoadTests.includes(role));
   const visibleNavigation = access.data ? navigation.filter((item) => item.id !== 'layout' && (item.id !== 'road-tests' || canAccessRoadTests) && roleRank[role] >= roleRank[item.minimumRole as Role]) : navigation.filter((item) => item.id === 'profile');
   const mobileNavigation = [...visibleNavigation].sort((a, b) => mobileNavigationOrder.indexOf(a.id) - mobileNavigationOrder.indexOf(b.id));
   const moveMobileNavigationItem = (id: Screen, direction: -1 | 1) => {
@@ -510,7 +510,6 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
             </div>
             <div className="ml-auto flex items-center gap-2">
               {localGuest && <Badge variant="secondary" className="shrink-0 border border-amber-500/60 bg-amber-100 font-black text-amber-950">GUEST LICENSE · LOCAL ONLY</Badge>}
-              {isDemoMode && <Badge variant="secondary" className="shrink-0 border border-amber-500/60 bg-amber-100 font-black text-amber-950">DEMO · ISOLATED</Badge>}
               <div className="hidden text-right xl:block"><p className="text-sm font-semibold">{format(currentTime, 'EEE, d MMM')}</p><p className="text-xs text-muted-foreground">{format(currentTime, 'HH:mm:ss')}</p></div>
               <Button variant={isOnline && syncState !== 'error' ? 'default' : 'secondary'} size="sm" className="rounded-xl" onClick={() => void sync(true)} aria-label={`Data storage status: ${syncLabel}`} title={localGuest ? 'Guest data stays on this device and is not uploaded.' : lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Click to sync workspace data'}><span className="live-dot" /><span className="hidden lg:inline">{syncLabel}</span></Button>
               <Button variant="outline" size="icon" className="rounded-xl" onClick={handleNotificationClick} onDoubleClick={(event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault()} aria-label={`Notifications. Sound ${soundEnabled ? 'on' : 'off'}. Double-click to toggle sound.`} title={`Notification sound ${soundEnabled ? 'on' : 'off'} · double-click to toggle`}>{soundEnabled ? <Bell /> : <BellOff />}</Button>
@@ -549,7 +548,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           {screen === 'reservations' && <ReservationsScreen reservations={reservations} vehicles={vehicles} locations={locations} selectedVehicleId={selectedVehicleId} setSelectedVehicleId={setSelectedVehicleId} newLocationId={newLocationId} setNewLocationId={setNewLocationId} handleReserve={handleReserve} cancel={(id: string) => { const reservation = reservations.find((item: Reservation) => item.id === id); if (!reservation) return; setReservations((current: Reservation[]) => current.map((item: Reservation) => item.id === id ? { ...item, status: 'Cancelled' } : item)); logAudit('Cancel', 'Reservation', reservation.reservationId); toast.success('Reservation cancelled.'); }} locationLabel={locationLabel} />}
           {screen === 'management' && canManage && <ManagementScreen role={role} locations={locations} setLocations={setLocations} vehicles={vehicles} setVehicles={setVehicles} movements={movements} auditEvents={auditEvents} setAuditEvents={setAuditEvents} logAudit={logAudit} actorId={queueOwnerId} garageLayout={garageLayout} setGarageLayout={setGarageLayout} />}
           {screen === 'settings' && isAdministrator && <SettingsScreen logAudit={logAudit} />}
-          {screen === 'profile' && <Profile actor={actor} email={user?.userPrincipalName ?? 'local profile'} role={role} movements={movements} reservations={reservations} />}
+          {screen === 'profile' && <Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />}
         </motion.div>
       </main>
       <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 md:hidden" aria-label="Primary navigation">
@@ -1008,8 +1007,12 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     });
   };
   const [newUserName, setNewUserName] = useState('');
+  const [newUserLoginId, setNewUserLoginId] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserMobileNumber, setNewUserMobileNumber] = useState('');
   const [newUserRole, setNewUserRole] = useState<Role>('Operator');
+  const [editingUserId, setEditingUserId] = useState<string>();
+  const [temporaryCredentials, setTemporaryCredentials] = useState<{ loginId: string; password: string }>();
   const loadManagedUsers = useCallback(async () => {
     setUsersLoading(true);
     setUsersError('');
@@ -1145,20 +1148,48 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
   };
   const addUser = () => {
     const name = newUserName.trim();
+    const loginId = newUserLoginId.trim();
     const email = newUserEmail.trim().toLowerCase();
-    if (!name || !email) return toast.error('Enter the user name and email address.');
-    if (!email.includes('@')) return toast.error('Enter a valid email address.');
+    const mobileNumber = newUserMobileNumber.trim();
+    if (!name || !loginId || !mobileNumber) return toast.error('Enter the user name, User ID, and mobile number.');
+    if (email && !email.includes('@')) return toast.error('Enter a valid email address.');
     setUsersBusyId('new-user');
-    void invokeUserAdmin({ action: 'invite', name, email, role: newUserRole, redirectTo: getAppAuthRedirectUrl() }).then(async (response) => {
+    void invokeUserAdmin({
+      action: editingUserId ? 'update-details' : 'create',
+      ...(editingUserId ? { userId: editingUserId } : {}),
+      name,
+      loginId,
+      email,
+      mobileNumber,
+      role: newUserRole,
+    }).then(async (response) => {
       await loadManagedUsers();
-      logAudit('Create', 'User', `${email} · ${newUserRole}`);
-      setNewUserName(''); setNewUserEmail(''); setNewUserRole('Operator'); setShowAddUser(false);
-      toast.success(response.invited ? `Invitation sent to ${email}.` : `${name} added to the workspace.`);
+      logAudit(editingUserId ? 'Edit' : 'Create', 'User', `${loginId} · ${newUserRole}`);
+      setTemporaryCredentials(response.temporaryPassword ? { loginId, password: response.temporaryPassword } : undefined);
+      setNewUserName('');
+      setNewUserLoginId('');
+      setNewUserEmail('');
+      setNewUserMobileNumber('');
+      setNewUserRole('Operator');
+      setEditingUserId(undefined);
+      setShowAddUser(false);
+      toast.success(editingUserId ? `${name}'s account details updated.` : response.existing ? `${name} linked to the workspace.` : `${name} created. Give them the temporary password securely.`);
     }).catch((error: unknown) => {
       toast.error(error instanceof Error ? error.message : 'Unable to add this user.');
     }).finally(() => setUsersBusyId(undefined));
   };
+  const editManagedUser = (user: ManagedUser) => {
+    setEditingUserId(user.id);
+    setNewUserName(user.name);
+    setNewUserLoginId(user.loginId);
+    setNewUserEmail(user.email.endsWith('@users.vplm.invalid') ? '' : user.email);
+    setNewUserMobileNumber(user.mobileNumber);
+    setNewUserRole(user.role ?? 'Operator');
+    setTemporaryCredentials(undefined);
+    setShowAddUser(true);
+  };
   const updateManagedUserRole = async (user: ManagedUser, nextRole: Role) => {
+    if (!user.role) return toast.error('Complete this user’s setup before changing their role.');
     setUsersBusyId(user.id);
     try {
       await invokeUserAdmin({ action: 'update-role', userId: user.id, role: nextRole });
@@ -1167,18 +1198,6 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
       toast.success(`${user.name}'s role updated.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to update this user role.');
-    } finally {
-      setUsersBusyId(undefined);
-    }
-  };
-  const sendPasswordReset = async (user: ManagedUser) => {
-    setUsersBusyId(user.id);
-    try {
-      await invokeUserAdmin({ action: 'reset-password', userId: user.id, redirectTo: getAppAuthRedirectUrl() });
-      logAudit('Reset password', 'User', user.email);
-      toast.success(`Password reset email sent to ${user.email}.`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to send a password reset email.');
     } finally {
       setUsersBusyId(undefined);
     }
@@ -1307,12 +1326,20 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     </Dialog>
   <TabsContent value="history" className="space-y-3"><div className="grid gap-3 sm:grid-cols-3"><Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Movements</p><p className="text-3xl font-bold">{movements.length}</p></CardContent></Card><Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Audit events</p><p className="text-3xl font-bold">{auditEvents.length}</p></CardContent></Card></div>{auditEvents.map((event: AuditEvent) => <Card key={event.id}><CardContent className="flex items-center gap-3 p-4"><History/><div className="flex-1"><p className="font-semibold">{event.action} · {event.entity}</p><p className="text-sm text-muted-foreground">{event.detail} · {event.actor}</p></div><time className="text-xs text-muted-foreground">{format(new Date(event.timestamp), 'dd MMM, HH:mm')}</time></CardContent></Card>)}</TabsContent>
   {role === 'Administrator' && <TabsContent value="users" className="space-y-3">
-    <div className="flex justify-end"><Button disabled={usersBusyId === 'new-user'} onClick={() => setShowAddUser((current: boolean) => !current)}><Plus/>{showAddUser ? 'Cancel' : 'Add user'}</Button></div>
-    {showAddUser && <Card><CardHeader><CardTitle>Invite user and assign role</CardTitle><CardDescription>New accounts receive an invitation email. Existing accounts are added to this workspace.</CardDescription></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><div className="space-y-2"><Label htmlFor="new-user-name">Full name</Label><Input id="new-user-name" required value={newUserName} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserName(event.target.value)} placeholder="Enter full name" /></div><div className="space-y-2"><Label htmlFor="new-user-email">Email</Label><Input id="new-user-email" type="email" required value={newUserEmail} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserEmail(event.target.value)} placeholder="name@example.com" /></div><div className="space-y-2"><Label>Role</Label><Select value={newUserRole} onValueChange={(value: Role) => setNewUserRole(value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{appRoles.map((item: Role) => <SelectItem key={item} value={item}>{roleLabel(item)}</SelectItem>)}</SelectContent></Select></div><Button className="self-end" disabled={usersBusyId === 'new-user'} onClick={addUser}><Plus/>{usersBusyId === 'new-user' ? 'Sending…' : 'Send invitation'}</Button></CardContent></Card>}
+    <div className="flex justify-end"><Button disabled={usersBusyId === 'new-user'} onClick={() => { setEditingUserId(undefined); setShowAddUser((current: boolean) => !current); }}><Plus/>{showAddUser ? 'Cancel' : 'Add user'}</Button></div>
+    {temporaryCredentials && <Card className="border-primary"><CardHeader><CardTitle>Temporary sign-in details</CardTitle><CardDescription>This password is shown only once. Share it with the user securely; they must change it at first sign-in.</CardDescription></CardHeader><CardContent className="space-y-2 text-sm"><p>User ID: <code>{temporaryCredentials.loginId}</code></p><p>Temporary password: <code className="break-all">{temporaryCredentials.password}</code></p></CardContent></Card>}
+    {showAddUser && <Card><CardHeader><CardTitle>{editingUserId ? 'Update registered user' : 'Add user and assign role'}</CardTitle><CardDescription>Create an account or link an existing email account without changing its password. Use an E.164 mobile number with country code for WhatsApp recovery.</CardDescription></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="space-y-2"><Label htmlFor="new-user-name">User name</Label><Input id="new-user-name" required value={newUserName} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserName(event.target.value)} placeholder="Enter full name" /></div>
+      <div className="space-y-2"><Label htmlFor="new-user-login-id">User ID</Label><Input id="new-user-login-id" required minLength={3} maxLength={32} pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,31}" value={newUserLoginId} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserLoginId(event.target.value)} placeholder="Unique sign-in ID" /></div>
+      <div className="space-y-2"><Label htmlFor="new-user-mobile">Mobile number</Label><Input id="new-user-mobile" type="tel" required pattern="\+[1-9][0-9]{7,14}" value={newUserMobileNumber} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserMobileNumber(event.target.value)} placeholder="+971501234567" /></div>
+      <div className="space-y-2"><Label htmlFor="new-user-email">Email (optional; blank keeps current)</Label><Input id="new-user-email" type="email" value={newUserEmail} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserEmail(event.target.value)} placeholder="name@example.com" /></div>
+      <div className="space-y-2"><Label>Role</Label><Select value={newUserRole} onValueChange={(value: Role) => setNewUserRole(value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{appRoles.map((item: Role) => <SelectItem key={item} value={item}>{roleLabel(item)}</SelectItem>)}</SelectContent></Select></div>
+      <Button className="self-end" disabled={usersBusyId === 'new-user'} onClick={addUser}><Plus/>{usersBusyId === 'new-user' ? 'Saving…' : editingUserId ? 'Save user' : 'Create user'}</Button>
+    </CardContent></Card>}
     {usersError && <p className="text-sm text-destructive" role="alert">{usersError}</p>}
     {usersLoading ? <Card><CardContent className="p-5 text-sm text-muted-foreground">Loading workspace users…</CardContent></Card>
-      : users.length === 0 ? <Card><CardContent className="p-5 text-sm text-muted-foreground">No managed users were found.</CardContent></Card>
-        : users.map((appUser) => <Card key={appUser.id}><CardContent className="flex flex-wrap items-center gap-3 p-4"><UserRound/><div className="min-w-52 flex-1"><p className="font-bold">{appUser.name}</p><p className="text-sm text-muted-foreground">{appUser.email}</p></div><Select value={appUser.role} disabled={usersBusyId === appUser.id} onValueChange={(value: Role) => void updateManagedUserRole(appUser, value)}><SelectTrigger className="w-44"><SelectValue/></SelectTrigger><SelectContent>{appRoles.map((item: Role) => <SelectItem key={item} value={item}>{roleLabel(item)}</SelectItem>)}</SelectContent></Select><Button variant="outline" disabled={usersBusyId === appUser.id} onClick={() => void sendPasswordReset(appUser)}><KeyRound/>Reset password</Button><Button variant="destructive" disabled={usersBusyId === appUser.id || appUser.id === actorId} onClick={() => void removeManagedUser(appUser)}><Trash2/>Remove</Button></CardContent></Card>)}
+      : users.length === 0 ? <Card><CardContent className="p-5 text-sm text-muted-foreground">No registered users were found.</CardContent></Card>
+        : users.map((appUser) => <Card key={appUser.id}><CardContent className="flex flex-wrap items-center gap-3 p-4"><UserRound/><div className="min-w-52 flex-1"><p className="font-bold">{appUser.name}</p><p className="text-sm text-muted-foreground">{appUser.loginId ? `User ID: ${appUser.loginId}` : 'User ID not assigned'} · {appUser.mobileNumber || 'Mobile not registered'}</p>{appUser.email && !appUser.email.endsWith('@users.vplm.invalid') && <p className="text-xs text-muted-foreground">{appUser.email}</p>}</div>{appUser.role ? <Select value={appUser.role} disabled={usersBusyId === appUser.id} onValueChange={(value: Role) => void updateManagedUserRole(appUser, value)}><SelectTrigger className="w-44"><SelectValue/></SelectTrigger><SelectContent>{appRoles.map((item: Role) => <SelectItem key={item} value={item}>{roleLabel(item)}</SelectItem>)}</SelectContent></Select> : <Badge variant="outline">Setup required</Badge>}<Button variant="outline" disabled={usersBusyId === appUser.id} onClick={() => editManagedUser(appUser)}>{appUser.role ? 'Edit details' : 'Complete setup'}</Button>{appUser.role && <Button variant="destructive" disabled={usersBusyId === appUser.id || appUser.id === actorId} onClick={() => void removeManagedUser(appUser)}><Trash2/>Remove</Button>}</CardContent></Card>)}
   </TabsContent>}
   <TabsContent value="recycle" className="space-y-3">{auditEvents.filter((event: AuditEvent) => event.action === 'Archive').map((event: AuditEvent) => <Card key={event.id}><CardContent className="flex items-center gap-3 p-4"><ArchiveRestore/><div className="flex-1"><p className="font-bold">{event.entity}</p><p className="text-sm text-muted-foreground">{event.detail}</p></div><Button variant="outline" onClick={() => { setAuditEvents((current) => current.map((item: AuditEvent) => item.id === event.id ? { ...item, action: 'Restore' } : item)); logAudit('Restore', event.entity, event.detail); toast.success('Item restored.'); }}><ArchiveRestore/>Restore</Button></CardContent></Card>)}</TabsContent></Tabs></div>;
 }
@@ -1465,21 +1492,59 @@ function HistoryScreen({ movements, auditEvents, vehicles, historyFilter, setHis
 
 function ReservationsScreen({ reservations, vehicles, locations, selectedVehicleId, setSelectedVehicleId, newLocationId, setNewLocationId, handleReserve, cancel, locationLabel }: { reservations: Reservation[]; vehicles: Vehicle[]; locations: ParkingLocation[]; selectedVehicleId: string; setSelectedVehicleId: (value: string) => void; newLocationId: string; setNewLocationId: (value: string) => void; handleReserve: () => void; cancel: (id: string) => void; locationLabel: (id?: string) => string }) { return <div className="grid gap-5 lg:grid-cols-6"><h2 className="text-2xl font-black lg:col-span-6">Reservations</h2><Card className="lg:col-span-6"><CardContent className="grid gap-4 p-5 sm:grid-cols-3"><Select value={selectedVehicleId} onValueChange={setSelectedVehicleId}><SelectTrigger className="h-12"><SelectValue /></SelectTrigger><SelectContent>{vehicles.filter((item: Vehicle) => item.id).map((item: Vehicle) => <SelectItem key={item.id} value={item.id}>{item.plateNumber}</SelectItem>)}</SelectContent></Select><Select value={newLocationId || 'none'} onValueChange={(value: string) => setNewLocationId(value === 'none' ? '' : value)}><SelectTrigger className="h-12"><SelectValue placeholder="Available bay" /></SelectTrigger><SelectContent><SelectItem value="none">Available bay</SelectItem>{locations.filter((item: ParkingLocation) => item.id && item.status === 'Available').map((item: ParkingLocation) => <SelectItem key={item.id} value={item.id}>{item.zone}-{item.bayNumber}</SelectItem>)}</SelectContent></Select><Button size="lg" onClick={handleReserve}><CalendarDays /> Reserve bay</Button></CardContent></Card><div className="grid gap-3 lg:col-span-6 lg:grid-cols-2">{reservations.map((reservation: Reservation) => { const vehicle = vehicles.find((item: Vehicle) => item.id === reservation.vehicleId); return <Card key={reservation.id}><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-secondary p-3 text-secondary-foreground"><CalendarDays /></div><div className="flex-1"><p className="font-semibold">{vehicle?.plateNumber} · {locationLabel(reservation.locationId)}</p><p className="text-sm text-muted-foreground">{format(new Date(reservation.reservationDate), 'dd MMM yyyy, HH:mm')} · {reservation.reservedBy}</p></div><Badge variant={statusVariant(reservation.status)}>{reservation.status}</Badge>{reservation.status === 'Upcoming' && <Button variant="ghost" size="icon" onClick={() => cancel(reservation.id)} aria-label="Cancel reservation"><X /></Button>}</CardContent></Card>; })}</div></div>; }
 
-function Profile({ actor, email, role, movements, reservations }: { actor: string; email: string; role: Role; movements: Movement[]; reservations: Reservation[] }) {
+function RegisteredUsersSummary() {
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true;
+    void invokeUserAdmin({ action: 'list' }).then((response) => {
+      if (active) setUsers(response.users ?? []);
+    }).catch((loadError: unknown) => {
+      if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load registered users.');
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, []);
+
+  return (
+    <Card className="lg:col-span-6">
+      <CardHeader><CardTitle>Registered users</CardTitle><CardDescription>Supabase accounts and their assigned workspace roles.</CardDescription></CardHeader>
+      <CardContent className="space-y-3">
+        {loading && <p className="text-sm text-muted-foreground">Loading registered users…</p>}
+        {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+        {!loading && !error && users.length === 0 && <p className="text-sm text-muted-foreground">No registered users were found.</p>}
+        {users.map((registeredUser) => (
+          <div key={registeredUser.id} className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
+            <UserRound className="text-muted-foreground" />
+            <div className="min-w-52 flex-1">
+              <p className="font-semibold">{registeredUser.name}</p>
+              <p className="text-sm text-muted-foreground">{registeredUser.loginId ? `ID ${registeredUser.loginId}` : 'User ID not assigned'} · {registeredUser.mobileNumber || 'Mobile not registered'}</p>
+            </div>
+            <Badge variant={registeredUser.role ? 'default' : 'outline'}>{registeredUser.role ? roleLabel(registeredUser.role) : 'Setup required'}</Badge>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Profile({ actor, email, role, movements, reservations, isAdministrator }: { actor: string; email: string; role: Role; movements: Movement[]; reservations: Reservation[]; isAdministrator: boolean }) {
   return (
     <div className="mx-auto grid max-w-5xl gap-5 lg:grid-cols-6">
       <h2 className="text-2xl font-black lg:col-span-6">Profile</h2>
       <Card className="lg:col-span-4 lg:row-span-2">
         <CardContent className="flex flex-col gap-5 p-6 sm:flex-row sm:items-center">
           <div className="grid h-20 w-20 place-items-center rounded-2xl bg-primary text-2xl font-black text-primary-foreground">{actor.split(' ').map((part: string) => part[0]).join('').slice(0, 2)}</div>
-          <div className="flex-1"><h3 className="text-xl font-bold">{actor}</h3><p className="text-muted-foreground">{email}</p><Badge className="mt-2">{roleLabel(role)} · local profile</Badge></div>
+          <div className="flex-1"><h3 className="text-xl font-bold">{actor}</h3><p className="text-muted-foreground">User ID: {email}</p><Badge className="mt-2">{roleLabel(role)} · authenticated</Badge></div>
         </CardContent>
       </Card>
       <div className="grid grid-cols-2 gap-3 lg:col-span-2">
         <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Actions</p><p className="text-3xl font-bold">{movements.filter((item: Movement) => item.performedBy === actor).length}</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Reservations</p><p className="text-3xl font-bold">{reservations.filter((item: Reservation) => item.reservedBy === actor).length}</p></CardContent></Card>
       </div>
-      <Card className="lg:col-span-6"><CardHeader><CardTitle>Browser-only profile</CardTitle></CardHeader><CardContent className="text-sm text-muted-foreground">This profile and role are not authenticated. Data is saved only in this browser and is not shared with other users.</CardContent></Card>
+      {isAdministrator && <RegisteredUsersSummary />}
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { CarFront, Lock, Mail, ShieldCheck } from 'lucide-react';
+import { CarFront, Lock, ShieldCheck, UserRound } from 'lucide-react';
 import { motion } from 'motion/react';
+import AiAssistant from '@/components/ai-assistant';
 import { ParkingApp } from '@/components/parking-app';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { applyWorkspaceSnapshot, clearWorkspaceSnapshot } from '@/lib/workspace-storage';
 import { loadWorkspace } from '@/lib/workspace-cloud';
-import { getAppAuthRedirectUrl, isDemoMode, isLocalGuestMode, isSupabaseConfigured, supabase, supabaseConfigurationError } from '@/lib/supabase';
+import { isSupabaseConfigured, supabase, supabaseConfigurationError } from '@/lib/supabase';
 import { queryClient } from '@/lib/query-client';
 
 const workspaceLoadErrorMessage = (error: unknown): string => {
@@ -27,12 +28,33 @@ const workspaceLoadErrorMessage = (error: unknown): string => {
 const isPasswordSetupUrl = () => ['recovery', 'invite'].includes(new URLSearchParams(window.location.hash.slice(1)).get('type') ?? '')
   || ['recovery', 'invite'].includes(new URLSearchParams(window.location.search).get('type') ?? '');
 
+const invokeUserAuth = async (body: Record<string, unknown>) => {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const { data, error } = await supabase.functions.invoke<{
+    session?: Pick<Session, 'access_token' | 'refresh_token'>;
+    message?: string;
+    error?: string;
+  }>('user-auth', { body });
+  if (error) {
+    if (error.context instanceof Response) {
+      const responseBody = await error.context.clone().json().catch(() => null) as { error?: string } | null;
+      throw new Error(responseBody?.error ?? error.message);
+    }
+    throw error;
+  }
+  if (!data) throw new Error('The authentication service returned no response.');
+  if (data.error) throw new Error(data.error);
+  return data;
+};
+
 function AuthScreen() {
   const client = supabase;
-  const [isSignUp, setIsSignUp] = useState(false);
   const [isResetRequest, setIsResetRequest] = useState(false);
-  const [email, setEmail] = useState('');
+  const [resetCodeSent, setResetCodeSent] = useState(false);
+  const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -45,21 +67,25 @@ function AuthScreen() {
     setErrorMessage('');
     try {
       if (isResetRequest) {
-        const { error } = await client.auth.resetPasswordForEmail(email.trim(), {
-          redirectTo: getAppAuthRedirectUrl(),
-        });
-        if (error) throw error;
-        setMessage('If this email belongs to an account, a password reset link will be sent.');
-      } else if (isSignUp) {
-        const { data, error } = await client.auth.signUp({
-          email: email.trim(),
-          password,
-          options: { emailRedirectTo: getAppAuthRedirectUrl() },
-        });
-        if (error) throw error;
-        if (!data.session) setMessage('Check your email to confirm the account, then sign in. Workspace access must be granted by an administrator.');
+        if (!resetCodeSent) {
+          const result = await invokeUserAuth({ action: 'send-reset-code', loginId: loginId.trim() });
+          setResetCodeSent(true);
+          setMessage(result.message ?? 'If this User ID has a registered mobile number, a WhatsApp code will be sent.');
+        } else {
+          await invokeUserAuth({ action: 'complete-reset', loginId: loginId.trim(), token: resetCode.trim(), password: newPassword });
+          setIsResetRequest(false);
+          setResetCodeSent(false);
+          setResetCode('');
+          setNewPassword('');
+          setMessage('Password updated. Sign in with your new password.');
+        }
       } else {
-        const { error } = await client.auth.signInWithPassword({ email: email.trim(), password });
+        const result = await invokeUserAuth({ action: 'login', loginId: loginId.trim(), password });
+        if (!result.session) throw new Error('The authentication service did not create a session.');
+        const { error } = await client.auth.setSession({
+          access_token: result.session.access_token,
+          refresh_token: result.session.refresh_token,
+        });
         if (error) throw error;
       }
     } catch (error) {
@@ -118,33 +144,30 @@ function AuthScreen() {
 
           <div className="mb-8 space-y-2">
             <h2 className="text-2xl font-bold tracking-tight">
-              {isDemoMode
-                ? isResetRequest ? 'Demo password reset' : isSignUp ? 'Create demo account' : 'Demo workspace'
-                : isResetRequest ? 'Reset password' : isSignUp ? 'Create account' : 'Welcome back'}
+              {isResetRequest ? 'Reset password' : 'Welcome back'}
             </h2>
             <p className="text-sm text-muted-foreground">
-              {isDemoMode
-                ? 'Demo data is isolated from the live workspace.'
-                : isResetRequest
-                ? 'Enter your email to receive a secure password reset link.'
-                : 'Sign in to the secure shared parking workspace.'}
+              {isResetRequest
+                ? resetCodeSent ? 'Enter the WhatsApp code and choose a new password.' : 'Verify your registered mobile number using WhatsApp.'
+                : 'Sign in with your User ID. Existing users can use their current email until an Administrator assigns a User ID.'}
             </p>
           </div>
 
           <form className="space-y-4" onSubmit={(event) => void submit(event)}>
             <div className="space-y-2">
-              <Label htmlFor="auth-email">Email</Label>
+              <Label htmlFor="auth-login-id">User ID or existing email</Label>
               <div className="relative">
-                <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <UserRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  id="auth-email"
-                  type="email"
-                  autoComplete="email"
+                  id="auth-login-id"
+                  type="text"
+                  autoComplete="username"
                   required
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="Enter your email"
+                  value={loginId}
+                  onChange={(event) => setLoginId(event.target.value)}
+                  placeholder="Enter your User ID"
                   className="h-11 pl-10"
+                  readOnly={resetCodeSent}
                 />
               </div>
             </div>
@@ -157,8 +180,7 @@ function AuthScreen() {
                   <Input
                     id="auth-password"
                     type="password"
-                    autoComplete={isSignUp ? 'new-password' : 'current-password'}
-                    minLength={8}
+                    autoComplete="current-password"
                     required
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
@@ -168,47 +190,49 @@ function AuthScreen() {
                 </div>
               </div>
             )}
+            {isResetRequest && resetCodeSent && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="auth-reset-code">WhatsApp verification code</Label>
+                  <Input id="auth-reset-code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={resetCode} onChange={(event) => setResetCode(event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="auth-new-password">New password</Label>
+                  <Input id="auth-new-password" type="password" autoComplete="new-password" minLength={8} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+                </div>
+              </>
+            )}
 
             {message && <p className="text-sm text-muted-foreground" role="status">{message}</p>}
             {errorMessage && <p className="text-sm text-destructive" role="alert">{errorMessage}</p>}
 
             <Button className="h-11 w-full" disabled={busy} type="submit">
-              {busy ? 'Please wait…' : isResetRequest ? 'Send reset link' : isSignUp ? 'Create account' : 'Sign in'}
+              {busy ? 'Please wait…' : isResetRequest ? resetCodeSent ? 'Verify code and reset password' : 'Send WhatsApp code' : 'Sign in'}
             </Button>
           </form>
 
-          {/* Guest Action */}
-          <Button
-            className="mt-3 h-11 w-full"
-            variant="outline"
-            onClick={() => { window.location.assign(`${window.location.pathname}?guest=1`); }}
-          >
-            Continue as Guest · local only
-          </Button>
-
-          {/* Account Navigation Toggles */}
-          {!isResetRequest && !isSignUp && (
+          {!isResetRequest && (
             <Button
               className="mt-2 w-full"
               variant="ghost"
-              onClick={() => { setIsResetRequest(true); setMessage(''); setErrorMessage(''); }}
+              onClick={() => { setIsResetRequest(true); setResetCodeSent(false); setMessage(''); setErrorMessage(''); }}
             >
               Forgot password?
             </Button>
           )}
 
-          <Button
-            className="mt-1 w-full"
-            variant="ghost"
-            onClick={() => {
+          {isResetRequest && (
+            <Button className="mt-1 w-full" variant="ghost" onClick={() => {
               setIsResetRequest(false);
-              setIsSignUp(isResetRequest ? false : (current) => !current);
+              setResetCodeSent(false);
+              setResetCode('');
+              setNewPassword('');
               setMessage('');
               setErrorMessage('');
-            }}
-          >
-            {isResetRequest ? 'Back to sign in' : isSignUp ? 'Already have an account? Sign in' : 'Need an account? Sign up'}
-          </Button>
+            }}>
+              Back to sign in
+            </Button>
+          )}
 
           <div className="mt-6 flex items-center gap-2 rounded-2xl bg-muted p-3 text-muted-foreground">
             <ShieldCheck className="size-4 shrink-0" />
@@ -234,11 +258,16 @@ function PasswordRecoveryScreen({ onContinue }: { onContinue: () => void }) {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isLocalGuestMode || !client) return;
+    if (!client) return;
     setBusy(true);
     setErrorMessage('');
     try {
-      const { error } = await client.auth.updateUser({ password });
+      const { data: userData, error: userError } = await client.auth.getUser();
+      if (userError) throw userError;
+      const { error } = await client.auth.updateUser({
+        password,
+        data: { ...userData.user.user_metadata, must_change_password: false },
+      });
       if (error) throw error;
       setUpdated(true);
     } catch (error) {
@@ -296,7 +325,7 @@ export default function HomePage() {
   const [workspaceError, setWorkspaceError] = useState('');
 
   useEffect(() => {
-    if (isLocalGuestMode || !client) return;
+    if (!client) return;
     let active = true;
     const initializeSession = async () => {
       const { data, error } = await client.auth.getSession();
@@ -304,12 +333,14 @@ export default function HomePage() {
       if (error) setWorkspaceError(error.message);
       setSession(data.session);
       if (isPasswordSetupUrl()) setPasswordSetup(true);
+      if (data.session?.user.user_metadata.must_change_password === true) setPasswordSetup(true);
       setSessionLoaded(true);
     };
     void initializeSession();
     const { data: listener } = client.auth.onAuthStateChange((event, nextSession) => {
       queryClient.removeQueries({ queryKey: ['authenticated-user'] });
       setSession(nextSession);
+      if (nextSession?.user.user_metadata.must_change_password === true) setPasswordSetup(true);
       if (event === 'PASSWORD_RECOVERY') setPasswordSetup(true);
       if (!nextSession) clearWorkspaceSnapshot();
     });
@@ -320,7 +351,6 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (isLocalGuestMode) return;
     if (!session) {
       setWorkspaceLoaded(false);
       setWorkspaceRevision(null);
@@ -348,27 +378,17 @@ export default function HomePage() {
     return () => { active = false; };
   }, [session?.user.id]);
 
-  if (isLocalGuestMode) {
-    return <ParkingApp signedInUserId="Guest User" initialCloudRevision={null} localGuest onExit={() => { window.location.assign(window.location.pathname); }} />;
-  }
-
   if (!isSupabaseConfigured || !client) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background p-4">
         <Card className="w-full max-w-2xl">
           <CardHeader>
-            <CardTitle>{isDemoMode ? 'Demo workspace is not configured' : 'Cloud storage is not configured'}</CardTitle>
-            <CardDescription>{isDemoMode ? 'Demo mode never connects to the live workspace.' : 'This app will not fall back to local-only accounts or data.'}</CardDescription>
+            <CardTitle>Cloud storage is not configured</CardTitle>
+            <CardDescription>This app will not fall back to local-only accounts or data.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <p role="alert">{supabaseConfigurationError}</p>
             <p>Broken Page..</p>
-            {isDemoMode && (
-              <Button className="w-full" variant="outline" onClick={() => { window.location.assign(window.location.pathname); }}>
-                Back to live application
-              </Button>
-            )}
-            <Button className="w-full" variant="outline" onClick={() => { window.location.assign(`${window.location.pathname}?guest=1`); }}>Continue as Guest · local only</Button>
           </CardContent>
         </Card>
       </main>
@@ -407,10 +427,13 @@ export default function HomePage() {
   }
 
   return (
-    <ParkingApp
-      signedInUserId={session.user.email ?? 'Signed-in user'}
-      initialCloudRevision={workspaceRevision}
-      onExit={() => { void client.auth.signOut(); }}
-    />
+    <>
+      <ParkingApp
+        signedInUserId={typeof session.user.user_metadata.login_id === 'string' ? session.user.user_metadata.login_id : session.user.email ?? 'Signed-in user'}
+        initialCloudRevision={workspaceRevision}
+        onExit={() => { void client.auth.signOut(); }}
+      />
+      <AiAssistant />
+    </>
   );
 }

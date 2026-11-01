@@ -1,22 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 
-export const isDemoMode = new URLSearchParams(window.location.search).get('demo') === '1';
-export const isLocalGuestMode = new URLSearchParams(window.location.search).get('guest') === '1';
-
-export const getAppAuthRedirectUrl = (): string => {
-  const url = new URL(window.location.href);
-  url.search = isDemoMode ? '?demo=1' : '';
-  url.hash = '';
-  return url.toString();
-};
-
 function validateConfiguration(): { url: string; key: string } | { error: string } {
-  const urlVariable = isDemoMode ? 'VITE_DEMO_SUPABASE_URL' : 'VITE_SUPABASE_URL';
-  const keyVariable = isDemoMode ? 'VITE_DEMO_SUPABASE_ANON_KEY' : 'VITE_SUPABASE_ANON_KEY';
-  const supabaseUrl = (isDemoMode ? import.meta.env.VITE_DEMO_SUPABASE_URL : import.meta.env.VITE_SUPABASE_URL)?.trim();
-  const supabasePublishableKey = (isDemoMode ? import.meta.env.VITE_DEMO_SUPABASE_ANON_KEY : import.meta.env.VITE_SUPABASE_ANON_KEY)?.trim();
-  if (!supabaseUrl) return { error: `The GitHub Actions variable ${urlVariable} is missing${isDemoMode ? '. Demo mode never connects to production.' : '.'}` };
-  if (!supabasePublishableKey) return { error: `The GitHub Actions variable ${keyVariable} is missing${isDemoMode ? '. Demo mode never connects to production.' : '.'}` };
+  const urlVariable = 'VITE_SUPABASE_URL';
+  const keyVariable = 'VITE_SUPABASE_ANON_KEY';
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+  const supabasePublishableKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
+  if (!supabaseUrl) return { error: `The GitHub Actions variable ${urlVariable} is missing.` };
+  if (!supabasePublishableKey) return { error: `The GitHub Actions variable ${keyVariable} is missing.` };
 
   let parsedUrl: URL;
   try {
@@ -41,7 +31,6 @@ export const supabaseConfigurationError = 'error' in configuration ? configurati
 export const isSupabaseConfigured = !supabaseConfigurationError;
 
 export const supabase = 'error' in configuration
-  || isLocalGuestMode
   ? null
   : createClient(configuration.url, configuration.key, {
       auth: {

@@ -44,9 +44,21 @@ Deno.serve(async (request) => {
     if (!projectUrl) throw new Error('SUPABASE_URL is not configured.');
     const authClient = createClient(projectUrl, getPublishableKey(), {
       auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
+      global: { headers: { Authorization: ['Bearer', accessToken].join(' ') } },
     });
     const { data: authData, error: authError } = await authClient.auth.getUser(accessToken);
     if (authError || !authData.user) return respond({ error: 'Your session is invalid or expired. Please sign in again.' }, 401);
+
+    const { data: membership, error: membershipError } = await authClient
+      .from('workspace_members')
+      .select('user_id')
+      .eq('user_id', authData.user.id)
+      .maybeSingle();
+    if (membershipError) {
+      console.error('AI assistant membership check failed:', membershipError.message);
+      return respond({ error: 'Unable to verify workspace access. Please try again later.' }, 500);
+    }
+    if (!membership) return respond({ error: 'Workspace membership is required to use the AI assistant.' }, 403);
 
     let input: unknown;
     try {

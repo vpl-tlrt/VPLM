@@ -46,25 +46,19 @@ export async function loadWorkspace(userId: string): Promise<{ snapshot: Workspa
 export async function saveWorkspace(snapshot: WorkspaceSnapshot, revision: number | null): Promise<number> {
   if (!supabase) throw new Error('Supabase is not configured.');
 
-  if (revision === null) {
-    const { data, error } = await supabase
-      .from('workspace_state')
-      .insert({ id: 1, state: snapshot, revision: 1 })
-      .select('revision')
-      .single();
-    if (error?.code === '23505') throw new WorkspaceConflictError();
-    if (error) throw error;
-    return data.revision;
+  const { data, error } = await supabase.functions.invoke<{ revision?: number; code?: string; error?: string }>('workspace-sync', {
+    body: { snapshot, revision },
+  });
+  if (error) {
+    if (error.context instanceof Response) {
+      const body = await error.context.clone().json().catch(() => null) as { code?: string; error?: string } | null;
+      if (error.context.status === 409 || body?.code === 'REVISION_CONFLICT') throw new WorkspaceConflictError();
+      throw new Error(body?.error ?? error.message);
+    }
+    throw error;
   }
-
-  const { data, error } = await supabase
-    .from('workspace_state')
-    .update({ state: snapshot, revision: revision + 1, updated_at: new Date().toISOString() })
-    .eq('id', 1)
-    .eq('revision', revision)
-    .select('revision')
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) throw new WorkspaceConflictError();
+  if (!data || typeof data.revision !== 'number' || !Number.isSafeInteger(data.revision)) {
+    throw new Error(data?.error ?? 'The workspace service returned an invalid revision.');
+  }
   return data.revision;
 }

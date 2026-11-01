@@ -6,7 +6,6 @@ import Layout from '@/pages/_layout';
 import { queryClient } from '@/lib/query-client';
 import { Toaster } from '@/components/ui/sonner';
 import ErrorBoundary from '@/components/system/error-boundary';
-import AiAssistant from '@/components/ai-assistant';
 
 import HomePage from '@/pages/index';
 import NotFoundPage from '@/pages/not-found';
@@ -24,7 +23,6 @@ function App() {
                 <Route path="*" element={<NotFoundPage />} />
               </Route>
             </Routes>
-            <AiAssistant />
           </Router>
         </JotaiProvider>
       </ErrorBoundary>

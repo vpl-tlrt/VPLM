@@ -5,3 +5,9 @@ verify_jwt = true
 
 [functions.ai-assistant]
 verify_jwt = true
+
+[functions.user-auth]
+verify_jwt = false
+
+[functions.workspace-sync]
+verify_jwt = false

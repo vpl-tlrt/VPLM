@@ -61,12 +61,16 @@ export default function AiAssistant() {
       }
       setMessages((current) => [...current, { role: 'assistant', content: data.reply }]);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : 'Unknown error';
+      let detail = error instanceof Error ? error.message : 'Unknown error';
+      if (typeof error === 'object' && error !== null && 'context' in error && error.context instanceof Response) {
+        const responseBody = await error.context.clone().json().catch(() => null) as { error?: unknown } | null;
+        if (typeof responseBody?.error === 'string') detail = responseBody.error;
+      }
       setMessages((current) => [
         ...current,
         {
           role: 'assistant',
-          content: `I couldn’t reach the AI service. Please check that the ai-assistant Supabase Edge Function is deployed and GEMINI_API_KEY is configured. Details: ${detail}`,
+          content: `I couldn’t get a reply from the AI assistant. ${detail}`,
         },
       ]);
     } finally {

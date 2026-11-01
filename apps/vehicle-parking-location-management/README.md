@@ -1,6 +1,8 @@
 # Vehicle Parking Management
 
-See the root [README](../../README.md) for Supabase setup, access policies, local development, and publishing instructions.
+See [account and data setup](./AUTH_SETUP.md) for Supabase account provisioning, User ID login, WhatsApp recovery, role enforcement, and Edge Function deployment.
+
+See the root [README](../../README.md) for application features and publishing instructions.
 
 ```sh
 npm ci

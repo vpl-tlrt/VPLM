@@ -20,11 +20,12 @@ export const useUser = () => {
       const user = data.user;
       if (!user) return null;
       const email = user.email ?? '';
+      const loginId = typeof user.user_metadata.login_id === 'string' ? user.user_metadata.login_id : email;
       return {
         id: user.id,
         email,
         fullName: user.user_metadata.full_name ?? email.split('@')[0] ?? 'Operator',
-        userPrincipalName: email,
+        userPrincipalName: loginId,
         objectId: user.id,
         tenantId: 'supabase-workspace',
       };
