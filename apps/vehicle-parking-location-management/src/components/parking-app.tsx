@@ -669,7 +669,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const showVehiclesOnMap = true;
 
   const [collapsedZones, setCollapsedZones] = useState<Set<string>>(new Set());
-  const visibleZones = zoneStats.filter((zoneItem: { zone: string }) => garageZoneFilter === 'all' || zoneItem.zone === garageZoneFilter);
+  const visibleZones = zoneStats.filter((zoneItem: { zone: string }) => !['BP1', 'BP2', 'BP3', 'Washing Area', 'Toyota Reception', 'Lexus Reception'].includes(zoneItem.zone) && (garageZoneFilter === 'all' || zoneItem.zone === garageZoneFilter));
   useEffect(() => {
     if (!focusedVehicleId) return;
     const focusedVehicle = vehicles.find((vehicle: Vehicle) => vehicle.id === focusedVehicleId);
@@ -929,6 +929,36 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
         </Card>
       </div>
       <Card><CardHeader><div className="flex items-center justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><CarFront /> Unassigned Bay</CardTitle><CardDescription>Vehicles assigned without a parking bay number.</CardDescription></div><Badge variant="outline">{unassignedVehicles.length}</Badge></div></CardHeader><CardContent>{unassignedVehicles.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{unassignedVehicles.map((vehicle: Vehicle) => <button id={`garage-vehicle-${vehicle.id}`} key={vehicle.id} type="button" onClick={() => onAssignUnassignedVehicle(vehicle)} className={`w-full rounded-xl border bg-background p-4 text-left ${locatedVehicleId === vehicle.id ? 'ring-4 ring-primary ring-offset-2' : ''}`}><div className="flex items-start justify-between gap-2"><div><p className="font-bold">{vehicle.plateNumber}</p><p className="text-sm text-muted-foreground">{vehicle.brand} {vehicle.model} · {vehicle.color}</p></div><Badge variant="secondary">Unassigned</Badge></div><div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Info label="Customer" value={vehicle.customerName} /><Info label="Assigned by" value={vehicle.assignedBy} /><Info label="Assigned on" value={vehicle.assignedDate ? format(new Date(vehicle.assignedDate), 'dd MMM yyyy, HH:mm') : undefined} /></div></button>)}</div> : <p className="py-2 text-sm text-muted-foreground">No vehicles are in the Unassigned Bay tray.</p>}</CardContent></Card>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {(['BP1', 'BP2', 'BP3', 'Washing Area', 'Toyota Reception', 'Lexus Reception'] as const).map((containerName) => {
+          const container = locations.find((location: ParkingLocation) => location.zone === containerName && isLiveGarageContainer(location));
+          if (!container) return null;
+          const occupant = activeVehicles.find((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(container.id));
+          const occupied = Boolean(occupant);
+          return <Card key={containerName}>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-3">
+                <div><CardTitle className="flex items-center gap-2"><CarFront /> {containerName}</CardTitle><CardDescription>Separate vehicle parking container · no bay number</CardDescription></div>
+                <Badge variant={occupied ? 'destructive' : 'outline'}>{occupied ? 'Occupied' : container.status === 'Available' ? 'Vacant' : container.status}</Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <button
+                id={occupant ? `garage-vehicle-${occupant.id}` : undefined}
+                type="button"
+                onClick={() => { if (occupant) { setSelectedBayId(undefined); setOverviewVehicleId(occupant.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(container.id); } }}
+                className={`w-full rounded-xl border bg-background p-4 text-left transition-colors hover:bg-muted ${occupant && locatedVehicleId === occupant.id ? 'ring-4 ring-primary ring-offset-2' : ''}`}
+              >
+                {occupant ? <>
+                  <p className="font-bold">{occupant.plateNumber}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{occupant.brand} {occupant.model} · {occupant.color}</p>
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Info label="Customer" value={occupant.customerName} /><Info label="Assigned by" value={occupant.assignedBy} /><Info label="Assigned on" value={occupant.assignedDate ? format(new Date(occupant.assignedDate), 'dd MMM yyyy, HH:mm') : undefined} /></div>
+                </> : <p className="text-sm text-muted-foreground">No vehicle assigned. Select to open container details.</p>}
+              </button>
+            </CardContent>
+          </Card>;
+        })}
+      </div>
       <BayInformationDialog bay={selectedBay} open={Boolean(selectedBayId)} onOpenChange={(open: boolean) => { if (!open) setSelectedBayId(undefined); }} vehicle={selectedBayVehicle} reservation={selectedReservation} maintenance={selectedMaintenance} history={selectedHistory} actor={actor} role={role} onReserve={reserveBay} onMaintenance={markMaintenance} onCompleteMaintenance={completeMaintenance} assignmentVehicle={assignmentVehicle} onAssignmentVehicleChange={setAssignmentVehicle} canAssignVehicle={canAssignVehicle} onAssignVehicle={() => { if (!selectedBay) return; onAssignSelectedBay(selectedBay.id, assignmentVehicle); window.setTimeout(() => { if (assignSelectedBay(selectedBay.id)) setSelectedBayId(undefined); }, 0); }} onRequestRelease={requestRelease} onReleaseDecision={decideRelease} />
       <VehicleOverviewDialog vehicle={activeVehicles.find((item: Vehicle) => item.id === overviewVehicleId)} open={Boolean(overviewVehicleId)} onOpenChange={(open: boolean) => { if (!open) setOverviewVehicleId(undefined); }} locations={locations} movements={movements} roadTest={overviewVehicleId ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === overviewVehicleId) : undefined} canRequestRoadTest={canAccessRoadTests} canEdit={canEditVehicle} canTransfer={canTransferVehicle} canDelete={canManage} onRequestRoadTest={(vehicle: Vehicle) => { setOverviewVehicleId(undefined); onOpenRoadTests(vehicle.id); }} onUpdate={updateVehicle} onTransfer={transferVehicle} onDeliver={deliverVehicle} onDelete={deleteVehicle} onQuickContact={(vehicle: Vehicle, bay: string) => onContactVehicle({ plateNumber: vehicle.plateNumber, location: bay || (vehicle.latitude && vehicle.longitude ? `${vehicle.latitude.toFixed(5)}, ${vehicle.longitude.toFixed(5)}` : 'GPS pending'), status: vehicle.status, id: vehicle.id })} />
     </div>
