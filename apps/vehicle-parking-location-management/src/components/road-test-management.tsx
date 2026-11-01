@@ -112,7 +112,7 @@ export function RoadTestManagement({ vehicles, locations, actor, users: workspac
     const timestamp = new Date(test.finishTimestamp ?? test.startTimestamp ?? test.assignmentTimestamp).getTime();
     const matchesPerson = selectedPeople.length === 0 || selectedPeople.includes(test.assignedTo);
     const matchesDate = (!dateFrom || timestamp >= startOfDay(dateFrom).getTime()) && (!dateTo || timestamp <= endOfDay(dateTo).getTime());
-    return matchesPerson && matchesDate && `${item?.plateNumber} ${item?.vin} ${test.jobCardNumber} ${displayAssignee(test.assignedTo, users)}`.toLowerCase().includes(query.toLowerCase());
+    return matchesPerson && matchesDate && `${item?.plateNumber} ${item?.vin} ${test.jobCardNumber} ${displayAssignee(test.assignedTo, applicationUsers)}`.toLowerCase().includes(query.toLowerCase());
   };
   const filtered = tests.filter((test: RoadTestRecord) => (status === 'all' || test.status === status) && (testTypeFilter === 'all' || (test.testType ?? 'Initial Road Test') === testTypeFilter) && matchesFilters(test));
   const activeTests = filtered.filter((test: RoadTestRecord) => test.status === 'Assigned' || test.status === 'In Road Test');
