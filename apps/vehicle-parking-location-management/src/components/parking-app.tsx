@@ -116,7 +116,7 @@ const zoneDisplayName = (zone: string): string => {
   if (['A', 'B', 'C'].includes(zone)) return `Accommodation Parking ${zone}`;
   if (zone === 'Workshop') return 'Workshop Parking';
   if (zone === 'Reception') return 'Reception Parking';
-  if (['Lexus Reception', 'Toyota Reception', 'Washing Area', 'BP1', 'BP2', 'BP3'].includes(zone)) return zone;
+  if (['Lexus Reception', 'Toyota Reception', 'Washing Area', 'BP1', 'BP2', 'BP3', 'Workshop Centre Bay'].includes(zone)) return zone;
   return `Zone ${zone}`;
 };
 
@@ -296,6 +296,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const actor = localGuest ? 'Guest User' : user?.fullName ?? 'Local Operator';
 
   const activeVehicles = vehicles.filter((item: Vehicle) => item.status !== 'Delivered');
+  const containerVehicleCount = (locationId: string) => activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId)).length;
+  const containerCanAccept = (location: ParkingLocation) => isLiveGarageContainer(location) && location.status !== 'Reserved' && location.status !== 'Maintenance' && containerVehicleCount(location.id) < 15;
   const linkedVehicleLocationIds = useMemo(() => new Set(activeVehicles.map((item: Vehicle) => parkingRecordKey(item.currentLocationId)).filter((id: string) => Boolean(id))), [activeVehicles]);
   useEffect(() => {
     setLocations((current: ParkingLocation[]) => {
@@ -314,7 +316,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const available = locations.filter((item: ParkingLocation) => item.status === 'Available' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
   const reserved = locations.filter((item: ParkingLocation) => item.status === 'Reserved' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
   const utilization = locations.length > 0 ? Math.round((occupied / locations.length) * 100) : 0;
-  const availableBays = locations.filter((item: ParkingLocation) => item.zone === zone && item.status === 'Available' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id)));
+  const availableBays = locations.filter((item: ParkingLocation) => item.zone === zone && (containerCanAccept(item) || (item.status === 'Available' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id)))));
   const selectedVehicle = activeVehicles.find((item: Vehicle) => item.id === selectedVehicleId);
   const searchResult = activeVehicles.find((item: Vehicle) =>
     item.plateNumber.toLowerCase().includes(searchQuery.toLowerCase()) || item.vin.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -350,7 +352,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     const isXParking = validation.value.xParking === 'Yes';
     if (isXParking && (toUnassignedBay || !location)) { toast.error('Choose an X Parking space beside a supported A or B bay.'); return false; }
     if (location && isXParking && !supportsXParkingLocation(location)) { toast.error('X Parking is only available in the marked A and B bay rows.'); return false; }
-    if (location && !isXParking && (location.status !== 'Available' || linkedVehicleLocationIds.has(normalizedBayId))) { toast.error('This bay is no longer available.'); return false; }
+    if (location && !isXParking && !containerCanAccept(location) && (location.status !== 'Available' || linkedVehicleLocationIds.has(normalizedBayId))) { toast.error('This bay is no longer available.'); return false; }
     if (location && isXParking && activeVehicles.some((item: Vehicle) => item.xParking === 'Yes' && parkingRecordKey(item.currentLocationId) === normalizedBayId && item.id !== existing?.id)) {
       toast.error('This bay already has an X-Parked vehicle in front of it. Choose another bay.');
       return false;
@@ -411,7 +413,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     if (!vehicle?.currentLocationId) return toast.error('No active assignment found for this plate.');
     const previous = parkingRecordKey(vehicle.currentLocationId);
     setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === vehicle.id ? { ...item, status: 'Released', operationalStatus: 'Checked Out', currentLocationId: undefined } : item));
-    setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => parkingRecordKey(item.id) === previous ? { ...item, status: 'Available' } : item));
+    setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => parkingRecordKey(item.id) === previous ? { ...item, status: isLiveGarageContainer(item) && containerVehicleCount(item.id) > 1 ? 'Occupied' : 'Available' } : item));
     addMovement(vehicle.id, vehicle.currentLocationId, undefined, 'Release');
     enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicle.id, payload: { locationId: '', actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: new Date().toISOString() });
     logAudit('Release', 'Vehicle', `${vehicle.plateNumber} from ${locationLabel(previous)}`, { ...vehicle, status: 'Released', operationalStatus: 'Checked Out', currentLocationId: undefined }, vehicle.currentLocationId, undefined);
@@ -424,12 +426,12 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     const vehicle = activeVehicles.find((item: Vehicle) => item.id === vehicleId);
     if (!vehicle?.currentLocationId || !destinationId) { toast.error('Select a parked vehicle and an available destination.'); return false; }
     const target = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(destinationId));
-    if (!target || target.status !== 'Available' || linkedVehicleLocationIds.has(parkingRecordKey(target.id))) { toast.error('Destination is occupied or reserved.'); return false; }
+    if (!target || (!containerCanAccept(target) && (target.status !== 'Available' || linkedVehicleLocationIds.has(parkingRecordKey(target.id))))) { toast.error('Destination is occupied or reserved.'); return false; }
     if (vehicle.xParking === 'Yes' && !supportsXParkingLocation(target)) { toast.error('X-Parked vehicles can only be moved to the marked A and B bay rows.'); return false; }
     const previous = vehicle.currentLocationId;
     const transferredAt = new Date().toISOString();
     const updatedVehicle = { ...vehicle, status: 'Transferred' as const, currentLocationId: target.id, assignedDate: transferredAt, assignedBy: actor };
-    setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(previous) ? { ...item, status: 'Available' } : parkingRecordKey(item.id) === parkingRecordKey(target.id) ? { ...item, status: 'Occupied' } : item));
+    setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(previous) ? { ...item, status: isLiveGarageContainer(item) && containerVehicleCount(item.id) > 1 ? 'Occupied' : 'Available' } : parkingRecordKey(item.id) === parkingRecordKey(target.id) ? { ...item, status: 'Occupied' } : item));
     setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === vehicle.id ? updatedVehicle : item));
     addMovement(vehicle.id, previous, target.id, 'Transfer', movementNotes);
     enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicle.id, payload: { locationId: target.id, actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: transferredAt });
@@ -669,7 +671,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const showVehiclesOnMap = true;
 
   const [collapsedZones, setCollapsedZones] = useState<Set<string>>(new Set());
-  const visibleZones = zoneStats.filter((zoneItem: { zone: string }) => !['BP1', 'BP2', 'BP3', 'Washing Area', 'Toyota Reception', 'Lexus Reception'].includes(zoneItem.zone) && (garageZoneFilter === 'all' || zoneItem.zone === garageZoneFilter));
+  const visibleZones = zoneStats.filter((zoneItem: { zone: string }) => !['BP1', 'BP2', 'BP3', 'Washing Area', 'Toyota Reception', 'Lexus Reception', 'Workshop Centre Bay'].includes(zoneItem.zone) && (garageZoneFilter === 'all' || zoneItem.zone === garageZoneFilter));
   useEffect(() => {
     if (!focusedVehicleId) return;
     const focusedVehicle = vehicles.find((vehicle: Vehicle) => vehicle.id === focusedVehicleId);
@@ -930,31 +932,30 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
       </div>
       <Card><CardHeader><div className="flex items-center justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><CarFront /> Unassigned Bay</CardTitle><CardDescription>Vehicles assigned without a parking bay number.</CardDescription></div><Badge variant="outline">{unassignedVehicles.length}</Badge></div></CardHeader><CardContent>{unassignedVehicles.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{unassignedVehicles.map((vehicle: Vehicle) => <button id={`garage-vehicle-${vehicle.id}`} key={vehicle.id} type="button" onClick={() => onAssignUnassignedVehicle(vehicle)} className={`w-full rounded-xl border bg-background p-4 text-left ${locatedVehicleId === vehicle.id ? 'ring-4 ring-primary ring-offset-2' : ''}`}><div className="flex items-start justify-between gap-2"><div><p className="font-bold">{vehicle.plateNumber}</p><p className="text-sm text-muted-foreground">{vehicle.brand} {vehicle.model} · {vehicle.color}</p></div><Badge variant="secondary">Unassigned</Badge></div><div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Info label="Customer" value={vehicle.customerName} /><Info label="Assigned by" value={vehicle.assignedBy} /><Info label="Assigned on" value={vehicle.assignedDate ? format(new Date(vehicle.assignedDate), 'dd MMM yyyy, HH:mm') : undefined} /></div></button>)}</div> : <p className="py-2 text-sm text-muted-foreground">No vehicles are in the Unassigned Bay tray.</p>}</CardContent></Card>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {(['BP1', 'BP2', 'BP3', 'Washing Area', 'Toyota Reception', 'Lexus Reception'] as const).map((containerName) => {
+        {(['BP1', 'BP2', 'BP3', 'Washing Area', 'Toyota Reception', 'Lexus Reception', 'Workshop Centre Bay'] as const).map((containerName) => {
           const container = locations.find((location: ParkingLocation) => location.zone === containerName && isLiveGarageContainer(location));
           if (!container) return null;
-          const occupant = activeVehicles.find((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(container.id));
-          const occupied = Boolean(occupant);
+          const occupants = activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(container.id));
           return <Card key={containerName}>
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
-                <div><CardTitle className="flex items-center gap-2"><CarFront /> {containerName}</CardTitle><CardDescription>Separate vehicle parking container · no bay number</CardDescription></div>
-                <Badge variant={occupied ? 'destructive' : 'outline'}>{occupied ? 'Occupied' : container.status === 'Available' ? 'Vacant' : container.status}</Badge>
+                <div><CardTitle className="flex items-center gap-2"><CarFront /> {containerName}</CardTitle><CardDescription>{containerName === 'Workshop Centre Bay' ? 'Urgent / Top Priority Vehicles Only' : 'Separate vehicle parking container'} · no bay number</CardDescription></div>
+                <Badge variant={occupants.length >= 15 ? 'destructive' : 'outline'}>{occupants.length} / 15 vehicles</Badge>
               </div>
             </CardHeader>
-            <CardContent>
-              <button
-                id={occupant ? `garage-vehicle-${occupant.id}` : undefined}
+            <CardContent className="space-y-2">
+              {occupants.length ? occupants.map((occupant: Vehicle) => <button
+                key={occupant.id}
+                id={`garage-vehicle-${occupant.id}`}
                 type="button"
-                onClick={() => { if (occupant) { setSelectedBayId(undefined); setOverviewVehicleId(occupant.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(container.id); } }}
-                className={`w-full rounded-xl border bg-background p-4 text-left transition-colors hover:bg-muted ${occupant && locatedVehicleId === occupant.id ? 'ring-4 ring-primary ring-offset-2' : ''}`}
+                onClick={() => { setSelectedBayId(undefined); setOverviewVehicleId(occupant.id); }}
+                className={`w-full rounded-xl border bg-background p-4 text-left transition-colors hover:bg-muted ${locatedVehicleId === occupant.id ? 'ring-4 ring-primary ring-offset-2' : ''}`}
               >
-                {occupant ? <>
-                  <p className="font-bold">{occupant.plateNumber}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{occupant.brand} {occupant.model} · {occupant.color}</p>
-                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Info label="Customer" value={occupant.customerName} /><Info label="Assigned by" value={occupant.assignedBy} /><Info label="Assigned on" value={occupant.assignedDate ? format(new Date(occupant.assignedDate), 'dd MMM yyyy, HH:mm') : undefined} /></div>
-                </> : <p className="text-sm text-muted-foreground">No vehicle assigned. Select to open container details.</p>}
-              </button>
+                <p className="font-bold">{occupant.plateNumber}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{occupant.brand} {occupant.model} · {occupant.color}</p>
+                <div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Info label="Customer" value={occupant.customerName} /><Info label="Assigned by" value={occupant.assignedBy} /><Info label="Assigned on" value={occupant.assignedDate ? format(new Date(occupant.assignedDate), 'dd MMM yyyy, HH:mm') : undefined} /></div>
+              </button>) : <p className="text-sm text-muted-foreground">No vehicles assigned.</p>}
+              <Button variant="outline" className="w-full" onClick={() => { setOverviewVehicleId(undefined); setSelectedBayId(container.id); }}>View container details</Button>
             </CardContent>
           </Card>;
         })}
