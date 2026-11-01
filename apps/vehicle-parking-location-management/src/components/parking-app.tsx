@@ -1305,7 +1305,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
                 const vehicle = vehicles.find((item: Vehicle) => parkingRecordKey(item.currentLocationId) === parkingRecordKey(bay.id));
                 return <button key={bay.id} type="button" onClick={() => openBayEditor(bay)} className={`parking-space ${bay.status === 'Reserved' ? 'bay-reserved' : bay.status === 'Maintenance' ? 'bay-maintenance' : ''}`} aria-label={`Edit bay ${bay.zone}-${bay.bayNumber}`}>
                   <Settings className="absolute right-2 top-2 h-4 w-4" />
-                  <span className="absolute bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-black">{bay.zone}-{bay.bayNumber}</span>
+                  <span className="absolute bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs font-black">{parkingLocationLabel(bay)}</span>
                   <span className="absolute left-2 top-7 text-[9px] font-semibold">{bay.section ?? 'Main'} · {bay.direction ?? 'Forward'}</span>
                   {vehicle && <TopViewCar vehicle={vehicle} />}
                   {!vehicle && bay.status !== 'Available' && <Badge className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" variant={bay.status === 'Reserved' ? 'secondary' : 'outline'}>{bay.status}</Badge>}
@@ -1337,7 +1337,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     </Card>
     {showLegacyBayEditor && <div aria-hidden="true">
       {editingBayId && bayDraft && <button type="button" onClick={saveBay}>Save legacy bay editor</button>}
-      {locations.map((bay: ParkingLocation) => <button key={bay.id} type="button" draggable onDragStart={() => setDraggedBay(bay.id)} onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()} onDrop={() => reorderBay(bay.id)} onClick={() => archiveBay(bay.id)}>{bay.zone}-{bay.bayNumber}</button>)}
+      {locations.map((bay: ParkingLocation) => <button key={bay.id} type="button" draggable onDragStart={() => setDraggedBay(bay.id)} onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()} onDrop={() => reorderBay(bay.id)} onClick={() => archiveBay(bay.id)}>{parkingLocationLabel(bay)}</button>)}
       {garageLayout.map((item: GarageLayoutItem) => <button key={item.id} type="button" draggable onDragStart={() => setDraggedLayoutItemId(item.id)} onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()} onDrop={() => reorderLayoutItem(item.id)} onClick={() => updateZoneDetails(item.id, { name: item.name ?? '', details: item.details ?? '' })}>{item.kind}</button>)}
       <button type="button" onClick={saveCompleteZone}>Save complete zone</button><button type="button" onClick={() => addLayoutItem('bay-row')}>Add row</button>
     </div>}
