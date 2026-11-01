@@ -11,7 +11,7 @@ Existing email-authenticated accounts are preserved. Until their profile is migr
 1. In Supabase Authentication settings, disable public sign-ups. Hiding the sign-up form alone does not disable the public Auth API; the app creates accounts through its Administrator-only Edge Function.
 2. Enable phone authentication and configure the project’s Twilio WhatsApp provider, including a verified/approved WhatsApp sender and message template as required by Twilio.
 3. Keep mobile numbers in E.164 format, including the leading `+` and country code. WhatsApp recovery only works after the account’s number is valid and the Supabase phone provider can deliver and verify codes.
-4. New users are created with the default login password `Park@123`. Share it securely. Users are not forced to change it at first sign-in, but can change their password whenever they choose.
+4. New users are created with the default login password `Park@123`. Share it securely. Users are not forced to change it at first sign-in. They can change it later through the password-recovery flow.
 
 Supabase supports WhatsApp OTP through its Twilio and Twilio Verify providers. Configure the provider in Supabase Authentication; do not put Twilio credentials in the frontend or GitHub variables.
 
