@@ -15,9 +15,11 @@ export const useUser = () => {
     queryKey: ['authenticated-user'],
     queryFn: async () => {
       if (!supabase) return null;
-      const { data, error } = await supabase.auth.getUser();
+      // getSession reads the persisted auth session locally, so the app can identify
+      // the signed-in user while offline. Server functions still verify the session.
+      const { data, error } = await supabase.auth.getSession();
       if (error) throw error;
-      const user = data.user;
+      const user = data.session?.user;
       if (!user) return null;
       const email = user.email ?? '';
       const loginId = typeof user.user_metadata.login_id === 'string' ? user.user_metadata.login_id : email;
