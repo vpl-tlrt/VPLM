@@ -85,11 +85,6 @@ const userName = (user: User) => {
   return user.email?.split('@')[0] ?? 'Workspace user';
 };
 
-const newTemporaryPassword = () => {
-  const bytes = crypto.getRandomValues(new Uint8Array(24));
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-};
-
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (request.method !== 'POST') return respond({ error: 'Method not allowed.' }, 405);
