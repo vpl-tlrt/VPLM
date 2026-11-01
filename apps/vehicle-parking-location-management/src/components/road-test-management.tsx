@@ -130,7 +130,7 @@ export function RoadTestManagement({ vehicles, locations, actor, users: workspac
       candidate.loginId.trim().toLowerCase() === raw.toLowerCase() ||
       candidate.id.trim().toLowerCase() === raw.toLowerCase()
     );
-    return match?.name.trim() || (raw.includes('@') ? 'Assigned user' : raw);
+    return match?.name.trim() || 'Assigned user';
   };
   const trendDates = dateFrom && dateTo ? eachDayOfInterval({ start: dateFrom, end: dateTo }) : Array.from({ length: 7 }, (_: unknown, index: number) => { const date = new Date(); date.setDate(date.getDate() - (6 - index)); return date; });
   const trendData = trendDates.map((date: Date) => ({ date: format(date, 'dd MMM'), completed: trendSource.filter((test: RoadTestRecord) => test.finishTimestamp && format(new Date(test.finishTimestamp), 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd')).length }));
