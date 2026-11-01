@@ -784,6 +784,8 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     appendBayAudit(selectedBay.id, approved ? 'Release Approved' : 'Release Rejected', `${actor}; requester ${selectedReservation.requesterName ?? '—'} notified`);
     toast.success(approved ? 'Release approved; bay is now vacant.' : 'Reservation kept; requester notified.');
   };
+  const containerVehicleCount = (locationId: string) => activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId)).length;
+  const containerCanAccept = (location: ParkingLocation) => isLiveGarageContainer(location) && location.status !== 'Reserved' && location.status !== 'Maintenance' && containerVehicleCount(location.id) < 15;
   const transferVehicle = (vehicleId: string, destinationId: string) => {
     const vehicle = activeVehicles.find((item: Vehicle) => item.id === vehicleId);
     const destination = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(destinationId));
