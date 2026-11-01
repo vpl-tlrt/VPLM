@@ -74,7 +74,23 @@ type UserAdminResponse = { users?: ManagedUser[]; existing?: boolean; loginId?: 
 
 const invokeUserAdmin = async (body: Record<string, unknown>): Promise<UserAdminResponse> => {
   if (!supabase) throw new Error('Supabase is not configured.');
-  const { data, error } = await supabase.functions.invoke<UserAdminResponse>('admin-users', { body });
+
+  // Edge Functions must receive the signed-in user's JWT, not the project publishable key.
+  let { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) throw new Error('Could not verify your sign-in. Please sign in again.');
+
+  if (!session?.access_token || session.access_token.split('.').length !== 3) {
+    const refreshed = await supabase.auth.refreshSession();
+    session = refreshed.data.session;
+    if (refreshed.error || !session?.access_token || session.access_token.split('.').length !== 3) {
+      throw new Error('Your session is invalid or expired. Please sign out and sign in again, then retry.');
+    }
+  }
+
+  const { data, error } = await supabase.functions.invoke<UserAdminResponse>('admin-users', {
+    body,
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
   if (error) {
     if (error.context instanceof Response) {
       const responseBody = await error.context.clone().json().catch(() => null) as { error?: string } | null;
