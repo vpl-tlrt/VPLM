@@ -77,6 +77,8 @@ Deno.serve(async (request) => {
     const apiKey = Deno.env.get('GEMINI_API_KEY');
     if (!apiKey) return respond({ error: 'The AI provider key is not configured. Ask the administrator to set GEMINI_API_KEY.' }, 503);
     const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash';
+    const fallbackModel = Deno.env.get('GEMINI_FALLBACK_MODEL') || 'gemini-3.1-flash-lite';
+    const models = [...new Set([model, fallbackModel])];
 
     const systemInstruction = [
       'You are the VPLM (Vehicle Parking Location Management) assistant in a prototype testing environment.',
@@ -90,46 +92,70 @@ Deno.serve(async (request) => {
 
     let response: Response | null = null;
     let providerMessage = '';
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
-        },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-          contents: [{ role: 'user', parts: [{ text: message }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 700 },
-        }),
-        signal: AbortSignal.timeout(25000),
-      });
+    let failedStatus = 0;
+    for (const [modelIndex, currentModel] of models.entries()) {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(currentModel)}:generateContent`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': apiKey,
+            },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: systemInstruction }] },
+              contents: [{ role: 'user', parts: [{ text: message }] }],
+              generationConfig: { temperature: 0.3, maxOutputTokens: 700 },
+            }),
+            signal: AbortSignal.timeout(25000),
+          });
+        } catch (error) {
+          response = null;
+          failedStatus = 0;
+          providerMessage = error instanceof Error ? error.message.slice(0, 400) : 'Network request failed.';
+          console.error('Gemini request could not reach provider:', { model: currentModel, attempt: attempt + 1, message: providerMessage });
+          if (attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 750 + Math.floor(Math.random() * 250)));
+            continue;
+          }
+          break;
+        }
 
-      if (response.ok) break;
+        if (response.ok) break;
 
-      const providerBody: unknown = await response.json().catch(() => null);
-      providerMessage = typeof providerBody === 'object' && providerBody !== null &&
-        'error' in providerBody && typeof providerBody.error === 'object' && providerBody.error !== null &&
-        'message' in providerBody.error && typeof providerBody.error.message === 'string'
-        ? providerBody.error.message.slice(0, 400)
-        : '';
-      const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
-      if (!retryable || attempt === 2) break;
+        failedStatus = response.status;
+        const providerBody: unknown = await response.json().catch(() => null);
+        providerMessage = typeof providerBody === 'object' && providerBody !== null &&
+          'error' in providerBody && typeof providerBody.error === 'object' && providerBody.error !== null &&
+          'message' in providerBody.error && typeof providerBody.error.message === 'string'
+          ? providerBody.error.message.slice(0, 400)
+          : '';
+        const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+        if (!retryable || response.status === 429 || response.status === 503 || attempt === 1) break;
 
-      const delay = 1000 * (2 ** attempt) + Math.floor(Math.random() * 250);
-      console.warn('Gemini returned a transient error; retrying:', { status: response.status, model, attempt: attempt + 1, delay });
-      await new Promise((resolve) => setTimeout(resolve, delay));
+        const delay = 1000 + Math.floor(Math.random() * 250);
+        console.warn('Gemini returned a transient error; retrying:', { status: response.status, model: currentModel, attempt: attempt + 1, delay });
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+
+      if (response?.ok) break;
+      if (modelIndex < models.length - 1) {
+        console.warn('Gemini primary model unavailable; trying fallback:', {
+          status: failedStatus || 'network error',
+          model: currentModel,
+          fallbackModel: models[modelIndex + 1],
+        });
+      }
     }
 
-    if (!response) throw new Error('Gemini request did not produce a response.');
-    if (!response.ok) {
-      const status = response.status;
-      if (status === 429) return respond({ error: 'The AI free-tier request limit has been reached. Please try again later.' }, 429);
-      console.error('Gemini request failed:', { status, model, message: providerMessage || 'No provider message.' });
+    if (!response?.ok) {
+      const status = failedStatus;
+      console.error('Gemini request failed:', { status: status || 'network error', models, message: providerMessage || 'No provider message.' });
+      if (status === 429) return respond({ error: 'The AI provider rate limit was reached on both configured models. Please try again later.' }, 429);
       return respond({
-        error: providerMessage
+        error: status && providerMessage
           ? `The AI provider returned HTTP ${status}: ${providerMessage}`
-          : `The AI provider returned HTTP ${status}. Please try again later.`,
+          : 'The AI provider could not be reached with either configured model. Please try again later.',
       }, 502);
     }
 
