@@ -349,12 +349,31 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       ? { ...existing, ...validation.value, ...xParkingDetails, status: 'Assigned', currentLocationId: location?.id, assignedDate: assignedAt, assignedBy: actor }
       : { id: vehicleId, vehicleId: `VH-${Date.now().toString().slice(-4)}`, ...validation.value, ...xParkingDetails, customerName: validation.value.customerName || 'Walk-in', status: 'Assigned', currentLocationId: location?.id, assignedDate: assignedAt, assignedBy: actor, driverOwner: validation.value.driverOwner || actor, department: validation.value.department || 'Workshop intake', operationalStatus: 'Checked In', photoUrls: [], geofenceStatus: 'Unknown', geofenceAlertEnabled: true };
     const destinationLabel = location ? `${location.zone}-${location.bayNumber}` : 'Unassigned Bay';
+    // Persist the vehicle and bay update synchronously before reporting success or
+    // starting any network sync. This keeps assignments safe during internet loss.
+    const nextVehicles = existing
+      ? vehicles.map((item: Vehicle) => item.id === vehicleId ? assignedVehicle : item)
+      : [assignedVehicle, ...vehicles];
+    const nextLocations = location
+      ? locations.map((item: ParkingLocation) => parkingRecordKey(item.id) === normalizedBayId ? { ...item, status: 'Occupied' as const } : item)
+      : locations;
+    const savedLocally = saveOfflineState({
+      vehicles: nextVehicles,
+      locations: nextLocations,
+      movements,
+      reservations,
+      auditEvents,
+      pendingChanges: 1,
+      savedAt: new Date().toISOString(),
+    });
+    if (!savedLocally) {
+      toast.error('Could not save this assignment on the device. Free device storage and try again.');
+      return false;
+    }
     logAudit(existing ? 'Edit' : 'Assignment', 'Vehicle', `${normalized} → ${destinationLabel}`, assignedVehicle, existing?.currentLocationId, location?.id);
-    setVehicles((current: Vehicle[]) => existing
-      ? current.map((item: Vehicle) => item.id === vehicleId ? assignedVehicle : item)
-      : [assignedVehicle, ...current]);
+    setVehicles(nextVehicles);
     if (location) {
-      setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => parkingRecordKey(item.id) === normalizedBayId ? { ...item, status: 'Occupied' } : item));
+      setLocations(nextLocations);
       addMovement(vehicleId, existing?.currentLocationId, location.id, 'Assign');
     }
     enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: existing ? 'update' : 'create', recordId: vehicleId, payload: { vehicleName: existing?.vehicleId ?? assignedVehicle.vehicleId, plateNumber: normalized, vin: validation.value.vin, brand: validation.value.brand, model: validation.value.model, color: validation.value.color, locationId: location?.id ?? '', ownerId: queueOwnerId, ownerName: validation.value.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
