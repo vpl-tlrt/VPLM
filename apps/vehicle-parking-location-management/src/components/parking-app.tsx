@@ -14,6 +14,7 @@ import { useLocalDataSync } from '@/hooks/use-local-data-sync';
 
 import { BayInformationDialog } from '@/components/bay-information-dialog';
 import { VehicleOverviewDialog } from '@/components/vehicle-overview-dialog';
+import AiAssistant from '@/components/ai-assistant';
 import { emptyVehicleForm, VehicleFormFields, vehicleColorClass, type VehicleFormData } from '@/components/vehicle-form-fields';
 import { RoadTestManagement } from '@/components/road-test-management';
 import { loadBayManagementState, saveBayManagementState, type BayAuditEntry, type BayMaintenance, type BayReservation } from '@/lib/bay-management-data';
@@ -307,16 +308,16 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     return { zone: zoneName, total: bays.length, available: bays.filter((item: ParkingLocation) => item.status === 'Available' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length, percent, state: percent >= 100 ? 'Full' : percent >= 80 ? 'Nearly full' : 'Available' };
   }), [linkedVehicleLocationIds, locations, zoneNames]);
 
-  const addMovement = (vehicleId: string, fromLocationId: string | undefined, toLocationId: string | undefined, type: Movement['movementType']) => {
+  const addMovement = (vehicleId: string, fromLocationId: string | undefined, toLocationId: string | undefined, type: Movement['movementType'], movementNotes = notes) => {
     const vehicle = vehicles.find((item: Vehicle) => item.id === vehicleId);
     const movementDate = new Date().toISOString();
     const snapshotVehicle = vehicle ? { ...vehicle, currentLocationId: toLocationId, assignedDate: movementDate, assignedBy: actor, photoUrls: [], photoUploadedAt: undefined } : undefined;
     const fromLocationLabel = locationLabel(fromLocationId);
     const toLocationLabel = locationLabel(toLocationId);
     const snapshot = snapshotVehicle ? { vehicle: snapshotVehicle, locationLabel: toLocationLabel, fromLocationLabel, toLocationLabel, assignment: { assignedDate: snapshotVehicle.assignedDate, assignedBy: actor, currentLocationId: toLocationId }, action: type, fromLocationId, toLocationId } : undefined;
-    const movement: Movement = { id: `mov-${crypto.randomUUID()}`, vehicleId, fromLocationId, toLocationId, movementType: type, actionDateTime: movementDate, performedBy: actor, notes, snapshot };
+    const movement: Movement = { id: `mov-${crypto.randomUUID()}`, vehicleId, fromLocationId, toLocationId, movementType: type, actionDateTime: movementDate, performedBy: actor, notes: movementNotes, snapshot };
     setMovements((current: Movement[]) => [movement, ...current]);
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'VehicleMovement', action: 'create', recordId: movement.id, payload: { name: `${type} ${vehicleId}`, vehicleId, vehicleName: vehicle?.vehicleId ?? vehicleId, fromLocationId, toLocationId, fromLocationLabel, toLocationLabel, movementType: type, movementDate, notes: JSON.stringify({ notes, snapshot, fromLocationId, toLocationId, fromLocationLabel, toLocationLabel }), actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: movementDate });
+    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'VehicleMovement', action: 'create', recordId: movement.id, payload: { name: `${type} ${vehicleId}`, vehicleId, vehicleName: vehicle?.vehicleId ?? vehicleId, fromLocationId, toLocationId, fromLocationLabel, toLocationLabel, movementType: type, movementDate, notes: JSON.stringify({ notes: movementNotes, snapshot, fromLocationId, toLocationId, fromLocationLabel, toLocationLabel }), actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: movementDate });
   };
 
   const handleAssign = (targetBayId?: string, toUnassignedBay = false, xParkingOccupant?: XParkingOccupant): boolean => {
@@ -380,22 +381,31 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     if (navigator.onLine) void sync(false);
   };
 
-  const handleTransfer = () => {
-    if (!canTransferVehicle) return toast.error('You do not have permission to transfer vehicles.');
-    if (!selectedVehicle?.currentLocationId || !newLocationId) return toast.error('Select a parked vehicle and an available destination.');
-    const target = locations.find((item: ParkingLocation) => item.id === newLocationId);
-    if (!target || target.status !== 'Available') return toast.error('Destination is occupied or reserved.');
-    if (selectedVehicle.xParking === 'Yes' && !supportsXParkingLocation(target)) return toast.error('X-Parked vehicles can only be moved to the marked A and B bay rows.');
-    const previous = selectedVehicle.currentLocationId;
-    setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => item.id === previous ? { ...item, status: 'Available' } : item.id === newLocationId ? { ...item, status: 'Occupied' } : item));
-    setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === selectedVehicle.id ? { ...item, status: 'Transferred', currentLocationId: newLocationId, assignedDate: new Date().toISOString(), assignedBy: actor } : item));
-    addMovement(selectedVehicle.id, previous, newLocationId, 'Transfer');
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: selectedVehicle.id, payload: { locationId: newLocationId, actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: new Date().toISOString() });
-    logAudit('Transfer', 'Vehicle', `${selectedVehicle.plateNumber}: ${locationLabel(previous)} → ${target.zone}-${target.bayNumber}`, { ...selectedVehicle, status: 'Transferred', currentLocationId: newLocationId, assignedDate: new Date().toISOString(), assignedBy: actor }, previous, newLocationId);
+  const transferVehicleById = (vehicleId: string, destinationId: string, movementNotes = notes): boolean => {
+    if (!canTransferVehicle) { toast.error('You do not have permission to transfer vehicles.'); return false; }
+    const vehicle = activeVehicles.find((item: Vehicle) => item.id === vehicleId);
+    if (!vehicle?.currentLocationId || !destinationId) { toast.error('Select a parked vehicle and an available destination.'); return false; }
+    const target = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(destinationId));
+    if (!target || target.status !== 'Available' || linkedVehicleLocationIds.has(parkingRecordKey(target.id))) { toast.error('Destination is occupied or reserved.'); return false; }
+    if (vehicle.xParking === 'Yes' && !supportsXParkingLocation(target)) { toast.error('X-Parked vehicles can only be moved to the marked A and B bay rows.'); return false; }
+    const previous = vehicle.currentLocationId;
+    const transferredAt = new Date().toISOString();
+    const updatedVehicle = { ...vehicle, status: 'Transferred' as const, currentLocationId: target.id, assignedDate: transferredAt, assignedBy: actor };
+    setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(previous) ? { ...item, status: 'Available' } : parkingRecordKey(item.id) === parkingRecordKey(target.id) ? { ...item, status: 'Occupied' } : item));
+    setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === vehicle.id ? updatedVehicle : item));
+    addMovement(vehicle.id, previous, target.id, 'Transfer', movementNotes);
+    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicle.id, payload: { locationId: target.id, actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: transferredAt });
+    logAudit('Transfer', 'Vehicle', `${vehicle.plateNumber}: ${locationLabel(previous)} → ${target.zone}-${target.bayNumber}`, updatedVehicle, previous, target.id);
     toast.success('Vehicle transferred.');
     playSound('general');
     if (navigator.onLine) void sync(false);
-    setNewLocationId(''); setNotes('');
+    setNewLocationId('');
+    setNotes('');
+    return true;
+  };
+  const handleTransfer = () => {
+    if (!selectedVehicle) return toast.error('Select a parked vehicle and an available destination.');
+    transferVehicleById(selectedVehicle.id, newLocationId, notes);
   };
   const handleRoadTestLocationChange = (vehicleId: string, fromId: string | undefined, toId: string | undefined, out: boolean) => {
     const vehicle = vehicles.find((item: Vehicle) => item.id === vehicleId);
@@ -554,6 +564,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 md:hidden" aria-label="Primary navigation">
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
+      {!localGuest && <AiAssistant vehicles={activeVehicles} locations={locations} canTransfer={canTransferVehicle} locationLabel={locationLabel} onTransfer={transferVehicleById} />}
     </div>
   );
   return appShell;

@@ -1,10 +1,26 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Bot, LoaderCircle, Send, Sparkles, X } from 'lucide-react';
+import { mapParkingLocationId, supportsXParkingLocation, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import { supabase } from '@/lib/supabase';
 
 type ChatMessage = {
   role: 'assistant' | 'user';
   content: string;
+};
+
+type TransferFlow = {
+  vehicleId: string;
+  step: 'taking' | 'destination' | 'parked';
+  selectedDestinationId?: string;
+  destinationId?: string;
+};
+
+type AiAssistantProps = {
+  vehicles: Vehicle[];
+  locations: ParkingLocation[];
+  canTransfer: boolean;
+  locationLabel: (locationId?: string) => string;
+  onTransfer: (vehicleId: string, destinationId: string, notes: string) => boolean;
 };
 
 const suggestions = [
@@ -13,22 +29,125 @@ const suggestions = [
   'How should I check parking availability?',
 ];
 
-export default function AiAssistant() {
+const normalize = (value: string): string => value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+const normalizeLocation = (value: string): string => normalize(mapParkingLocationId(value) ?? value);
+const isYes = (value: string): boolean => /^(yes|y|yeah|yep)\b/i.test(value.trim());
+const isNo = (value: string): boolean => /^(no|n|nope)\b/i.test(value.trim());
+
+export default function AiAssistant({ vehicles, locations, canTransfer, locationLabel, onTransfer }: AiAssistantProps) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [flow, setFlow] = useState<TransferFlow | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
       content:
-        'Hi! I’m the VPLM AI assistant. I can explain workflows and help you plan parking operations. This prototype does not yet read live vehicle records or perform actions. Please do not enter confidential or personal information.',
+        'Hi! I can answer VPLM workflow questions and look up vehicles in this workspace. For transfers, I’ll ask you to confirm each step and will record the move only after you confirm the vehicle is parked in its new bay.',
     },
   ]);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, open, busy]);
+  }, [messages, open, busy, flow]);
+
+  const addAssistantMessage = (content: string) => {
+    setMessages((current) => [...current, { role: 'assistant', content }]);
+  };
+
+  const activeFlowVehicle = flow ? vehicles.find((vehicle) => vehicle.id === flow.vehicleId && vehicle.status !== 'Delivered') : undefined;
+  const availableDestinations = flow && activeFlowVehicle
+    ? locations.filter((location) =>
+        location.status === 'Available' &&
+        !vehicles.some((vehicle) => vehicle.status !== 'Delivered' && normalizeLocation(vehicle.currentLocationId ?? '') === normalizeLocation(location.id)) &&
+        (activeFlowVehicle.xParking !== 'Yes' || supportsXParkingLocation(location)),
+      )
+    : [];
+
+  const continueTransferFlow = (answer: string) => {
+    if (!flow) return;
+
+    if (flow.step === 'taking') {
+      if (isNo(answer)) {
+        setFlow(null);
+        addAssistantMessage('Okay. No transfer has been started.');
+        return;
+      }
+      if (isYes(answer)) {
+        setFlow({ ...flow, step: 'destination', selectedDestinationId: undefined });
+        addAssistantMessage('Where are you planning to park it? Choose an available bay below, or type its label (for example, B-47).');
+        return;
+      }
+      addAssistantMessage('Please answer Yes or No: are you taking this vehicle?');
+      return;
+    }
+
+    if (flow.step === 'destination') {
+      const typedBay = normalize(answer);
+      const typedDestination = locations.find((location) =>
+        typedBay === normalize(`${location.zone}-${location.bayNumber}`) ||
+        typedBay === normalize(`${location.zone}-${Number(location.bayNumber)}`) ||
+        typedBay === normalizeLocation(location.id),
+      );
+      const destinationId = flow.selectedDestinationId ?? typedDestination?.id;
+      const destination = availableDestinations.find((location) => location.id === destinationId);
+      if (!destination) {
+        addAssistantMessage('That bay is not available for this vehicle. Choose one of the available bays shown below.');
+        return;
+      }
+      setFlow({ ...flow, step: 'parked', destinationId: destination.id, selectedDestinationId: undefined });
+      addAssistantMessage(`Please park ${activeFlowVehicle?.plateNumber} in ${destination.zone}-${destination.bayNumber}. Have you parked it there?`);
+      return;
+    }
+
+    if (isNo(answer) || /^not yet\b/i.test(answer.trim())) {
+      addAssistantMessage('No transfer has been recorded. Confirm Yes here once the vehicle is physically parked in the selected bay.');
+      return;
+    }
+    if (!isYes(answer)) {
+      addAssistantMessage('Please confirm Yes once it is parked, or choose Not yet. Nothing is recorded before confirmation.');
+      return;
+    }
+    if (!activeFlowVehicle || !flow.destinationId) {
+      setFlow(null);
+      addAssistantMessage('The vehicle or destination is no longer available. Search for the vehicle again to start over.');
+      return;
+    }
+
+    setBusy(true);
+    const destination = locations.find((location) => location.id === flow.destinationId);
+    const completed = onTransfer(
+      activeFlowVehicle.id,
+      flow.destinationId,
+      'Transfer confirmed in VPLM AI assistant after user verified parking.',
+    );
+    if (completed) {
+      setFlow(null);
+      addAssistantMessage(`Transfer recorded: ${activeFlowVehicle.plateNumber} is now assigned to ${destination ? `${destination.zone}-${destination.bayNumber}` : 'the selected bay'}.`);
+    } else {
+      addAssistantMessage('The transfer could not be recorded. Check the selected bay and your transfer permissions, then try again.');
+    }
+    setBusy(false);
+  };
+
+  const findVehicleLookup = (message: string): { handled: boolean; vehicle?: Vehicle; duplicateMatches?: Vehicle[] } => {
+    const normalizedMessage = normalize(message);
+    const activeVehicles = vehicles.filter((vehicle) => vehicle.status !== 'Delivered' && normalize(vehicle.plateNumber));
+    const exactTokens = new Set((message.match(/[A-Z0-9-]+/gi) ?? []).map(normalize));
+    const exactMatches = activeVehicles.filter((vehicle) => exactTokens.has(normalize(vehicle.plateNumber)));
+    const matches = exactMatches.length ? exactMatches : activeVehicles.filter((vehicle) => normalizedMessage.includes(normalize(vehicle.plateNumber)));
+    const longestMatchLength = Math.max(0, ...matches.map((vehicle) => normalize(vehicle.plateNumber).length));
+    const bestMatches = matches.filter((vehicle) => normalize(vehicle.plateNumber).length === longestMatchLength);
+    if (bestMatches.length === 1) return { handled: true, vehicle: bestMatches[0] };
+    if (bestMatches.length > 1) return { handled: true, duplicateMatches: bestMatches };
+
+    const hasLookupIntent = /\b(search|find|lookup|look up|where|vehicle|plate|registration|details|model|color|colour|parked)\b/i.test(message);
+    const hasRegistrationToken = /\b[A-Z0-9-]*\d[A-Z0-9-]*\b/i.test(message);
+    const isRegistrationOnly = /^[A-Z0-9 -]{3,18}$/i.test(message.trim()) && /\d/.test(message);
+    if (isRegistrationOnly || (hasRegistrationToken && hasLookupIntent)) return { handled: true };
+    return { handled: false };
+  };
 
   const sendMessage = async (event?: FormEvent, suggestedMessage?: string) => {
     event?.preventDefault();
@@ -39,14 +158,37 @@ export default function AiAssistant() {
     setInput('');
     setBusy(true);
 
+    if (flow) {
+      continueTransferFlow(message);
+      setBusy(false);
+      return;
+    }
+
+    const lookup = findVehicleLookup(message);
+    if (lookup.handled) {
+      if (lookup.duplicateMatches) {
+        addAssistantMessage(`More than one active vehicle matches that registration: ${lookup.duplicateMatches.map((vehicle) => vehicle.plateNumber).join(', ')}. Please search using the full registration.`);
+      } else if (!lookup.vehicle) {
+        addAssistantMessage('I could not find that registration in the current workspace.');
+      } else {
+        const vehicle = lookup.vehicle;
+        const bay = vehicle.currentLocationId ? locationLabel(vehicle.currentLocationId) : 'not parked in a bay';
+        const details = `${vehicle.plateNumber} — ${vehicle.brand} ${vehicle.model}, ${vehicle.color}. Current bay: ${bay}.`;
+        if (!vehicle.currentLocationId) {
+          addAssistantMessage(`${details} This vehicle has no active bay assignment, so a transfer cannot be started.`);
+        } else if (!canTransfer) {
+          addAssistantMessage(`${details} Your role can look up this vehicle but cannot transfer it.`);
+        } else {
+          setFlow({ vehicleId: vehicle.id, step: 'taking' });
+          addAssistantMessage(`${details}\nAre you taking it?`);
+        }
+      }
+      setBusy(false);
+      return;
+    }
+
     if (!supabase) {
-      setMessages((current) => [
-        ...current,
-        {
-          role: 'assistant',
-          content: 'AI chat requires a configured Supabase connection and a signed-in account. Guest/local mode is not supported for this online assistant.',
-        },
-      ]);
+      addAssistantMessage('AI chat requires a configured Supabase connection and a signed-in account. Guest/local mode is not supported for this online assistant.');
       setBusy(false);
       return;
     }
@@ -59,20 +201,14 @@ export default function AiAssistant() {
       if (typeof data?.reply !== 'string' || !data.reply.trim()) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'The AI service returned an empty response.');
       }
-      setMessages((current) => [...current, { role: 'assistant', content: data.reply }]);
+      addAssistantMessage(data.reply);
     } catch (error) {
       let detail = error instanceof Error ? error.message : 'Unknown error';
       if (typeof error === 'object' && error !== null && 'context' in error && error.context instanceof Response) {
         const responseBody = await error.context.clone().json().catch(() => null) as { error?: unknown } | null;
         if (typeof responseBody?.error === 'string') detail = responseBody.error;
       }
-      setMessages((current) => [
-        ...current,
-        {
-          role: 'assistant',
-          content: `I couldn’t get a reply from the AI assistant. ${detail}`,
-        },
-      ]);
+      addAssistantMessage(`I couldn’t get a reply from the AI assistant. ${detail}`);
     } finally {
       setBusy(false);
     }
@@ -106,7 +242,7 @@ export default function AiAssistant() {
           </header>
 
           <div className="border-b border-border bg-muted/40 px-4 py-2 text-xs leading-relaxed text-muted-foreground">
-            Testing mode: don’t enter confidential, personal, or live vehicle data. Replies are AI-generated and may be incorrect.
+            Vehicle lookups use this workspace. Transfers are recorded only after you confirm the vehicle is parked in its new bay. AI answers may be incorrect.
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
@@ -122,6 +258,50 @@ export default function AiAssistant() {
                 {message.content}
               </div>
             ))}
+
+            {flow?.step === 'taking' && (
+              <div className="flex gap-2">
+                <button type="button" disabled={busy} onClick={() => continueTransferFlow('Yes')} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">Yes</button>
+                <button type="button" disabled={busy} onClick={() => continueTransferFlow('No')} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold disabled:opacity-50">No</button>
+              </div>
+            )}
+
+            {flow?.step === 'destination' && (
+              <div className="space-y-2 rounded-xl bg-muted p-3">
+                <label className="block text-xs font-medium" htmlFor="assistant-destination">Available destination bay</label>
+                <select
+                  id="assistant-destination"
+                  value={flow.selectedDestinationId ?? ''}
+                  onChange={(event) => setFlow({ ...flow, selectedDestinationId: event.target.value || undefined })}
+                  className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">Select a bay</option>
+                  {availableDestinations.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.zone}-{location.bayNumber}{location.section ? ` · ${location.section}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {availableDestinations.length === 0 && <p className="text-xs text-muted-foreground">No eligible bays are currently available.</p>}
+                <button
+                  type="button"
+                  disabled={busy || (!flow.selectedDestinationId && availableDestinations.length === 0)}
+                  onClick={() => continueTransferFlow(flow.selectedDestinationId ?? '')}
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                >
+                  Confirm destination
+                </button>
+              </div>
+            )}
+
+            {flow?.step === 'parked' && (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={busy} onClick={() => continueTransferFlow('Yes')} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">Yes, parked</button>
+                <button type="button" disabled={busy} onClick={() => continueTransferFlow('Not yet')} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold disabled:opacity-50">Not yet</button>
+                <button type="button" disabled={busy} onClick={() => { setFlow(null); addAssistantMessage('Transfer cancelled. No vehicle or bay data was changed.'); }} className="rounded-lg border border-border px-4 py-2 text-sm disabled:opacity-50">Cancel</button>
+              </div>
+            )}
+
             {messages.length === 1 && (
               <div className="space-y-2 pt-1">
                 <p className="text-xs text-muted-foreground">Try asking:</p>
@@ -161,7 +341,7 @@ export default function AiAssistant() {
                   void sendMessage();
                 }
               }}
-              placeholder="Ask about a workflow…"
+              placeholder={flow?.step === 'destination' ? 'Or type a bay, e.g. B-47…' : 'Ask about a workflow or vehicle…'}
               className="max-h-28 min-h-10 flex-1 resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <button

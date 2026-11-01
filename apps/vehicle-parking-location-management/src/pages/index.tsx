@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { CarFront, Lock, ShieldCheck, UserRound } from 'lucide-react';
 import { motion } from 'motion/react';
-import AiAssistant from '@/components/ai-assistant';
 import { ParkingApp } from '@/components/parking-app';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -427,13 +426,10 @@ export default function HomePage() {
   }
 
   return (
-    <>
-      <ParkingApp
-        signedInUserId={typeof session.user.user_metadata.login_id === 'string' ? session.user.user_metadata.login_id : session.user.email ?? 'Signed-in user'}
-        initialCloudRevision={workspaceRevision}
-        onExit={() => { void client.auth.signOut(); }}
-      />
-      <AiAssistant />
-    </>
+    <ParkingApp
+      signedInUserId={typeof session.user.user_metadata.login_id === 'string' ? session.user.user_metadata.login_id : session.user.email ?? 'Signed-in user'}
+      initialCloudRevision={workspaceRevision}
+      onExit={() => { void client.auth.signOut(); }}
+    />
   );
 }
