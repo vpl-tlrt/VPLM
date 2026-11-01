@@ -8,7 +8,6 @@ import type { ParkingLocation, Vehicle } from '@/lib/parking-data';
 import { loadRoadTestAudit, loadRoadTestNotifications, loadRoadTests, roadTestLocationLabel, saveRoadTestData, type RoadTestAuditEntry, type RoadTestNotification, type RoadTestPriority, type RoadTestRecord, type RoadTestResult, type RoadTestType } from '@/lib/road-test-data';
 import { useUser } from '@/hooks/use-user';
 import { supabase } from '@/lib/supabase';
-import { appStorageKey } from '@/lib/local-storage-scope';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
