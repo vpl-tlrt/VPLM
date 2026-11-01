@@ -280,8 +280,8 @@ Deno.serve(async (request) => {
       if (membership.role === 'Administrator' && await administratorCount(adminClient) <= 1) {
         return respond({ error: 'The last administrator cannot be removed.' }, 409);
       }
-      const { error: sessionError } = await adminClient.auth.admin.signOut(userId, 'global');
-      if (sessionError) throw sessionError;
+      // admin.signOut expects an access JWT, not a user ID.
+      // Delete the account directly; existing access JWTs expire naturally.
       const { error } = await adminClient.auth.admin.deleteUser(userId);
       if (error) throw error;
       return respond({ ok: true });
