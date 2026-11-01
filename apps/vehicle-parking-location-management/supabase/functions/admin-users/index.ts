@@ -105,7 +105,6 @@ Deno.serve(async (request) => {
     const { data: authData, error: authError } = await publicClient.auth.getUser(accessToken);
     if (authError || !authData.user) return respond({ error: 'Your session is invalid or expired.' }, 401);
     const callerMembership = await getMembership(adminClient, authData.user.id);
-    if (callerMembership?.role !== 'Administrator') return respond({ error: 'Administrator access is required.' }, 403);
 
     let input: unknown;
     try {
@@ -114,6 +113,23 @@ Deno.serve(async (request) => {
       return respond({ error: 'The request body must be valid JSON.' }, 400);
     }
     if (!isRecord(input) || typeof input.action !== 'string') return respond({ error: 'A valid action is required.' }, 400);
+
+    if (input.action === 'assignees') {
+      if (!callerMembership) return respond({ error: 'Workspace access is required.' }, 403);
+      const { data: memberships, error } = await adminClient.from('workspace_members')
+        .select('user_id, login_id, user_name')
+        .order('user_name', { ascending: true });
+      if (error) throw error;
+      return respond({
+        users: (memberships ?? []).map((member) => ({
+          id: member.user_id,
+          name: member.user_name?.trim() || member.login_id || 'Workspace user',
+          loginId: member.login_id ?? '',
+        })),
+      });
+    }
+
+    if (callerMembership?.role !== 'Administrator') return respond({ error: 'Administrator access is required.' }, 403);
 
     if (input.action === 'list') {
       const [{ data: memberships, error: membershipError }, allUsers] = await Promise.all([
