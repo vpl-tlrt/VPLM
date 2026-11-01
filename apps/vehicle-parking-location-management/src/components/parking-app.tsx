@@ -1109,6 +1109,109 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
   const [newUserRole, setNewUserRole] = useState<Role>('Operator');
   const [editingUserId, setEditingUserId] = useState<string>();
   const [temporaryCredentials, setTemporaryCredentials] = useState<{ loginId: string; password: string }>();
+
+  type BulkUserRow = { userId: string; loginId: string; name: string; mobileNumber: string; email: string; role: Role; error?: string };
+  const [bulkRows, setBulkRows] = useState<BulkUserRow[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResults, setBulkResults] = useState<string[]>([]);
+  const [showBulkUsers, setShowBulkUsers] = useState(false);
+  const csvCell = (value: string) => '"' + value.replace(/"/g, '""') + '"';
+  const downloadBulkTemplate = () => {
+    const header = ['account_id', 'user_id', 'full_name', 'mobile_number', 'email', 'role'];
+    const lines = [header, ...users.map((user) => [user.id, user.loginId, user.name, user.mobileNumber, user.email.endsWith('@users.vplm.invalid') ? '' : user.email, user.role ?? ''])];
+    const csv = '\uFEFF' + lines.map((line) => line.map((cell) => csvCell(cell ?? '')).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'vplm-users-bulk-template.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const parseBulkCsv = (source: string): string[][] => {
+    const rows: string[][] = [];
+    let row: string[] = [], cell = '', quoted = false;
+    for (let i = 0; i < source.length; i += 1) {
+      const char = source[i];
+      if (char === '"') {
+        if (quoted && source[i + 1] === '"') { cell += '"'; i += 1; }
+        else quoted = !quoted;
+      } else if (char === ',' && !quoted) { row.push(cell); cell = ''; }
+      else if ((char === '\n' || char === '\r') && !quoted) {
+        if (char === '\r' && source[i + 1] === '\n') i += 1;
+        row.push(cell); if (row.some((value) => value.trim())) rows.push(row);
+        row = []; cell = '';
+      } else cell += char;
+    }
+    if (quoted) throw new Error('The CSV contains an unclosed quoted field.');
+    row.push(cell); if (row.some((value) => value.trim())) rows.push(row);
+    return rows;
+  };
+  const importBulkCsv = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setBulkResults([]);
+    try {
+      if (file.size > 2_000_000) throw new Error('CSV file must be smaller than 2 MB.');
+      const records = parseBulkCsv((await file.text()).replace(/^\uFEFF/, ''));
+      const expected = ['account_id', 'user_id', 'full_name', 'mobile_number', 'email', 'role'];
+      if (records.length < 2 || expected.some((key, index) => records[0][index]?.trim().toLowerCase() !== key) || records[0].length !== expected.length) {
+        throw new Error('Use the downloaded CSV template with all six columns in the original order.');
+      }
+      if (records.length > 501) throw new Error('Import a maximum of 500 users per file.');
+      const ids = new Set<string>(), logins = new Set<string>(), mobiles = new Set<string>();
+      const parsed: BulkUserRow[] = records.slice(1).map((values, index) => {
+        const [userId = '', loginId = '', name = '', mobileNumber = '', email = '', rawRole = ''] = values.map((value) => value.trim());
+        const errors: string[] = [];
+        if (values.length !== 6) errors.push('Expected six columns');
+        if (userId && !users.some((user) => user.id === userId)) errors.push('Unknown account ID');
+        if (!/^[a-z0-9][a-z0-9._-]{2,31}$/i.test(loginId)) errors.push('Invalid User ID');
+        if (!name || name.length > 120) errors.push('Invalid full name');
+        if (!/^\\+[1-9]\d{7,14}$/.test(mobileNumber)) errors.push('Invalid mobile number');
+        if (email && !/^[^\s@]+@[^\s@]+\\.[^\s@]+$/.test(email)) errors.push('Invalid email');
+        if (!appRoles.includes(rawRole as Role)) errors.push('Invalid role');
+        if (userId && ids.has(userId)) errors.push('Duplicate account ID in file');
+        if (logins.has(loginId.toLowerCase())) errors.push('Duplicate User ID in file');
+        if (mobiles.has(mobileNumber)) errors.push('Duplicate mobile number in file');
+        if (userId) ids.add(userId);
+        logins.add(loginId.toLowerCase()); mobiles.add(mobileNumber);
+        if (userId === actorId && rawRole !== 'Administrator') errors.push('Cannot change your own administrator role');
+        return { userId, loginId, name, mobileNumber, email, role: rawRole as Role, error: errors.length ? 'Row ' + (index + 2) + ': ' + errors.join('; ') : undefined };
+      });
+      // Avoid a changed ID colliding with an existing account not present in the import.
+      for (const row of parsed) {
+        const conflict = users.find((user) => user.id !== row.userId && (user.loginId.toLowerCase() === row.loginId.toLowerCase() || (user.mobileNumber && user.mobileNumber === row.mobileNumber)));
+        if (conflict && !parsed.some((other) => other.userId === conflict.id && other.loginId.toLowerCase() !== row.loginId.toLowerCase() && other.mobileNumber !== row.mobileNumber)) {
+          row.error = [row.error, 'User ID or mobile number already belongs to another account'].filter(Boolean).join('; ');
+        }
+      }
+      setBulkRows(parsed);
+    } catch (error) {
+      setBulkRows([]);
+      toast.error(error instanceof Error ? error.message : 'Unable to read CSV.');
+    }
+  };
+  const applyBulkUsers = async () => {
+    if (!bulkRows.length || bulkRows.some((row) => row.error) || bulkBusy) return;
+    setBulkBusy(true);
+    const results: string[] = [];
+    try {
+      for (const row of bulkRows) {
+        try {
+          await invokeUserAdmin({ action: row.userId ? 'update-details' : 'create', ...(row.userId ? { userId: row.userId } : {}), name: row.name, loginId: row.loginId, mobileNumber: row.mobileNumber, email: row.email, role: row.role });
+          results.push('SUCCESS: ' + row.loginId + (row.userId ? ' updated' : ' created'));
+        } catch (error) {
+          results.push('FAILED: ' + row.loginId + ' — ' + (error instanceof Error ? error.message : 'Unknown error'));
+        }
+      }
+      setBulkResults(results);
+      setBulkRows([]);
+      await loadManagedUsers();
+      logAudit('Bulk update', 'Users', results.filter((result) => result.startsWith('SUCCESS')).length + ' of ' + results.length + ' users processed');
+      toast.success(results.filter((result) => result.startsWith('SUCCESS')).length + ' of ' + results.length + ' user records saved.');
+    } finally { setBulkBusy(false); }
+  };
+
   const loadManagedUsers = useCallback(async () => {
     setUsersLoading(true);
     setUsersError('');
@@ -1423,6 +1526,12 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
   <TabsContent value="history" className="space-y-3"><div className="grid gap-3 sm:grid-cols-3"><Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Movements</p><p className="text-3xl font-bold">{movements.length}</p></CardContent></Card><Card><CardContent className="p-4"><p className="text-sm text-muted-foreground">Audit events</p><p className="text-3xl font-bold">{auditEvents.length}</p></CardContent></Card></div>{auditEvents.map((event: AuditEvent) => <Card key={event.id}><CardContent className="flex items-center gap-3 p-4"><History/><div className="flex-1"><p className="font-semibold">{event.action} · {event.entity}</p><p className="text-sm text-muted-foreground">{event.detail} · {event.actor}</p></div><time className="text-xs text-muted-foreground">{format(new Date(event.timestamp), 'dd MMM, HH:mm')}</time></CardContent></Card>)}</TabsContent>
   {role === 'Administrator' && <TabsContent value="users" className="space-y-3">
     <div className="flex justify-end"><Button disabled={usersBusyId === 'new-user'} onClick={() => { setEditingUserId(undefined); setShowAddUser((current: boolean) => !current); }}><Plus/>{showAddUser ? 'Cancel' : 'Add user'}</Button></div>
+    <Card><CardHeader><CardTitle>Bulk user import / update</CardTitle><CardDescription>Download the current users as a CSV template, edit in Excel, then upload to preview. Keep account_id unchanged to update an existing account; leave it blank to create a new user. Changes are applied only after confirmation.</CardDescription></CardHeader><CardContent className="space-y-3">
+      <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={downloadBulkTemplate} disabled={usersLoading || bulkBusy}><Download/>Download CSV template</Button><Button variant="outline" onClick={() => setShowBulkUsers((current) => !current)}>{showBulkUsers ? 'Hide bulk import' : 'Import CSV'}</Button></div>
+      {showBulkUsers && <><Input type="file" accept=".csv,text/csv" disabled={bulkBusy} onChange={(event: ChangeEvent<HTMLInputElement>) => void importBulkCsv(event)} aria-label="Upload bulk users CSV"/>
+      {bulkRows.length > 0 && <div className="space-y-2"><p className="text-sm font-medium">{bulkRows.length} rows ready for review · {bulkRows.filter((row) => row.error).length} validation errors</p><div className="max-h-72 overflow-auto rounded border"><table className="w-full text-left text-xs"><thead><tr><th className="p-2">Action</th><th className="p-2">User ID</th><th className="p-2">Name</th><th className="p-2">Role</th><th className="p-2">Validation</th></tr></thead><tbody>{bulkRows.map((row, index) => <tr key={index} className="border-t"><td className="p-2">{row.userId ? 'Update' : 'Create'}</td><td className="p-2">{row.loginId}</td><td className="p-2">{row.name}</td><td className="p-2">{row.role}</td><td className="p-2">{row.error ? <span className="text-destructive">{row.error}</span> : 'Ready'}</td></tr>)}</tbody></table></div><Button disabled={bulkBusy || bulkRows.some((row) => row.error)} onClick={() => { if (window.confirm('Apply ' + bulkRows.length + ' user changes? This will update live user accounts.')) void applyBulkUsers(); }}>{bulkBusy ? 'Updating users…' : 'Confirm and apply ' + bulkRows.length + ' users'}</Button></div>}
+      {bulkResults.length > 0 && <div className="max-h-48 overflow-auto rounded border p-3 text-xs" role="status">{bulkResults.map((result, index) => <p key={index} className={result.startsWith('FAILED') ? 'text-destructive' : ''}>{result}</p>)}</div>}</>}
+    </CardContent></Card>
     {temporaryCredentials && <Card className="border-primary"><CardHeader><CardTitle>New user sign-in details</CardTitle><CardDescription>Share these sign-in details securely. The user can change it later using the password-recovery option.</CardDescription></CardHeader><CardContent className="space-y-2 text-sm"><p>User ID: <code>{temporaryCredentials.loginId}</code></p><p>Default login password: <code className="break-all">{temporaryCredentials.password}</code></p></CardContent></Card>}
     {showAddUser && <Card><CardHeader><CardTitle>{editingUserId ? 'Update registered user' : 'Add user and assign role'}</CardTitle><CardDescription>Create an account or link an existing email account without changing its password. Use an E.164 mobile number with country code for WhatsApp recovery.</CardDescription></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       <div className="space-y-2"><Label htmlFor="new-user-name">User name</Label><Input id="new-user-name" required value={newUserName} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserName(event.target.value)} placeholder="Enter full name" /></div>
