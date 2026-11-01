@@ -11,6 +11,19 @@ type AppAccess = {
   can: (feature: AccessFeature, action: AccessAction) => boolean;
 };
 
+const CACHED_ACCESS_PREFIX = 'vplm-cached-access-v1:';
+const validRoles: AppRole[] = ['Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Guest Users', 'Others'];
+
+const readCachedRole = (userObjectId?: string): AppRole | undefined => {
+  if (!userObjectId || typeof window === 'undefined') return undefined;
+  try {
+    const role = window.localStorage.getItem(`${CACHED_ACCESS_PREFIX}${userObjectId}`);
+    return validRoles.includes(role as AppRole) ? role as AppRole : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const roleCan = (role: AppRole, feature: AccessFeature, action: AccessAction) => {
   if (role === 'Administrator') return true;
   if (role === 'Supervisor') return feature !== 'ApplicationSettings' && feature !== 'RolePermissions';
@@ -19,9 +32,19 @@ const roleCan = (role: AppRole, feature: AccessFeature, action: AccessAction) =>
 };
 
 export const useAppAccess = (userPrincipalName: string | undefined, userObjectId?: string, localGuest = false) => {
+  const cachedRole = readCachedRole(userObjectId);
+  const cachedAccess: AppAccess | undefined = cachedRole && userObjectId
+    ? {
+        appUser: { id: userObjectId, applicationUserName: userPrincipalName?.split('@')[0] ?? 'Operator', email: userPrincipalName ?? '' },
+        role: cachedRole,
+        can: (feature: AccessFeature, action: AccessAction) => roleCan(cachedRole, feature, action),
+      }
+    : undefined;
   return useQuery<AppAccess>({
     queryKey: ['app-access', userPrincipalName, userObjectId, localGuest],
     enabled: Boolean(userPrincipalName || userObjectId || localGuest),
+    initialData: cachedAccess,
+    initialDataUpdatedAt: 0,
     queryFn: async () => {
       if (localGuest) {
         const role: AppRole = 'Guest Users';
@@ -42,6 +65,11 @@ export const useAppAccess = (userPrincipalName: string | undefined, userObjectId
         throw new Error('Workspace membership has an invalid role.');
       }
       const role = data.role as AppRole;
+      try {
+        window.localStorage.setItem(`${CACHED_ACCESS_PREFIX}${userObjectId}`, role);
+      } catch {
+        // Offline operation remains available even if browser storage is restricted.
+      }
       return {
         appUser: { id: userObjectId, applicationUserName: userPrincipalName?.split('@')[0] ?? 'Operator', email: userPrincipalName ?? '' },
         role,
