@@ -35,13 +35,13 @@ const elapsedLabel = (test: RoadTestRecord, now: number) => {
   const clock = [hours, minutes, seconds].map((value: number) => String(value).padStart(2, '0')).join(':');
   return days ? `${days}d ${clock}` : clock;
 };
-type Props = { vehicles: Vehicle[]; locations: ParkingLocation[]; actor: string; canCreateAssignment: boolean; initialVehicleId?: string; onInitialVehicleHandled: () => void; onVehicleLocationChange: (vehicleId: string, fromId: string | undefined, toId: string | undefined, out: boolean) => void; onLocateVehicle: (vehicleId: string) => void; onNotificationSound: (kind: 'assignment' | 'success' | 'urgent' | 'general') => void };
+type Props = { vehicles: Vehicle[]; locations: ParkingLocation[]; actor: string; canCreateAssignment: boolean; initialVehicleId?: string; initialTestType?: RoadTestType; onInitialVehicleHandled: () => void; onVehicleLocationChange: (vehicleId: string, fromId: string | undefined, toId: string | undefined, out: boolean) => void; onLocateVehicle: (vehicleId: string) => void; onNotificationSound: (kind: 'assignment' | 'success' | 'urgent' | 'general') => void };
 type Form = { vehicleId: string; job: string; purpose: string; assignedTo: string; priority: RoadTestPriority; testType: RoadTestType; remarks: string };
 const blank: Form = { vehicleId: '', job: '', purpose: '', assignedTo: '', priority: 'Normal', testType: 'Initial Road Test', remarks: '' };
 const badge = (status: string) => status === 'Completed' || status === 'Pass' ? 'default' : status === 'Fail' || status === 'Cancelled' ? 'destructive' : status === 'In Road Test' ? 'secondary' : 'outline';
 const csvCell = (value: string | number | undefined) => `"${String(value ?? '').replaceAll('"', '""')}"`;
 
-export function RoadTestManagement({ vehicles, locations, actor, canCreateAssignment, initialVehicleId, onInitialVehicleHandled, onVehicleLocationChange, onLocateVehicle, onNotificationSound }: Props) {
+export function RoadTestManagement({ vehicles, locations, actor, canCreateAssignment, initialVehicleId, initialTestType, onInitialVehicleHandled, onVehicleLocationChange, onLocateVehicle, onNotificationSound }: Props) {
   const [tests, setTests] = useState<RoadTestRecord[]>(loadRoadTests);
   const [audit, setAudit] = useState<RoadTestAuditEntry[]>(loadRoadTestAudit);
   const [notifications, setNotifications] = useState<RoadTestNotification[]>(loadRoadTestNotifications);
@@ -80,11 +80,11 @@ export function RoadTestManagement({ vehicles, locations, actor, canCreateAssign
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   useEffect(() => {
     if (!initialVehicleId) return;
-    setForm((current: Form) => ({ ...current, vehicleId: initialVehicleId }));
+    setForm((current: Form) => ({ ...current, vehicleId: initialVehicleId, testType: initialTestType ?? current.testType }));
     setVehicleQuery(vehicles.find((item: Vehicle) => item.id === initialVehicleId)?.plateNumber ?? '');
     setTab('assign');
     onInitialVehicleHandled();
-  }, [initialVehicleId, onInitialVehicleHandled, vehicles]);
+  }, [initialTestType, initialVehicleId, onInitialVehicleHandled, vehicles]);
   useEffect(() => {
     saveRoadTestData(tests, audit, notifications);
   }, [tests, audit, notifications]);
