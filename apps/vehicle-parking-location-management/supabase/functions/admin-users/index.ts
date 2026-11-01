@@ -118,7 +118,7 @@ Deno.serve(async (request) => {
       return respond({
         users: (memberships ?? []).map((member) => ({
           id: member.user_id,
-          name: member.user_name?.trim() || member.login_id || 'Workspace user',
+          name: member.user_name?.trim() || 'Workspace user',
           loginId: member.login_id ?? '',
         })),
       });
