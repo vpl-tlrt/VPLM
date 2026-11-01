@@ -105,8 +105,18 @@ Deno.serve(async (request) => {
     if (!response.ok) {
       const status = response.status;
       if (status === 429) return respond({ error: 'The AI free-tier request limit has been reached. Please try again later.' }, 429);
-      console.error('Gemini request failed with status:', status);
-      return respond({ error: 'The AI provider could not complete the request. Please try again later.' }, 502);
+      const providerBody: unknown = await response.json().catch(() => null);
+      const providerMessage = typeof providerBody === 'object' && providerBody !== null &&
+        'error' in providerBody && typeof providerBody.error === 'object' && providerBody.error !== null &&
+        'message' in providerBody.error && typeof providerBody.error.message === 'string'
+        ? providerBody.error.message.slice(0, 400)
+        : '';
+      console.error('Gemini request failed:', { status, model, message: providerMessage || 'No provider message.' });
+      return respond({
+        error: providerMessage
+          ? `The AI provider returned HTTP ${status}: ${providerMessage}`
+          : `The AI provider returned HTTP ${status}. Please try again later.`,
+      }, 502);
     }
 
     const result: unknown = await response.json();
