@@ -68,6 +68,7 @@ type XParkingOccupant = { plateNumber: string; model: string };
 const appRoles: Role[] = ['Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Guest Users', 'Others'];
 const roleRank: Record<Role, number> = { Operator: 1, Drivers: 1, 'Guest Users': 1, Others: 1, TechnicalLeader: 2, Supervisor: 3, Administrator: 4 };
 const roleLabel = (role: Role) => role === 'TechnicalLeader' ? 'Technical Leader' : role;
+const normalizeBulkRole = (value: string): Role | undefined => appRoles.find((role) => role.toLowerCase().replace(/[^a-z0-9]/g, '') === value.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
 const rolesWithoutRoadTests: Role[] = ['Drivers', 'Guest Users', 'Others'];
 type ManagedUser = { id: string; name: string; email: string; loginId: string; mobileNumber: string; role: Role | null };
 type UserAdminResponse = { users?: ManagedUser[]; existing?: boolean; loginId?: string; temporaryPassword?: string | null };
@@ -1121,7 +1122,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
   const csvCell = (value: string) => '"' + value.replace(/"/g, '""') + '"';
   const downloadBulkTemplate = () => {
     const header = ['account_id', 'user_id', 'full_name', 'mobile_number', 'email', 'role'];
-    const lines = [header, ...users.map((user) => [user.id, user.loginId, user.name, user.mobileNumber, user.email.endsWith('@users.vplm.invalid') ? '' : user.email, user.role ?? ''])];
+    const lines = [header, ...users.map((user) => [user.id, user.loginId, user.name, user.mobileNumber, user.email.endsWith('@users.vplm.invalid') ? '' : user.email, user.role ? roleLabel(user.role) : ''])];
     const csv = '\uFEFF' + lines.map((line) => line.map((cell) => csvCell(cell ?? '')).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a');
@@ -1170,7 +1171,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
         const name = inputName || existing?.name || '';
         const mobileNumber = inputMobile || existing?.mobileNumber || '';
         const email = inputEmail || (existing?.email.endsWith('@users.vplm.invalid') ? '' : existing?.email) || '';
-        const role = (inputRole || existing?.role || '') as Role;
+        const role = normalizeBulkRole(inputRole || existing?.role || '') ?? (inputRole as Role);
         const errors: string[] = [];
         if (values.length !== 6) errors.push('Expected six columns');
         if (userId && !existing) errors.push('Unknown account ID');
@@ -1178,7 +1179,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
         if (!name || name.length > 120) errors.push('Invalid full name');
         if (!/^\+[1-9]\d{7,14}$/.test(mobileNumber)) errors.push('Invalid mobile number (use + followed by country code and digits)');
         if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Invalid email');
-        if (!appRoles.includes(role)) errors.push('Invalid role');
+        if (!appRoles.includes(role)) errors.push('Invalid role (use Technical Leader, Administrator, Supervisor, Operator, Drivers, Guest Users or Others)');
         if (userId && ids.has(userId)) errors.push('Duplicate account ID in file');
         if (loginId && logins.has(loginId.toLowerCase())) errors.push('Duplicate User ID in file');
         if (mobileNumber && mobiles.has(mobileNumber)) errors.push('Duplicate mobile number in file');
