@@ -66,6 +66,7 @@ const createParkingLayout = (): ParkingLocation[] => {
     'BP1',
     'BP2',
     'BP3',
+    'Workshop Centre Bay',
   ].map((name) => ({
     id: `loc-container-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     zone: name,
@@ -73,9 +74,9 @@ const createParkingLayout = (): ParkingLocation[] => {
     lane: 'Container',
     section: 'Live Parking Garage',
     direction: 'Two-way',
-    capacity: 1,
+    capacity: 15,
     status: 'Available',
-    remarks: 'Live Parking Garage container; no bay number.',
+    remarks: name === 'Workshop Centre Bay' ? 'Urgent / Top Priority Vehicles Only; no bay number.' : 'Live Parking Garage container; no bay number.',
   }));
 
   return [...zoneA, ...zoneB, ...zoneC, ...workshop, ...reception, ...liveGarageContainers];
@@ -109,7 +110,7 @@ export const reconcileParkingLayout = (savedLocations?: ParkingLocation[]): Park
   const defaultBayKeys = new Set(initialLocations.map(bayKey));
   const restoredDefaults = initialLocations.map((location: ParkingLocation) => {
     const saved = savedById.get(location.id) ?? savedByBay.get(bayKey(location));
-    return saved ? { ...location, ...saved, id: location.id, zone: location.zone, bayNumber: location.bayNumber, lane: location.lane, section: location.section, direction: location.direction } : location;
+    return saved ? { ...location, ...saved, id: location.id, zone: location.zone, bayNumber: location.bayNumber, lane: location.lane, section: location.section, direction: location.direction, capacity: isLiveGarageContainer(location) ? 15 : saved.capacity } : location;
   });
   const customLocations = savedLocations
     .map((location: ParkingLocation) => ({ ...location, id: mapParkingLocationId(location.id) ?? location.id }))
