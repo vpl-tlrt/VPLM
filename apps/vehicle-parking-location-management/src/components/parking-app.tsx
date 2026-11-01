@@ -1162,27 +1162,41 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
       if (records.length > 501) throw new Error('Import a maximum of 500 users per file.');
       const ids = new Set<string>(), logins = new Set<string>(), mobiles = new Set<string>();
       const parsed: BulkUserRow[] = records.slice(1).map((values, index) => {
-        const [userId = '', loginId = '', name = '', mobileNumber = '', email = '', rawRole = ''] = values.map((value) => value.trim());
+        const [userId = '', inputLoginId = '', inputName = '', inputMobile = '', inputEmail = '', inputRole = ''] = values.map((value) => value.trim());
+        const existing = users.find((user) => user.id === userId);
+        const loginId = inputLoginId || existing?.loginId || '';
+        const name = inputName || existing?.name || '';
+        const mobileNumber = inputMobile || existing?.mobileNumber || '';
+        const email = inputEmail || (existing?.email.endsWith('@users.vplm.invalid') ? '' : existing?.email) || '';
+        const role = (inputRole || existing?.role || '') as Role;
         const errors: string[] = [];
         if (values.length !== 6) errors.push('Expected six columns');
-        if (userId && !users.some((user) => user.id === userId)) errors.push('Unknown account ID');
-        if (!/^[a-z0-9][a-z0-9._-]{2,31}$/i.test(loginId)) errors.push('Invalid User ID');
+        if (userId && !existing) errors.push('Unknown account ID');
+        if (!/^[a-z0-9][a-z0-9._-]{2,31}$/i.test(loginId)) errors.push('Invalid User ID (3–32 letters, numbers, dot, underscore or hyphen)');
         if (!name || name.length > 120) errors.push('Invalid full name');
-        if (!/^\\+[1-9]\d{7,14}$/.test(mobileNumber)) errors.push('Invalid mobile number');
-        if (email && !/^[^\s@]+@[^\s@]+\\.[^\s@]+$/.test(email)) errors.push('Invalid email');
-        if (!appRoles.includes(rawRole as Role)) errors.push('Invalid role');
+        if (!/^\+[1-9]\d{7,14}$/.test(mobileNumber)) errors.push('Invalid mobile number (use + followed by country code and digits)');
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Invalid email');
+        if (!appRoles.includes(role)) errors.push('Invalid role');
         if (userId && ids.has(userId)) errors.push('Duplicate account ID in file');
-        if (logins.has(loginId.toLowerCase())) errors.push('Duplicate User ID in file');
-        if (mobiles.has(mobileNumber)) errors.push('Duplicate mobile number in file');
+        if (loginId && logins.has(loginId.toLowerCase())) errors.push('Duplicate User ID in file');
+        if (mobileNumber && mobiles.has(mobileNumber)) errors.push('Duplicate mobile number in file');
         if (userId) ids.add(userId);
-        logins.add(loginId.toLowerCase()); mobiles.add(mobileNumber);
-        if (userId === actorId && rawRole !== 'Administrator') errors.push('Cannot change your own administrator role');
-        return { userId, loginId, name, mobileNumber, email, role: rawRole as Role, error: errors.length ? 'Row ' + (index + 2) + ': ' + errors.join('; ') : undefined };
+        if (loginId) logins.add(loginId.toLowerCase());
+        if (mobileNumber) mobiles.add(mobileNumber);
+        if (userId === actorId && role !== 'Administrator') errors.push('Cannot change your own administrator role');
+        return { userId, loginId, name, mobileNumber, email, role, error: errors.length ? 'Row ' + (index + 2) + ': ' + errors.join('; ') : undefined };
       });
-      // Avoid a changed ID colliding with an existing account not present in the import.
+      // Each existing account can retain its own User ID/mobile; never treat that as a duplicate.
+      // Reject collisions with accounts not included in the upload, or whose values remain unchanged.
       for (const row of parsed) {
-        const conflict = users.find((user) => user.id !== row.userId && (user.loginId.toLowerCase() === row.loginId.toLowerCase() || (user.mobileNumber && user.mobileNumber === row.mobileNumber)));
-        if (conflict && !parsed.some((other) => other.userId === conflict.id && other.loginId.toLowerCase() !== row.loginId.toLowerCase() && other.mobileNumber !== row.mobileNumber)) {
+        const conflicts = users.filter((user) => user.id !== row.userId &&
+          (user.loginId.toLowerCase() === row.loginId.toLowerCase() || (user.mobileNumber && user.mobileNumber === row.mobileNumber)));
+        if (conflicts.some((user) => {
+          const updatedOwner = parsed.find((other) => other.userId === user.id);
+          return !updatedOwner ||
+            (user.loginId.toLowerCase() === row.loginId.toLowerCase() && updatedOwner.loginId.toLowerCase() === user.loginId.toLowerCase()) ||
+            (user.mobileNumber === row.mobileNumber && updatedOwner.mobileNumber === user.mobileNumber);
+        })) {
           row.error = [row.error, 'User ID or mobile number already belongs to another account'].filter(Boolean).join('; ');
         }
       }
