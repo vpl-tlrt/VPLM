@@ -33,6 +33,7 @@ const isRole = (value: unknown): value is Role =>
   typeof value === 'string' && roles.some((role) => role === value);
 const isLoginId = (value: string) => /^[a-z0-9][a-z0-9._-]{2,31}$/i.test(value);
 const isMobileNumber = (value: string) => /^\+[1-9]\d{7,14}$/.test(value);
+const DEFAULT_LOGIN_PASSWORD = 'Park@123';
 
 const readKey = (jsonName: string, legacyName: string): string => {
   const raw = Deno.env.get(jsonName);
@@ -174,7 +175,7 @@ Deno.serve(async (request) => {
         if (error) throw error;
         userId = existingUser.id;
       } else {
-        temporaryPassword = newTemporaryPassword();
+        temporaryPassword = DEFAULT_LOGIN_PASSWORD;
         const accountEmail = email || `user-${crypto.randomUUID()}@users.vplm.invalid`;
         const { data, error } = await adminClient.auth.admin.createUser({
           email: accountEmail,
@@ -182,7 +183,7 @@ Deno.serve(async (request) => {
           phone: mobileNumber,
           phone_confirm: false,
           password: temporaryPassword,
-          user_metadata: { full_name: name, login_id: loginId, must_change_password: true },
+          user_metadata: { full_name: name, login_id: loginId },
         });
         if (error) throw error;
         if (!data.user) throw new Error('Supabase did not return the new user account.');
