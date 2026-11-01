@@ -332,14 +332,12 @@ export default function HomePage() {
       if (error) setWorkspaceError(error.message);
       setSession(data.session);
       if (isPasswordSetupUrl()) setPasswordSetup(true);
-      if (data.session?.user.user_metadata.must_change_password === true) setPasswordSetup(true);
       setSessionLoaded(true);
     };
     void initializeSession();
     const { data: listener } = client.auth.onAuthStateChange((event, nextSession) => {
       queryClient.removeQueries({ queryKey: ['authenticated-user'] });
       setSession(nextSession);
-      if (nextSession?.user.user_metadata.must_change_password === true) setPasswordSetup(true);
       if (event === 'PASSWORD_RECOVERY') setPasswordSetup(true);
       if (!nextSession) clearWorkspaceSnapshot();
     });
