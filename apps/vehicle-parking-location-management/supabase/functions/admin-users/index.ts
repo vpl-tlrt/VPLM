@@ -112,7 +112,7 @@ Deno.serve(async (request) => {
     if (input.action === 'assignees') {
       if (!callerMembership) return respond({ error: 'Workspace access is required.' }, 403);
       const { data: memberships, error } = await adminClient.from('workspace_members')
-        .select('user_id, login_id, user_name')
+        .select('user_id, login_id, user_name, role')
         .order('user_name', { ascending: true });
       if (error) throw error;
       return respond({
@@ -120,6 +120,7 @@ Deno.serve(async (request) => {
           id: member.user_id,
           name: member.user_name?.trim() || 'Workspace user',
           loginId: member.login_id ?? '',
+          role: member.role,
         })),
       });
     }
