@@ -7,7 +7,8 @@ export function useOnlineUsers(user: { id: string; name: string; role: string } 
   const [connected, setConnected] = useState(false);
   useEffect(() => {
     if (!supabase || !user?.id) { setUsers([]); setConnected(false); return; }
-    const channel = supabase.channel('vplm-online-users', { config: { presence: { key: user.id } } });
+    const client = supabase;
+    const channel = client.channel('vplm-online-users', { config: { presence: { key: user.id } } });
     const refresh = () => {
       const entries = Object.values(channel.presenceState<OnlineUser>()).flat();
       const unique = new Map<string, OnlineUser>();
@@ -20,7 +21,7 @@ export function useOnlineUsers(user: { id: string; name: string; role: string } 
         await channel.track({ userId: user.id, name: user.name, role: user.role, onlineAt: new Date().toISOString() });
       } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setConnected(false);
     });
-    return () => { void channel.untrack(); void supabase.removeChannel(channel); };
+    return () => { void channel.untrack(); void client.removeChannel(channel); };
   }, [user?.id, user?.name, user?.role]);
   return { users, connected };
 }
