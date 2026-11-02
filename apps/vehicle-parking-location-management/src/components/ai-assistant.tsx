@@ -48,6 +48,30 @@ const shortcutHelp = directory
   .map(({ key, label, description, example }) => `${key} · ${label}: ${description} Example: “${example}”.`)
   .join('\n');
 
+const SupraCompanion = ({ awake }: { awake: boolean }) => (
+  <span className={`relative block h-14 w-28 transition-transform duration-500 motion-reduce:transition-none ${awake ? '-translate-y-1 scale-105' : 'animate-[supra-idle_3s_ease-in-out_infinite]'}`} aria-hidden="true">
+    <svg viewBox="0 0 160 76" className="h-full w-full overflow-visible drop-shadow-lg" role="img">
+      <defs>
+        <linearGradient id="vplm-supra-paint" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#ffba55"/><stop offset=".48" stopColor="#fa6029"/><stop offset="1" stopColor="#b91c1c"/>
+        </linearGradient>
+      </defs>
+      <ellipse cx="82" cy="67" rx="69" ry="6" fill="#000" opacity=".16"/>
+      <path d="M19 49 L26 38 L49 34 L65 18 Q73 13 88 14 L109 19 L126 36 L145 40 Q153 42 153 51 L150 61 L11 61 L10 53 Z" fill="url(#vplm-supra-paint)" stroke="#862d20" strokeWidth="2"/>
+      <path d="M55 34 L68 21 Q77 17 87 19 L105 23 L120 36 Z" fill="#18354a" stroke="#ffe0ba" strokeWidth="2"/>
+      <path d="M90 20 L91 35" stroke="#ffe0ba" strokeWidth="2"/>
+      <path d="M21 42 L12 36 L10 32 L31 35" fill="#ba2922"/>
+      <path d="M138 41 L153 40 L156 46 L142 48" fill="#fff0b5"/>
+      <path d="M28 46 L49 45 M115 44 L139 46" stroke="#ffd4a2" strokeWidth="2" opacity=".8"/>
+      <circle cx="42" cy="60" r="12" fill="#171717" stroke="#353535" strokeWidth="3"/><circle cx="42" cy="60" r="6" fill="#d4d4d8"/>
+      <circle cx="126" cy="60" r="12" fill="#171717" stroke="#353535" strokeWidth="3"/><circle cx="126" cy="60" r="6" fill="#d4d4d8"/>
+      <path d="M70 47 L102 47" stroke="#ffdfaf" strokeWidth="2" strokeLinecap="round"/>
+      {awake && <><circle cx="77" cy="29" r="3" fill="#7df9ff"/><circle cx="101" cy="30" r="3" fill="#7df9ff"/><path d="M81 39 Q90 45 99 39" fill="none" stroke="#7df9ff" strokeWidth="2" strokeLinecap="round"/></>}
+    </svg>
+    {awake && <span className="absolute -right-1 -top-1 text-lg animate-pulse">✨</span>}
+  </span>
+);
+
 export default function AiAssistant({
   vehicles,
   locations,
@@ -642,15 +666,20 @@ export default function AiAssistant({
         </section>
       )}
 
+      <style>{`@keyframes supra-idle { 0%,100% { transform:translateY(0) rotate(-1deg) } 50% { transform:translateY(-5px) rotate(1deg) } } @media (prefers-reduced-motion: reduce) { .animate-\\[supra-idle_3s_ease-in-out_infinite\\] { animation:none !important; } }`}</style>
       <button
         type="button"
         aria-label={open ? 'Close VPLM AI assistant' : 'Open VPLM AI assistant'}
         aria-expanded={open}
+        title={open ? 'Close VPLM AI' : 'Tap the Supra companion to ask VPLM AI'}
         onClick={() => setOpen((current) => !current)}
-        className="flex items-center gap-2 rounded-full bg-primary px-4 py-3 font-semibold text-primary-foreground shadow-xl transition hover:scale-[1.02] hover:opacity-95"
+        className="group flex flex-col items-center gap-0.5 rounded-2xl border border-border/70 bg-card/95 px-3 pb-2 pt-1 text-card-foreground shadow-xl backdrop-blur-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
-        {open ? <X size={20} /> : <Sparkles size={20} />}
-        <span>{open ? 'Close assistant' : 'Ask VPLM AI'}</span>
+        <SupraCompanion awake={open} />
+        <span className="flex items-center gap-1.5 text-xs font-bold">
+          {open ? <Bot size={14} /> : <Sparkles size={14} />}
+          {open ? 'AI awake · tap to close' : 'Ask VPLM AI'}
+        </span>
       </button>
     </div>
   );
