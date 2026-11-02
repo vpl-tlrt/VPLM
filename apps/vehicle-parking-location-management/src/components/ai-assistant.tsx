@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { BookOpen, Bot, CircleParking, LoaderCircle, MapPin, MoveRight, Route, Search, Send, Sparkles, X } from 'lucide-react';
 import { mapParkingLocationId, supportsXParkingLocation, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import { supabase } from '@/lib/supabase';
-import { TransformingCar3D } from '@/components/transforming-car-3d';
+import { VplmCodexPet } from '@/components/vplm-codex-pet';
 
 type ChatMessage = {
   role: 'assistant' | 'user';
@@ -643,21 +643,7 @@ export default function AiAssistant({
         </section>
       )}
 
-      <style>{`@keyframes supra-hover { 0%,100% { transform:translateY(0) rotate(-2deg) } 50% { transform:translateY(-7px) rotate(2deg) } } @media (prefers-reduced-motion: reduce) { .animate-\\[supra-hover_3\\.6s_ease-in-out_infinite\\] { animation:none !important; } }`}</style>
-      <button
-        type="button"
-        aria-label={open ? 'Close VPLM AI assistant' : 'Open VPLM AI assistant'}
-        aria-expanded={open}
-        title={open ? 'Close VPLM AI' : 'Tap the Supra companion to ask VPLM AI'}
-        onClick={() => setOpen((current) => !current)}
-        className="group flex flex-col items-center gap-0 border-0 bg-transparent p-0 text-foreground drop-shadow-lg transition-transform duration-300 hover:-translate-y-1 hover:scale-105 focus-visible:rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-      >
-        <TransformingCar3D awake={open} />
-        <span className="flex items-center gap-1.5 rounded-full border border-cyan-400/60 bg-slate-950/90 px-3 py-1 text-[11px] font-bold text-white shadow-[0_0_12px_rgba(34,211,238,.45)]">
-          {open ? <Bot size={14} /> : <Sparkles size={14} />}
-          {open ? 'AI awake · tap to close' : 'Ask VPLM AI'}
-        </span>
-      </button>
+      <VplmCodexPet awake={open} onToggle={() => setOpen(current => !current)} />
     </div>
   );
 }
