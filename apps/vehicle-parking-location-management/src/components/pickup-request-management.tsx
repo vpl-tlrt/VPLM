@@ -59,7 +59,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, onFinishPa
     if (!opened || !supabase || busy) return;
     if (status === 'Completed') {
       if (!finalBay) return toast.error('Select where the vehicle was actually parked.');
-      if (!onFinishParking(opened.vehicle_id, opened.origin_location_id, finalBay)) return;
+      // Validate final destination in the host before changing request state.\n      if (!locations.some(location => location.id === finalBay)) return toast.error('Invalid parking location.');
     }
     setBusy(true);
     const timestamp = new Date().toISOString();
@@ -72,7 +72,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, onFinishPa
     const { data, error } = await supabase.from('pickup_requests').update(update).eq('id', opened.id).eq('status', expected).select('id');
     setBusy(false);
     if (error || !data?.length) { toast.error(error?.message ?? 'Request changed on another device. Refresh and retry.'); void refresh(); return; }
-    toast.success(status === 'Completed' ? 'Parking completed.' : status === 'In Transit' ? 'Pickup accepted.' : 'Pickup cancelled.');
+    if (status === 'Completed' && !onFinishParking(opened.vehicle_id, opened.origin_location_id, finalBay)) {\n      toast.error('Pickup record completed, but vehicle transfer failed. Contact a supervisor to reconcile the location.');\n      setOpened(null); void refresh(); return;\n    }\n    toast.success(status === 'Completed' ? 'Parking completed.' : status === 'In Transit' ? 'Pickup accepted.' : 'Pickup cancelled.');
     setOpened(null); setFinalBay(''); void refresh();
   };
   const submit = async () => {
