@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { BookOpen, Bot, CircleParking, LoaderCircle, MapPin, MoveRight, Route, Search, Send, Sparkles, X } from 'lucide-react';
 import { mapParkingLocationId, supportsXParkingLocation, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import { supabase } from '@/lib/supabase';
+import { TransformingCar3D } from '@/components/transforming-car-3d';
 
 type ChatMessage = {
   role: 'assistant' | 'user';
@@ -47,47 +48,6 @@ const isNo = (value: string): boolean => /^(no|n|nope)\b/i.test(value.trim());
 const shortcutHelp = directory
   .map(({ key, label, description, example }) => `${key} · ${label}: ${description} Example: “${example}”.`)
   .join('\n');
-
-const SupraCompanion = ({ awake }: { awake: boolean }) => (
-  <span className={`relative block h-[88px] w-[132px] [perspective:500px] motion-reduce:transform-none ${awake ? 'scale-110' : 'animate-[supra-hover_3.6s_ease-in-out_infinite]'}`} aria-hidden="true">
-    <span className={`absolute inset-0 transition-all duration-700 [transform-style:preserve-3d] ${awake ? 'scale-75 -translate-y-2 opacity-0 rotate-[-22deg]' : 'scale-100 opacity-100'}`}>
-      <svg viewBox="0 0 180 115" className="h-full w-full overflow-visible drop-shadow-[0_9px_9px_rgba(0,0,0,.45)]">
-        <defs>
-          <linearGradient id="supra-metal" x1=".15" y1="0" x2=".85" y2="1"><stop stopColor="#fff0b8"/><stop offset=".18" stopColor="#ffb23d"/><stop offset=".45" stopColor="#f16a0b"/><stop offset=".72" stopColor="#c53b06"/><stop offset="1" stopColor="#741d12"/></linearGradient>
-          <linearGradient id="supra-glass" x1="0" y1="0" x2=".9" y2="1"><stop stopColor="#92d9ed"/><stop offset=".25" stopColor="#234f6a"/><stop offset=".75" stopColor="#0b1c33"/><stop offset="1" stopColor="#070b13"/></linearGradient>
-          <linearGradient id="supra-light" x1="0" x2="1"><stop stopColor="#fff"/><stop offset="1" stopColor="#5be4ff"/></linearGradient>
-        </defs>
-        <ellipse cx="93" cy="103" rx="78" ry="10" fill="#050b1a" opacity=".35"/>
-        <path d="M13 64 Q17 52 41 45 L67 22 Q85 13 115 20 L145 39 Q165 45 170 58 L174 78 Q168 92 150 95 L37 96 Q13 90 9 77Z" fill="url(#supra-metal)" stroke="#63241c" strokeWidth="2"/>
-        <path d="M51 44 L74 25 Q95 18 113 25 L138 43 L115 51 L57 51Z" fill="url(#supra-glass)" stroke="#e7b878" strokeWidth="2"/>
-        <path d="M108 26 L112 51" stroke="#b6b4a9" strokeWidth="2"/>
-        <path d="M14 67 Q33 57 54 62 L70 74 L63 88 L13 82Z M111 75 L132 59 Q157 55 171 63 L174 81 L118 89Z" fill="#9e2d0b" opacity=".85"/>
-        <path d="M18 65 L54 63 L65 71 L28 75Z M126 71 L140 61 L168 64 L160 74Z" fill="url(#supra-light)" stroke="#d6fcff" strokeWidth="1.5"/>
-        <path d="M62 82 Q88 69 122 80 L120 94 L63 96Z" fill="#151923" stroke="#070b12" strokeWidth="3"/>
-        <path d="M73 82 L112 81 L109 86 L76 87Z" fill="#383b42"/>
-        <path d="M14 82 L45 90 L50 99 L28 99 L12 90Z M140 91 L171 81 L168 93 L154 101 L136 99Z" fill="#1c2029"/>
-        <path d="M30 94 L53 98 M135 98 L157 93" stroke="#b5b8bc" strokeWidth="3"/>
-        <path d="M59 54 Q90 59 128 53" fill="none" stroke="#ffcf77" strokeWidth="2" opacity=".8"/>
-        <path d="M43 45 L23 47 L21 39 L40 39Z" fill="#d3470b"/>
-      </svg>
-    </span>
-    <span className={`absolute left-1/2 top-0 h-[94px] w-[82px] -translate-x-1/2 transition-all duration-700 ${awake ? 'scale-100 opacity-100 rotate-0' : 'scale-50 opacity-0 rotate-[-20deg]'}`}>
-      <svg viewBox="0 0 110 125" className="h-full w-full drop-shadow-[0_0_14px_rgba(34,211,238,.6)]">
-        <defs><linearGradient id="robot-orange" x1="0" x2="1" y1="0" y2="1"><stop stopColor="#ffe0a1"/><stop offset=".35" stopColor="#fa7918"/><stop offset="1" stopColor="#812a12"/></linearGradient></defs>
-        <path d="M34 21 L41 8 L70 8 L79 22 L74 45 L36 45Z" fill="#282d37" stroke="#ff9328" strokeWidth="4"/>
-        <path d="M39 20 L55 13 L71 20 L67 34 L57 39 L43 33Z" fill="#121e31" stroke="#dba768" strokeWidth="2"/>
-        <path d="M42 26 L53 29 L51 33 L41 31Z M58 29 L69 26 L69 31 L59 33Z" fill="#4beaff"/>
-        <path d="M31 43 L78 43 L90 77 L76 95 L33 95 L20 77Z" fill="#171b25" stroke="#fb8521" strokeWidth="4"/>
-        <path d="M33 46 L55 55 L77 46 L71 72 L55 80 L38 72Z" fill="url(#robot-orange)"/>
-        <circle cx="55" cy="64" r="9" fill="#172c3c" stroke="#55edff" strokeWidth="3"/><circle cx="55" cy="64" r="4" fill="#9afaff"/>
-        <path d="M25 47 L8 56 L3 84 L21 91 L33 68Z M84 47 L102 56 L108 84 L89 91 L77 68Z" fill="url(#robot-orange)" stroke="#292b35" strokeWidth="4"/>
-        <path d="M37 93 L29 121 L48 123 L55 99 L63 123 L82 121 L73 93Z" fill="#292e3a" stroke="#e66c20" strokeWidth="4"/>
-        <path d="M12 84 L5 101 L22 106 L27 89 M97 84 L105 101 L89 106 L83 89" fill="#222b35" stroke="#f28a27" strokeWidth="3"/>
-      </svg>
-    </span>
-    <span className={`pointer-events-none absolute bottom-1 left-3 right-3 h-2 rounded-full bg-cyan-400/60 blur-[5px] transition-opacity duration-500 ${awake ? 'opacity-100' : 'opacity-60'}`}/>
-  </span>
-);
 
 export default function AiAssistant({
   vehicles,
@@ -692,7 +652,7 @@ export default function AiAssistant({
         onClick={() => setOpen((current) => !current)}
         className="group flex flex-col items-center gap-0 border-0 bg-transparent p-0 text-foreground drop-shadow-lg transition-transform duration-300 hover:-translate-y-1 hover:scale-105 focus-visible:rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
       >
-        <SupraCompanion awake={open} />
+        <TransformingCar3D awake={open} />
         <span className="flex items-center gap-1.5 rounded-full border border-cyan-400/60 bg-slate-950/90 px-3 py-1 text-[11px] font-bold text-white shadow-[0_0_12px_rgba(34,211,238,.45)]">
           {open ? <Bot size={14} /> : <Sparkles size={14} />}
           {open ? 'AI awake · tap to close' : 'Ask VPLM AI'}
