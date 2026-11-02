@@ -33,6 +33,7 @@ import { notifyWorkspaceDataChanged } from '@/lib/workspace-sync-events';
 import { validateVehicle } from '@/lib/vehicle-validation';
 import { enqueueSync } from '@/lib/sync-queue';
 import { supabase } from '@/lib/supabase';
+import { useOnlineUsers, type OnlineUser } from '@/lib/use-online-users';
 import { appStorageKey } from '@/lib/local-storage-scope';
 
 import { Badge } from '@/components/ui/badge';
@@ -297,6 +298,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const [historyFilter, setHistoryFilter] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const actor = localGuest ? 'Guest User' : user?.fullName ?? 'Local Operator';
+  const { users: onlineUsers, connected: presenceConnected } = useOnlineUsers(!localGuest && queueOwnerId ? { id: queueOwnerId, name: actor, role } : null);
 
   const activeVehicles = vehicles.filter((item: Vehicle) => item.status !== 'Delivered');
   const containerVehicleCount = (locationId: string) => activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId)).length;
@@ -618,7 +620,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           {screen === 'history' && <HistoryScreen movements={movements} auditEvents={auditEvents} vehicles={vehicles} historyFilter={historyFilter} setHistoryFilter={setHistoryFilter} locationLabel={locationLabel} canRecoverDeliveredVehicle={canRecoverDeliveredVehicle} onRecoverDeliveredVehicle={recoverDeliveredVehicle} />}
           {screen === 'reservations' && <ReservationsScreen reservations={reservations} vehicles={vehicles} locations={locations} selectedVehicleId={selectedVehicleId} setSelectedVehicleId={setSelectedVehicleId} newLocationId={newLocationId} setNewLocationId={setNewLocationId} handleReserve={handleReserve} cancel={(id: string) => { const reservation = reservations.find((item: Reservation) => item.id === id); if (!reservation) return; setReservations((current: Reservation[]) => current.map((item: Reservation) => item.id === id ? { ...item, status: 'Cancelled' } : item)); logAudit('Cancel', 'Reservation', reservation.reservationId); toast.success('Reservation cancelled.'); }} locationLabel={locationLabel} />}
           {screen === 'management' && canManage && <ManagementScreen role={role} locations={locations} setLocations={setLocations} vehicles={vehicles} setVehicles={setVehicles} movements={movements} auditEvents={auditEvents} setAuditEvents={setAuditEvents} logAudit={logAudit} actorId={queueOwnerId} garageLayout={garageLayout} setGarageLayout={setGarageLayout} />}
-          {screen === 'settings' && isAdministrator && <SettingsScreen logAudit={logAudit} />}
+          {screen === 'settings' && isAdministrator && <SettingsScreen users={onlineUsers} connected={presenceConnected} />}
           {screen === 'profile' && <Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />}
         </motion.div>
       </main>
@@ -1570,76 +1572,17 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
   <TabsContent value="recycle" className="space-y-3">{auditEvents.filter((event: AuditEvent) => event.action === 'Archive').map((event: AuditEvent) => <Card key={event.id}><CardContent className="flex items-center gap-3 p-4"><ArchiveRestore/><div className="flex-1"><p className="font-bold">{event.entity}</p><p className="text-sm text-muted-foreground">{event.detail}</p></div><Button variant="outline" onClick={() => { setAuditEvents((current) => current.map((item: AuditEvent) => item.id === event.id ? { ...item, action: 'Restore' } : item)); logAudit('Restore', event.entity, event.detail); toast.success('Item restored.'); }}><ArchiveRestore/>Restore</Button></CardContent></Card>)}</TabsContent></Tabs></div>;
 }
 
-type DataConnectionDomain = 'parking' | 'vehicles' | 'movements' | 'reservations' | 'roadTests' | 'access' | 'communications' | 'ai' | 'audit';
-type DataConnectionDetails = { environment: string; endpoint: string; resource: string; authenticationReference: string; notes: string };
-type DataConnectionSettings = Record<DataConnectionDomain, DataConnectionDetails>;
-
-const DATA_CONNECTION_STORAGE_KEY = appStorageKey('vplm-domain-connection-details-v1');
-const emptyConnectionDetails = (): DataConnectionDetails => ({ environment: '', endpoint: '', resource: '', authenticationReference: '', notes: '' });
-const dataConnectionDomains: { id: DataConnectionDomain; label: string; description: string }[] = [
-  { id: 'parking', label: 'Parking', description: 'Parking locations, sections, rows, and bay types.' },
-  { id: 'vehicles', label: 'Vehicles', description: 'Vehicle profiles, details, photos, and GPS history.' },
-  { id: 'movements', label: 'Movements', description: 'Vehicle assignments, transfers, releases, and movement history.' },
-  { id: 'reservations', label: 'Reservations', description: 'Parking reservations and release requests.' },
-  { id: 'roadTests', label: 'Road tests', description: 'Road tests, audit events, and notifications.' },
-  { id: 'access', label: 'Access', description: 'Application users, role assignments, permissions, and access requests.' },
-  { id: 'communications', label: 'Communications', description: 'Chats, messages, groups, attachments, and voice transmissions.' },
-  { id: 'ai', label: 'AI', description: 'AI analysis jobs and plate-to-bay matches.' },
-  { id: 'audit', label: 'Audit', description: 'Application audit logs and operational history.' },
-];
-const defaultDataConnectionSettings = (): DataConnectionSettings => dataConnectionDomains.reduce((settings: Partial<DataConnectionSettings>, domain: { id: DataConnectionDomain }) => ({ ...settings, [domain.id]: emptyConnectionDetails() }), {}) as DataConnectionSettings;
-const loadDataConnectionSettings = (): DataConnectionSettings => {
-  const defaults = defaultDataConnectionSettings();
-  try {
-    const stored = window.localStorage.getItem(DATA_CONNECTION_STORAGE_KEY);
-    if (!stored) return defaults;
-    const parsed = JSON.parse(stored) as Partial<Record<DataConnectionDomain, Partial<DataConnectionDetails>>>;
-    return dataConnectionDomains.reduce((settings: DataConnectionSettings, domain: { id: DataConnectionDomain }) => ({ ...settings, [domain.id]: { ...defaults[domain.id], ...parsed[domain.id] } }), defaults);
-  } catch {
-    return defaults;
-  }
-};
-
-function SettingsScreen({ logAudit }: { logAudit: (action: string, entity: string, detail: string) => void }) {
-  const [connectionSettings, setConnectionSettings] = useState<DataConnectionSettings>(loadDataConnectionSettings);
-  const updateConnectionDetail = (domain: DataConnectionDomain, field: keyof DataConnectionDetails, value: string) => {
-    setConnectionSettings((current: DataConnectionSettings) => ({ ...current, [domain]: { ...current[domain], [field]: value } }));
-  };
-  const saveConnectionDetail = (domain: DataConnectionDomain, label: string) => {
-    try {
-      window.localStorage.setItem(DATA_CONNECTION_STORAGE_KEY, JSON.stringify(connectionSettings));
-      logAudit('Setting', 'Connection details', `${label} configuration saved locally`);
-      toast.success(`${label} connection details saved on this device. Active data routing is unchanged.`);
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : `Unable to save ${label} connection details.`);
-    }
-  };
-  return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <div><p className="technical-label">Administrator only</p><h2 className="text-2xl font-black">System settings</h2><p className="text-muted-foreground">Configure connection references separately for each application data domain.</p></div>
-      <Card>
-        <CardHeader><CardTitle>Data connections</CardTitle><CardDescription>Store environment and endpoint references for administrators. Do not enter passwords, secrets, or access tokens. Saving these details does not change the app's active data routing.</CardDescription></CardHeader>
-        <CardContent className="grid gap-4 lg:grid-cols-2">
-          {dataConnectionDomains.map((domain: { id: DataConnectionDomain; label: string; description: string }) => {
-            const details = connectionSettings[domain.id];
-            return (
-              <div key={domain.id} className="space-y-4 rounded-xl border bg-card p-4 text-card-foreground">
-                <div><h3 className="font-bold">{domain.label}</h3><p className="text-sm text-muted-foreground">{domain.description}</p></div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-2"><Label htmlFor={`${domain.id}-environment`}>Environment</Label><Input id={`${domain.id}-environment`} value={details.environment} onChange={(event: ChangeEvent<HTMLInputElement>) => updateConnectionDetail(domain.id, 'environment', event.target.value)} placeholder="Environment name or ID" /></div>
-                  <div className="space-y-2"><Label htmlFor={`${domain.id}-resource`}>Resource / table</Label><Input id={`${domain.id}-resource`} value={details.resource} onChange={(event: ChangeEvent<HTMLInputElement>) => updateConnectionDetail(domain.id, 'resource', event.target.value)} placeholder="Table, flow, or resource name" /></div>
-                </div>
-                <div className="space-y-2"><Label htmlFor={`${domain.id}-endpoint`}>Endpoint</Label><Input id={`${domain.id}-endpoint`} value={details.endpoint} onChange={(event: ChangeEvent<HTMLInputElement>) => updateConnectionDetail(domain.id, 'endpoint', event.target.value)} placeholder="Environment or service endpoint" /></div>
-                <div className="space-y-2"><Label htmlFor={`${domain.id}-auth-reference`}>Authentication reference</Label><Input id={`${domain.id}-auth-reference`} value={details.authenticationReference} onChange={(event: ChangeEvent<HTMLInputElement>) => updateConnectionDetail(domain.id, 'authenticationReference', event.target.value)} placeholder="Connection reference name only" /></div>
-                <div className="space-y-2"><Label htmlFor={`${domain.id}-notes`}>Administrator notes</Label><Textarea id={`${domain.id}-notes`} value={details.notes} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => updateConnectionDetail(domain.id, 'notes', event.target.value)} placeholder="Non-sensitive setup notes" /></div>
-                <Button onClick={() => saveConnectionDetail(domain.id, domain.label)}><Save />Save {domain.label}</Button>
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-    </div>
-  );
+function SettingsScreen({ users, connected }: { users: OnlineUser[]; connected: boolean }) {
+  return <div className="mx-auto max-w-6xl space-y-5">
+    <div><p className="technical-label">Administrator only</p><h2 className="text-2xl font-black">System settings</h2><p className="text-muted-foreground">Live user monitoring</p></div>
+    <Card>
+      <CardHeader><CardTitle>Currently online users ({users.length})</CardTitle><CardDescription>{connected ? 'Live connections reported by Supabase Presence. Multiple tabs for one account count as one user.' : 'Presence connection unavailable. Online count may be incomplete.'}</CardDescription></CardHeader>
+      <CardContent className="space-y-2">
+        {users.map(item => <div key={item.userId} className="flex items-center justify-between rounded-lg border p-3"><div><p className="font-semibold">{item.name}</p><p className="text-sm text-muted-foreground">{item.role}</p></div><Badge variant="outline">Online</Badge></div>)}
+        {users.length === 0 && <p className="text-sm text-muted-foreground">No connected users reported.</p>}
+      </CardContent>
+    </Card>
+  </div>;
 }
 
 function SearchScreen({ query, setQuery, result, locationLabel, locations, vehicles, movements, onLocateVehicle }: { query: string; setQuery: (value: string) => void; result?: Vehicle; locationLabel: (id?: string) => string; locations: ParkingLocation[]; vehicles: Vehicle[]; movements: Movement[]; onLocateVehicle: (vehicleId: string) => void }) {
