@@ -1083,8 +1083,8 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   .road-test-pocket:hover { box-shadow: inset 0 1px 0 color-mix(in oklch, white 18%, transparent), 0 24px 42px color-mix(in oklch, black 38%, transparent); }
   .road-test-pocket-heading { position: relative; z-index: 30; display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0.65rem 0; font-size: 0.68rem; font-weight: 800; }
   .road-test-pocket-heading strong { display: grid; min-width: 1.4rem; height: 1.4rem; place-items: center; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: 0.68rem; }
-  .road-test-pocket-stage { position: relative; width: 64%; height: 5.35rem; margin: 0.1rem auto 0.35rem; perspective: 900px; cursor: pointer; }
-  .road-test-pocket-stack { position: absolute; inset: 2.35rem 0 0.35rem; transform-style: preserve-3d; }
+  .road-test-pocket-stage { position: relative; width: 86%; height: 8.5rem; margin: 0.2rem auto 0.5rem; perspective: 900px; cursor: pointer; }
+  .road-test-pocket-stack { position: absolute; inset: 4.6rem 0 0.35rem; transform-style: preserve-3d; }
   .road-test-wallet-card {
     --wallet-index: 0;
     position: absolute;
@@ -1099,7 +1099,7 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
     color: var(--card-foreground);
     box-shadow: inset 1px 1px 1px color-mix(in oklch, white 14%, transparent), inset -3px -3px 7px color-mix(in oklch, black 22%, transparent), 0 7px 12px color-mix(in oklch, black 44%, transparent);
     backdrop-filter: none;
-    transform: translate3d(0, calc(var(--wallet-index) * -0.78rem), calc(var(--wallet-index) * -10px)) rotateX(calc(var(--wallet-index) * 1.4deg));
+    transform: translate3d(0, calc(var(--wallet-index) * -1.15rem), calc(var(--wallet-index) * -10px)) rotateX(calc(var(--wallet-index) * 1.4deg));
     transform-origin: 50% 0;
     animation: wallet-stack-cycle 7.2s cubic-bezier(0.45, 0.05, 0.2, 1) infinite;
     animation-delay: calc(var(--wallet-index) * -0.72s);
