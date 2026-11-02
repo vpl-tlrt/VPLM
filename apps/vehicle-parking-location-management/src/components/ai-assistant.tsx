@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { BookOpen, Bot, CircleParking, LoaderCircle, MapPin, MoveRight, Route, Search, Send, Sparkles, X } from 'lucide-react';
+import { BookOpen, Bot, CarFront, CircleParking, LoaderCircle, MapPin, MoveRight, Route, Search, Send, Sparkles, X } from 'lucide-react';
 import { mapParkingLocationId, supportsXParkingLocation, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import { supabase } from '@/lib/supabase';
 import { VplmCodexPet } from '@/components/vplm-codex-pet';
@@ -9,13 +9,14 @@ type ChatMessage = {
   content: string;
 };
 
-type AssistantFunction = 'find' | 'assign' | 'transfer' | 'road-test' | 'availability';
+type AssistantFunction = 'find' | 'assign' | 'transfer' | 'road-test' | 'availability' | 'pickup-request';
 
 type TransferFlow = {
   vehicleId?: string;
   step: 'vehicle' | 'taking' | 'destination' | 'parked';
   selectedDestinationId?: string;
   destinationId?: string;
+  destinationIsXParking?: boolean;
 };
 
 type AiAssistantProps = {
@@ -28,7 +29,8 @@ type AiAssistantProps = {
   locationLabel: (locationId?: string) => string;
   onAssign: (plateNumber: string, vehicle?: Vehicle) => boolean;
   onInitialRoadTest: (vehicleId: string) => boolean;
-  onTransfer: (vehicleId: string, destinationId: string, notes: string) => boolean;
+  onPickupRequest: () => void;
+  onTransfer: (vehicleId: string, destinationId: string, notes: string, toXParking?: boolean) => boolean;
 };
 
 const directory: { id: AssistantFunction | 'help'; key: string; label: string; description: string; example: string; icon: typeof Search }[] = [
@@ -36,6 +38,7 @@ const directory: { id: AssistantFunction | 'help'; key: string; label: string; d
   { id: 'assign', key: 'ASSIGN', label: 'Add / Assign', description: 'Open the validated vehicle intake and bay assignment form.', example: 'Assign 938848', icon: CircleParking },
   { id: 'transfer', key: 'TRANSFER', label: 'Transfer', description: 'Guide a confirmed vehicle move to an available bay.', example: 'Transfer 938848', icon: MoveRight },
   { id: 'road-test', key: 'IRT', label: 'Initial Road Test', description: 'Technical Leaders can start an IRT request for a registered vehicle.', example: 'IRT 938848', icon: Route },
+  { id: 'pickup-request', key: 'PICKUP', label: 'Vehicle pickup request', description: 'Submit a request for staff approval to pick up a parked vehicle.', example: 'Request vehicle pickup', icon: CarFront },
   { id: 'availability', key: 'BAY', label: 'Bay availability', description: 'Check available spaces by zone or bay number.', example: 'BAY B', icon: MapPin },
   { id: 'help', key: 'HELP', label: 'Function directory', description: 'Show shortcuts, supported tasks, and example prompts.', example: 'HELP', icon: BookOpen },
 ];
@@ -59,6 +62,7 @@ export default function AiAssistant({
   locationLabel,
   onAssign,
   onInitialRoadTest,
+  onPickupRequest,
   onTransfer,
 }: AiAssistantProps) {
   const [open, setOpen] = useState(false);
@@ -88,9 +92,15 @@ export default function AiAssistant({
 
   const availableDestinations = transferFlow && activeFlowVehicle
     ? locations.filter((location) =>
-        location.status === 'Available' &&
-        !vehicles.some((vehicle) => vehicle.status !== 'Delivered' && normalizeLocation(vehicle.currentLocationId ?? '') === normalizeLocation(location.id)) &&
-        (activeFlowVehicle.xParking !== 'Yes' || supportsXParkingLocation(location)),
+        location.status !== 'Reserved' &&
+        location.status !== 'Maintenance' &&
+        !vehicles.some((vehicle) => vehicle.status !== 'Delivered' && normalizeLocation(vehicle.currentLocationId ?? '') === normalizeLocation(location.id)),
+      )
+    : [];
+  const availableXParkingDestinations = transferFlow
+    ? locations.filter((location) =>
+        supportsXParkingLocation(location) &&
+        !vehicles.some((vehicle) => vehicle.status !== 'Delivered' && vehicle.xParking === 'Yes' && normalizeLocation(vehicle.currentLocationId ?? '') === normalizeLocation(location.id)),
       )
     : [];
 
@@ -168,6 +178,13 @@ export default function AiAssistant({
   };
 
   const runFunction = (action: AssistantFunction, query: string) => {
+    if (action === 'pickup-request') {
+      setActiveFunction(null);
+      onPickupRequest();
+      addAssistantMessage('The Vehicle Pickup Requests section is open. Select a parked vehicle and submit the request for staff approval.');
+      return;
+    }
+
     const registration = findVehicle(query);
     if (action === 'availability') {
       setActiveFunction(null);
@@ -268,6 +285,11 @@ export default function AiAssistant({
       addAssistantMessage('Transfer function selected. Enter the vehicle registration to begin the confirmation flow.');
       return;
     }
+    if (action === 'pickup-request') {
+      onPickupRequest();
+      addAssistantMessage('The Vehicle Pickup Requests section is open. Select a parked vehicle and submit the request for staff approval.');
+      return;
+    }
     setActiveFunction(action);
     if (action === 'find') addAssistantMessage('Find vehicle selected. Enter a registration number to see its vehicle details and current bay.');
     if (action === 'assign') addAssistantMessage('Add / Assign selected. Enter the vehicle registration; I’ll open the validated form so you can complete details and choose a bay.');
@@ -327,20 +349,24 @@ export default function AiAssistant({
     }
 
     if (transferFlow.step === 'destination') {
-      const typedBay = normalize(answer);
+      const typedXParking = /\bX(?:\s*PARK(?:ING)?)?\b/i.test(answer);
+      const typedBay = normalize(answer.replace(/\bX(?:\s*PARK(?:ING)?)?\b/gi, ''));
       const typedDestination = locations.find((location) =>
         typedBay === normalize(`${location.zone}-${location.bayNumber}`) ||
         typedBay === normalize(`${location.zone}-${Number(location.bayNumber)}`) ||
         typedBay === normalizeLocation(location.id),
       );
-      const destinationId = transferFlow.selectedDestinationId ?? typedDestination?.id;
-      const destination = availableDestinations.find((location) => location.id === destinationId);
+      const selectedXParking = transferFlow.selectedDestinationId?.startsWith('xparking:') ?? false;
+      const selectedDestinationId = transferFlow.selectedDestinationId?.replace(/^(?:bay|xparking):/, '');
+      const destinationId = selectedDestinationId ?? typedDestination?.id;
+      const destinationIsXParking = transferFlow.selectedDestinationId ? selectedXParking : typedXParking;
+      const destination = (destinationIsXParking ? availableXParkingDestinations : availableDestinations).find((location) => location.id === destinationId);
       if (!destination) {
-        addAssistantMessage('That bay is not available for this vehicle. Choose one of the available bays shown below.');
+        addAssistantMessage('That parking space is not available for this vehicle. Choose one of the available spaces shown below.');
         return;
       }
-      setTransferFlow({ ...transferFlow, step: 'parked', destinationId: destination.id, selectedDestinationId: undefined });
-      addAssistantMessage(`Please park ${activeFlowVehicle?.plateNumber} in ${destination.zone}-${destination.bayNumber}. Have you parked it there?`);
+      setTransferFlow({ ...transferFlow, step: 'parked', destinationId: destination.id, destinationIsXParking, selectedDestinationId: undefined });
+      addAssistantMessage(`Please park ${activeFlowVehicle?.plateNumber} in ${destinationIsXParking ? 'the X Parking space ' : ''}${destination.zone}-${destination.bayNumber}. Have you parked it there?`);
       return;
     }
 
@@ -364,6 +390,7 @@ export default function AiAssistant({
       activeFlowVehicle.id,
       transferFlow.destinationId,
       'Transfer confirmed in VPLM AI assistant after user verified parking.',
+      transferFlow.destinationIsXParking,
     );
     if (completed) {
       setTransferFlow(null);
@@ -381,6 +408,8 @@ export default function AiAssistant({
     if (/^(assign|add|\/assign|asn)(\b|$)/i.test(command) || /\b(add|assign)\s+(?:a\s+)?vehicle\b/i.test(command)) return 'assign';
     if (/^(transfer|\/transfer|trf)(\b|$)/i.test(command) || /\btransfer\s+(?:vehicle|car)\b/i.test(command)) return 'transfer';
     if (/^(irt|\/irt|road[\s-]*test)(\b|$)/i.test(command) || /\b(initial road test|road test request)\b/i.test(command)) return 'road-test';
+    if (/^(pickup|\/pickup|pick up|pickup request|request vehicle|request pickup)(\b|$)/i.test(command) ||
+      /\b(?:request|schedule)\s+(?:a\s+)?vehicle\s+pickup\b/i.test(command)) return 'pickup-request';
     if (/^(bay|\/bay|availability)(\b|$)/i.test(command) ||
       /\b(bay availability|parking availability|available bays)\b/i.test(command) ||
       (/\b(available|availability|occupied|free)\b/i.test(command) && /\b[A-Z]+[- ]?\d{1,3}\b/i.test(message))) return 'availability';
@@ -551,7 +580,7 @@ export default function AiAssistant({
 
             {transferFlow?.step === 'destination' && (
               <div className="space-y-2 rounded-xl bg-muted p-3">
-                <label className="block text-xs font-medium" htmlFor="assistant-destination">Available destination bay</label>
+                <label className="block text-xs font-medium" htmlFor="assistant-destination">Available destination space</label>
                 <select
                   id="assistant-destination"
                   value={transferFlow.selectedDestinationId ?? ''}
@@ -560,15 +589,20 @@ export default function AiAssistant({
                 >
                   <option value="">Select a bay</option>
                   {availableDestinations.map((location) => (
-                    <option key={location.id} value={location.id}>
+                    <option key={`bay:${location.id}`} value={`bay:${location.id}`}>
                       {location.zone}-{location.bayNumber}{location.section ? ` · ${location.section}` : ''}
                     </option>
                   ))}
+                  {availableXParkingDestinations.map((location) => (
+                    <option key={`xparking:${location.id}`} value={`xparking:${location.id}`}>
+                      X Parking · {location.zone}-{location.bayNumber}
+                    </option>
+                  ))}
                 </select>
-                {availableDestinations.length === 0 && <p className="text-xs text-muted-foreground">No eligible bays are currently available.</p>}
+                {availableDestinations.length === 0 && availableXParkingDestinations.length === 0 && <p className="text-xs text-muted-foreground">No eligible spaces are currently available.</p>}
                 <button
                   type="button"
-                  disabled={busy || (!transferFlow.selectedDestinationId && availableDestinations.length === 0)}
+                  disabled={busy || (!transferFlow.selectedDestinationId && availableDestinations.length === 0 && availableXParkingDestinations.length === 0)}
                   onClick={() => continueTransferFlow(transferFlow.selectedDestinationId ?? '')}
                   className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
                 >

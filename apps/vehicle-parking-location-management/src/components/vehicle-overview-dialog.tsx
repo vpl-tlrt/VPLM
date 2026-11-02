@@ -1,8 +1,8 @@
-import { useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { format } from 'date-fns';
 import { BatteryWarning, Camera, CarFront, CircleStop, Fuel, History, MapPin, Navigation, Pencil, Route, Save, Trash2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { mapParkingLocationId, supportsXParkingLocation, type Movement, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
+import { isLiveGarageContainer, mapParkingLocationId, supportsXParkingLocation, type Movement, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import type { RoadTestRecord } from '@/lib/road-test-data';
 import { VehicleFormFields, type VehicleFormData } from '@/components/vehicle-form-fields';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,7 @@ interface VehicleOverviewDialogBaseProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   locations: ParkingLocation[];
+  vehicles?: Vehicle[];
   roadTest?: RoadTestRecord;
   movements: Movement[];
 }
@@ -27,7 +28,7 @@ interface InteractiveVehicleOverviewDialogProps extends VehicleOverviewDialogBas
   canTransfer: boolean;
   canDelete: boolean;
   onUpdate: (vehicleId: string, changes: Partial<Vehicle>, auditAction: string) => void;
-  onTransfer: (vehicleId: string, locationId: string) => void;
+  onTransfer: (vehicleId: string, locationId: string, toXParking?: boolean) => void;
   onRequestRoadTest: (vehicle: Vehicle) => void;
   onDelete: (vehicleId: string) => void;
   onDeliver: (vehicleId: string) => void;
@@ -79,20 +80,32 @@ const blobToDataUrl = (blob: Blob): Promise<string> => new Promise((resolve, rej
 });
 
 export function VehicleOverviewDialog(props: VehicleOverviewDialogProps) {
-  const { vehicle, open, onOpenChange, locations, movements, roadTest } = props;
+  const { vehicle, open, onOpenChange, locations, vehicles = [], movements, roadTest } = props;
   const interactive = props.mode !== 'readonly' ? props : undefined;
   const [targetZone, setTargetZone] = useState('none');
   const [targetBay, setTargetBay] = useState('none');
+  const [targetType, setTargetType] = useState<'bay' | 'xParking'>('bay');
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState<VehicleFormData>();
   const photoRef = useRef<HTMLInputElement>(null);
+  const availableBays = locations.filter((item: ParkingLocation) => targetType === 'xParking'
+    ? supportsXParkingLocation(item) && !vehicles.some((candidate: Vehicle) => candidate.xParking === 'Yes' && mapParkingLocationId(candidate.currentLocationId) === mapParkingLocationId(item.id))
+    : item.status !== 'Reserved' && item.status !== 'Maintenance' && (isLiveGarageContainer(item)
+      ? vehicles.filter((candidate: Vehicle) => candidate.status !== 'Delivered' && mapParkingLocationId(candidate.currentLocationId) === mapParkingLocationId(item.id)).length < 15
+      : !vehicles.some((candidate: Vehicle) => candidate.xParking !== 'Yes' && mapParkingLocationId(candidate.currentLocationId) === mapParkingLocationId(item.id))));
+  const availableZones = Array.from(new Set(availableBays.map((item: ParkingLocation) => item.zone))).filter((zone: string) => zone);
+  const firstAvailableZone = availableZones[0] ?? 'none';
+  const targetZoneAvailable = availableZones.includes(targetZone);
+  const effectiveTargetZone = targetZoneAvailable ? targetZone : firstAvailableZone;
+  const zoneBays = availableBays.filter((item: ParkingLocation) => item.zone === effectiveTargetZone);
+  useEffect(() => {
+    if (!targetZoneAvailable) setTargetZone(firstAvailableZone);
+    setTargetBay('none');
+  }, [vehicle?.id, targetType, targetZoneAvailable, firstAvailableZone]);
   if (!vehicle) return null;
   const location = locations.find((item: ParkingLocation) => mapParkingLocationId(item.id) === mapParkingLocationId(vehicle.currentLocationId));
   const history = movements.filter((item: Movement) => item.vehicleId === vehicle.id);
   const lastMovement = history[0];
-  const availableBays = locations.filter((item: ParkingLocation) => item.status === 'Available' && (vehicle.xParking !== 'Yes' || supportsXParkingLocation(item)));
-  const availableZones = Array.from(new Set(availableBays.map((item: ParkingLocation) => item.zone))).filter((zone: string) => zone);
-  const zoneBays = availableBays.filter((item: ParkingLocation) => item.zone === targetZone);
   const updateGps = () => {
     if (!interactive) return;
     if (!navigator.geolocation) return toast.error('Location services are unavailable on this device.');
@@ -176,7 +189,33 @@ export function VehicleOverviewDialog(props: VehicleOverviewDialogProps) {
           <TabsContent value="gps"><div className="relative h-64 overflow-hidden rounded-2xl bg-muted"><div className="absolute inset-0 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px]" /><div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary p-3 text-primary-foreground shadow-xl"><MapPin /></div><div className="absolute bottom-3 left-3 rounded-lg bg-popover p-3 text-sm text-popover-foreground shadow"><strong>{vehicle.latitude?.toFixed(5) ?? 'GPS pending'}, {vehicle.longitude?.toFixed(5) ?? '—'}</strong><p>{vehicle.distanceToBayMeters ?? '—'} m from assigned bay · {vehicle.geofenceStatus}</p></div></div>{interactive && <Button className="mt-3 w-full" onClick={updateGps}><Navigation /> Update current location</Button>}</TabsContent>
         </Tabs>
       </div>
-      {interactive && <aside className="space-y-3"><div className="rounded-xl border bg-card p-4 text-card-foreground"><p className="technical-label">Vehicle actions</p><div className="mt-3 grid gap-2">{roadTest && <div className="rounded-lg bg-secondary p-3 text-sm text-secondary-foreground"><div className="flex items-center justify-between gap-2"><strong>Road test request</strong><Badge variant={roadTest.status === 'In Road Test' ? 'secondary' : 'outline'}>{roadTest.status}</Badge></div><p className="mt-1">{roadTest.jobCardNumber} · {roadTest.purpose}</p><p className="mt-1">Assigned to {roadTest.assignedTo || 'Unassigned'}</p></div>}{interactive.canRequestRoadTest && <Button onClick={() => interactive.onRequestRoadTest(vehicle)}><Route /> Request road test</Button>}<Select value={targetZone} onValueChange={(zone: string) => { setTargetZone(zone); setTargetBay('none'); }}><SelectTrigger><SelectValue placeholder="Select destination zone" /></SelectTrigger><SelectContent><SelectItem value="none">Select destination zone</SelectItem>{availableZones.map((zone: string) => <SelectItem key={zone} value={zone}>{zone}</SelectItem>)}</SelectContent></Select><Select value={targetBay} onValueChange={setTargetBay} disabled={targetZone === 'none'}><SelectTrigger><SelectValue placeholder="Select bay number" /></SelectTrigger><SelectContent><SelectItem value="none">Select bay number</SelectItem>{zoneBays.filter((item: ParkingLocation) => item.id).map((item: ParkingLocation) => <SelectItem key={item.id} value={item.id}>{item.bayNumber}</SelectItem>)}</SelectContent></Select><Button disabled={!interactive.canTransfer || targetBay === 'none'} onClick={() => { interactive.onTransfer(vehicle.id, targetBay); setTargetZone('none'); setTargetBay('none'); }}><Upload /> Transfer / assign bay</Button><Button variant="secondary" onClick={() => { interactive.onQuickContact(vehicle, location ? `${location.zone}-${location.bayNumber}` : 'Unassigned'); onOpenChange(false); }}><Navigation /> Contact assigned user</Button><Button variant="outline" disabled={!interactive.canEdit} onClick={beginEdit}><Pencil /> Edit vehicle details</Button><Button variant="outline" onClick={() => action('Checked In', 'Check-In')}>Check-In vehicle</Button><Button variant="outline" onClick={() => { interactive.onDeliver(vehicle.id); onOpenChange(false); }}><CarFront /> Delivered</Button><Button variant={vehicle.lowBatteryWarning ? 'destructive' : 'outline'} onClick={() => toggleWarning('lowBatteryWarning', 'Low Battery Warning')}><BatteryWarning /> {vehicle.lowBatteryWarning ? 'Clear Low Battery Warning' : 'Low Battery Warning'}</Button><Button variant={vehicle.noBrakeWarning ? 'destructive' : 'outline'} onClick={() => toggleWarning('noBrakeWarning', 'No Brake Warning')}><CircleStop /> {vehicle.noBrakeWarning ? 'Clear No Brake Warning' : 'No Brake Warning'}</Button><Button variant={vehicle.noFuelWarning ? 'destructive' : 'outline'} onClick={() => toggleWarning('noFuelWarning', 'No Fuel Warning')}><Fuel /> {vehicle.noFuelWarning ? 'Clear No Fuel Warning' : 'No Fuel Warning'}</Button>{interactive.canDelete && <Button variant="destructive" onClick={() => { interactive.onDelete(vehicle.id); onOpenChange(false); }}><Trash2 /> Delete vehicle record</Button>}</div></div><div className="rounded-xl bg-secondary p-4 text-secondary-foreground"><p className="font-bold">Geofence monitoring</p><p className="mt-1 text-sm">Alerts {vehicle.geofenceAlertEnabled ? 'enabled' : 'disabled'} · Current position: {vehicle.geofenceStatus}</p></div></aside>}
+      {interactive && <aside className="space-y-3">
+        <div className="rounded-xl border bg-card p-4 text-card-foreground"><p className="technical-label">Vehicle actions</p><div className="mt-3 grid gap-2">
+          {roadTest && <div className="rounded-lg bg-secondary p-3 text-sm text-secondary-foreground"><div className="flex items-center justify-between gap-2"><strong>Road test request</strong><Badge variant={roadTest.status === 'In Road Test' ? 'secondary' : 'outline'}>{roadTest.status}</Badge></div><p className="mt-1">{roadTest.jobCardNumber} · {roadTest.purpose}</p><p className="mt-1">Assigned to {roadTest.assignedTo || 'Unassigned'}</p></div>}
+          {interactive.canRequestRoadTest && <Button onClick={() => interactive.onRequestRoadTest(vehicle)}><Route /> Request road test</Button>}
+          <Select value={targetType} onValueChange={(value: 'bay' | 'xParking') => { setTargetType(value); setTargetZone('none'); setTargetBay('none'); }}>
+            <SelectTrigger><SelectValue placeholder="Destination type" /></SelectTrigger><SelectContent><SelectItem value="bay">Regular parking space</SelectItem><SelectItem value="xParking">X Parking space</SelectItem></SelectContent>
+          </Select>
+          <Select value={effectiveTargetZone} onValueChange={(zone: string) => { setTargetZone(zone); setTargetBay('none'); }}>
+            <SelectTrigger><SelectValue placeholder="Select destination zone" /></SelectTrigger><SelectContent><SelectItem value="none">Select destination zone</SelectItem>{availableZones.map((zone: string) => <SelectItem key={zone} value={zone}>{zone}</SelectItem>)}</SelectContent>
+          </Select>
+          <Select value={targetBay} onValueChange={setTargetBay} disabled={effectiveTargetZone === 'none'}>
+            <SelectTrigger><SelectValue placeholder={targetType === 'xParking' ? 'Select X Parking space' : 'Select bay number'} /></SelectTrigger>
+            <SelectContent><SelectItem value="none">{targetType === 'xParking' ? 'Select X Parking space' : 'Select bay number'}</SelectItem>{zoneBays.filter((item: ParkingLocation) => item.id).map((item: ParkingLocation) => <SelectItem key={item.id} value={item.id}>{item.bayNumber} · {item.section ?? 'Main'} / {item.lane}</SelectItem>)}</SelectContent>
+          </Select>
+          <Button disabled={!interactive.canTransfer || targetBay === 'none'} onClick={() => { interactive.onTransfer(vehicle.id, targetBay, targetType === 'xParking'); setTargetBay('none'); }}><Upload /> Transfer / assign bay</Button>
+          <Button variant="secondary" onClick={() => { interactive.onQuickContact(vehicle, location ? `${location.zone}-${location.bayNumber}` : 'Unassigned'); onOpenChange(false); }}><Navigation /> Contact assigned user</Button>
+          <Button variant="outline" disabled={!interactive.canEdit} onClick={beginEdit}><Pencil /> Edit vehicle details</Button>
+          <Button variant="outline" onClick={() => action('Checked In', 'Check-In')}>Check-In vehicle</Button>
+          <Button variant="outline" onClick={() => action(vehicle.operationalStatus === 'Washing' ? 'Parked' : 'Washing', vehicle.operationalStatus === 'Washing' ? 'Washing Completed' : 'Washing')}><CarFront /> {vehicle.operationalStatus === 'Washing' ? 'Finish Washing' : 'Washing'}</Button>
+          <Button variant="outline" onClick={() => { interactive.onDeliver(vehicle.id); onOpenChange(false); }}><CarFront /> Delivered</Button>
+          <Button variant={vehicle.lowBatteryWarning ? 'destructive' : 'outline'} onClick={() => toggleWarning('lowBatteryWarning', 'Low Battery Warning')}><BatteryWarning /> {vehicle.lowBatteryWarning ? 'Clear Low Battery Warning' : 'Low Battery Warning'}</Button>
+          <Button variant={vehicle.noBrakeWarning ? 'destructive' : 'outline'} onClick={() => toggleWarning('noBrakeWarning', 'No Brake Warning')}><CircleStop /> {vehicle.noBrakeWarning ? 'Clear No Brake Warning' : 'No Brake Warning'}</Button>
+          <Button variant={vehicle.noFuelWarning ? 'destructive' : 'outline'} onClick={() => toggleWarning('noFuelWarning', 'No Fuel Warning')}><Fuel /> {vehicle.noFuelWarning ? 'Clear No Fuel Warning' : 'No Fuel Warning'}</Button>
+          {interactive.canDelete && <Button variant="destructive" onClick={() => { interactive.onDelete(vehicle.id); onOpenChange(false); }}><Trash2 /> Delete vehicle record</Button>}
+        </div></div>
+        <div className="rounded-xl bg-secondary p-4 text-secondary-foreground"><p className="font-bold">Geofence monitoring</p><p className="mt-1 text-sm">Alerts {vehicle.geofenceAlertEnabled ? 'enabled' : 'disabled'} · Current position: {vehicle.geofenceStatus}</p></div>
+      </aside>}
     </div>
     {interactive && isEditing && draft && <DialogFooter className="sticky -bottom-6 mt-1 border-t bg-background py-4"><Button variant="outline" onClick={() => { setIsEditing(false); setDraft(undefined); }}><X /> Cancel</Button><Button onClick={saveEdit}><Save /> Save changes</Button></DialogFooter>}
   </DialogContent></Dialog>;
