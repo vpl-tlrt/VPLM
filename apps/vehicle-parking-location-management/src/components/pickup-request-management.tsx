@@ -112,8 +112,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
         || dateMatches(request.completed_at) || dateMatches(request.cancelled_at));
   });
   const dailyActivity = useMemo(() => {
-    const byKey = new Map<string, { date: string; userId: string; userName: string; pickups: number; transfers: number }>();
-    const eventCounts = { pickups: 0, transfers: 0 };
+    const byUser = new Map<string, { userId: string; userName: string; pickups: number; transfers: number }>();
     for (const request of requests) {
       const events = [
         { date: request.accepted_at, userId: request.accepted_by_id ?? '', userName: request.accepted_by ?? '', type: 'pickups' as const },
@@ -121,22 +120,18 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
       ];
       for (const event of events) {
         if (!dateMatches(event.date) || (userFilter !== 'all' && event.userId !== userFilter)) continue;
-        eventCounts[event.type] += 1;
-        const date = format(new Date(event.date!), 'yyyy-MM-dd');
         const id = event.userId || event.userName || 'unknown';
-        const key = `${date}:${id}`;
-        const row = byKey.get(key) ?? {
-          date,
+        const row = byUser.get(id) ?? {
           userId: event.userId,
           userName: (users.find(user => user.id === event.userId)?.name ?? event.userName) || 'Unknown user',
           pickups: 0,
           transfers: 0,
         };
         row[event.type] += 1;
-        byKey.set(key, row);
+        byUser.set(id, row);
       }
     }
-    return { rows: [...byKey.values()].sort((a, b) => b.date.localeCompare(a.date) || a.userName.localeCompare(b.userName)), ...eventCounts };
+    return [...byUser.values()].sort((a, b) => a.userName.localeCompare(b.userName));
   }, [dateFrom, dateTo, requests, userFilter, users]);
   const action = async (status: Status) => {
     if (!opened || !supabase || busy) return;
@@ -222,7 +217,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
           <SelectItem value="Workshop Bay">Workshop Bays</SelectItem><SelectItem value="Park Accommodation">Park Accommodation</SelectItem><SelectItem value="Reception for Delivery">Reception for Delivery</SelectItem>
         </SelectContent></Select>
         {destination === 'Workshop Bay' && <Select value={workshopBay} onValueChange={setWorkshopBay}><SelectTrigger><SelectValue placeholder="Choose workshop bay"/></SelectTrigger><SelectContent>{workshopBays.map(location => <SelectItem key={location.id} value={location.id}>{label(location)}</SelectItem>)}</SelectContent></Select>}
-        <Select value={assignedDriverId} onValueChange={setAssignedDriverId}><SelectTrigger aria-label="Assign pickup to driver"><SelectValue placeholder="Assign to driver"/></SelectTrigger><SelectContent>
+        <Select value={assignedDriverId} onValueChange={setAssignedDriverId}><SelectTrigger aria-label="Assign pickup to a user with the Drivers role"><SelectValue placeholder="Select a Driver"/></SelectTrigger><SelectContent>
           <SelectItem value="unassigned">Any driver · unassigned</SelectItem>
           {driverUsers.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}
           {driverUsers.length === 0 && <SelectItem value="no-drivers" disabled>No registered Drivers users</SelectItem>}
@@ -231,8 +226,14 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
         <Button onClick={() => void submit()} disabled={busy || !supabase}>Submit Request</Button>
       </div>}
     </CardContent></Card>
-    <Card><CardHeader><CardTitle>Task filters</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Select value={taskView} onValueChange={(value: 'all' | 'mine') => setTaskView(value)}><SelectTrigger aria-label="Task scope"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All tasks</SelectItem><SelectItem value="mine">My tasks</SelectItem></SelectContent></Select>
+    <Card><CardHeader><CardTitle>Task filters</CardTitle></CardHeader><CardContent className="grid gap-3 lg:grid-cols-4">
+      <div className="grid gap-3">
+        {([{ value: 'mine', label: '1 My Task' }, { value: 'all', label: '2 All Task' }] as const).map(option =>
+          <button key={option.value} type="button" aria-pressed={taskView === option.value}
+            className={`rounded-xl border p-4 text-left font-semibold shadow-sm transition hover:border-primary ${taskView === option.value ? 'border-primary bg-primary/10' : 'bg-card'}`}
+            onClick={() => setTaskView(option.value)}>{option.label}</button>
+        )}
+      </div>
       <Select value={userFilter} onValueChange={setUserFilter}><SelectTrigger aria-label="Filter by user"><SelectValue placeholder="All users"/></SelectTrigger><SelectContent><SelectItem value="all">All users</SelectItem>{users.map(user => <SelectItem key={user.id} value={user.id}>{user.name} · {user.role}</SelectItem>)}</SelectContent></Select>
       <Input type="date" aria-label="Filter from date" value={dateFrom} onChange={event => setDateFrom(event.target.value)} />
       <Input type="date" aria-label="Filter to date" value={dateTo} onChange={event => setDateTo(event.target.value)} />
@@ -248,11 +249,10 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
         <p className="text-xs text-muted-foreground">Assigned to {request.assigned_to ?? 'Any driver'}</p>
       </button>
     )}{selected.length === 0 && <p className="text-sm text-muted-foreground">No {view.toLowerCase()} requests.</p>}</div>}
-    <Card><CardHeader><CardTitle>Driver activity by date</CardTitle><CardDescription>Pickups are counted when accepted; transfers are counted when parking is completed.</CardDescription></CardHeader><CardContent className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2"><div className="rounded-lg bg-muted p-3"><p className="text-sm text-muted-foreground">Vehicles picked up</p><p className="text-2xl font-bold">{dailyActivity.pickups}</p></div><div className="rounded-lg bg-muted p-3"><p className="text-sm text-muted-foreground">Vehicles transferred</p><p className="text-2xl font-bold">{dailyActivity.transfers}</p></div></div>
-      <div className="overflow-x-auto"><table className="w-full min-w-[480px] text-left text-sm"><thead><tr className="border-b text-muted-foreground"><th className="p-2">Date</th><th className="p-2">User</th><th className="p-2">Picked up</th><th className="p-2">Transferred</th></tr></thead><tbody>
-        {dailyActivity.rows.map(row => <tr key={`${row.date}:${row.userId || row.userName}`} className="border-b last:border-0"><td className="p-2">{format(new Date(`${row.date}T00:00:00`), 'dd MMM yyyy')}</td><td className="p-2">{row.userName}</td><td className="p-2">{row.pickups}</td><td className="p-2">{row.transfers}</td></tr>)}
-        {dailyActivity.rows.length === 0 && <tr><td className="p-3 text-center text-muted-foreground" colSpan={4}>No pickup or transfer activity in this date range.</td></tr>}
+    <Card><CardHeader><CardTitle>Driver activity by user</CardTitle><CardDescription>Activity is grouped by user for the selected date range. Pickups are counted when accepted; transfers when parking is completed.</CardDescription></CardHeader><CardContent>
+      <div className="overflow-x-auto"><table className="w-full min-w-[420px] text-left text-sm"><thead><tr className="border-b text-muted-foreground"><th className="p-2">User</th><th className="p-2">Picked up</th><th className="p-2">Transferred</th></tr></thead><tbody>
+        {dailyActivity.map(row => <tr key={row.userId || row.userName} className="border-b last:border-0"><td className="p-2">{row.userName}</td><td className="p-2">{row.pickups}</td><td className="p-2">{row.transfers}</td></tr>)}
+        {dailyActivity.length === 0 && <tr><td className="p-3 text-center text-muted-foreground" colSpan={3}>No pickup or transfer activity in this date range.</td></tr>}
       </tbody></table></div>
     </CardContent></Card>
     <Dialog open={Boolean(opened)} onOpenChange={isOpen => { if (!isOpen) { setOpened(null); setFinalBay(''); } }}>
