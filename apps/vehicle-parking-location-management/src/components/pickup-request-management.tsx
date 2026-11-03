@@ -47,6 +47,8 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
   const [assignedDriverId, setAssignedDriverId] = useState('unassigned');
   const [opened, setOpened] = useState<Pickup | null>(null);
   const [finalBay, setFinalBay] = useState('');
+  const [otherBay, setOtherBay] = useState(false);
+  const [bayNumber, setBayNumber] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'Requested' | 'In Transit' | 'Completed' | 'Cancelled'>('Requested');
@@ -98,6 +100,15 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
   const workshopBays = locations.filter(isWorkshop);
   const finalLocations = opened ? locations.filter(location => matchesDestination(location, opened.destination_type)) : [];
   const locationById = (id: string | null | undefined) => locations.find(location => location.id === id);
+  const centreBay = locations.find(location => location.zone === 'Workshop Centre Bay');
+  const finalLocation = locationById(finalBay);
+  const parkedVehicles = (locationId: string) => vehicles.filter(vehicle => vehicle.id !== opened?.vehicle_id
+    && vehicle.status !== 'Delivered' && vehicle.currentLocationId === locationId && vehicle.xParking !== 'Yes');
+  const finalOccupants = finalLocation ? parkedVehicles(finalLocation.id) : [];
+  const isCentreBay = finalLocation?.zone === 'Workshop Centre Bay';
+  const bayBlocked = Boolean(finalLocation && (finalLocation.status === 'Reserved' || finalLocation.status === 'Maintenance'
+    || (finalLocation.lane === 'Container' ? finalOccupants.length >= 15
+      : finalOccupants.length > 0 || finalLocation.status === 'Occupied')));
   const driverUsers = users.filter(user => user.role === 'Drivers' && user.name.trim());
   const dateMatches = (value: string | null) => {
     if (!value) return false;
@@ -159,6 +170,8 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
     }
     if (status === 'Completed') {
       if (!finalBay) return toast.error('Select where the vehicle was actually parked.');
+      if (bayBlocked) return toast.error('Vehicle Existing not Moved, or parking location is unavailable.');
+      if (vehicles.find(vehicle => vehicle.id === opened.vehicle_id)?.currentLocationId !== opened.origin_location_id) return toast.error('Vehicle location has changed. Refresh before completing.');
       // Validate final destination in the host before changing request state.
       if (!finalLocations.some(location => location.id === finalBay)) return toast.error('Select a parking location matching the requested destination.');
     }
@@ -225,7 +238,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
         </button>
       )}{matching.length === 0 && <p className="text-sm text-muted-foreground">No parked vehicles match.</p>}</div>}
       {selectedVehicle && <div className="space-y-3 rounded-xl border p-3">
-        <p className="font-semibold">Request pickup for {selectedVehicle.plateNumber}</p>
+        <div className="flex items-center justify-between gap-2"><p className="font-semibold">Request pickup for {selectedVehicle.plateNumber}</p><Button type="button" variant="ghost" size="icon" aria-label="Close new pickup request" onClick={() => setSelectedVehicle(null)}><X /></Button></div>
         <Select value={destination} onValueChange={value => { setDestination(value as Destination); setWorkshopBay(''); }}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>
           <SelectItem value="Workshop Bay">Workshop Bays</SelectItem><SelectItem value="Park Accommodation">Park Accommodation</SelectItem><SelectItem value="Reception for Delivery">Reception for Delivery</SelectItem>
         </SelectContent></Select>
@@ -254,7 +267,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
       <Button key={status} variant={view === status ? 'default' : 'outline'} onClick={() => setView(status)}>{status} ({filteredRequests.filter(item => item.status === status).length})</Button>
     )}</div>
     {loading ? <p>Loading pickup requests…</p> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{selected.map(request =>
-      <button key={request.id} type="button" onClick={() => { setOpened(request); setFinalBay(''); }} className="rounded-xl border bg-card p-4 text-left shadow-md transition hover:border-primary hover:shadow-lg">
+      <button key={request.id} type="button" onClick={() => { setOpened(request); setFinalBay(request.destination_type === 'Workshop Bay' ? request.requested_bay_id ?? '' : ''); setOtherBay(false); setBayNumber(''); }} className="rounded-xl border bg-card p-4 text-left shadow-md transition hover:border-primary hover:shadow-lg">
         <span className="text-xs text-muted-foreground">{originType(locationById(request.origin_location_id))} pickup</span>
         <p className="text-xl font-black">{request.plate_number}</p><p className="text-sm">{request.destination_type}</p>
         <p className="text-xs text-muted-foreground">Requested by {request.requested_by}</p>
@@ -274,12 +287,32 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
           <p>Requested for: {opened.destination_type}{opened.requested_bay_id ? ` · ${label(locationById(opened.requested_bay_id) ?? { zone: '', bayNumber: opened.requested_bay_id } as ParkingLocation)}` : ''}</p>
           <p>Requested by: {opened.requested_by}</p>{opened.accepted_by && <p>Accepted by: {opened.accepted_by}</p>}
           <p>Assigned to: {opened.assigned_to ?? 'Any driver'}</p>
-          {opened.status === 'In Transit' && <Select value={finalBay} onValueChange={setFinalBay}><SelectTrigger><SelectValue placeholder="Where did you park the vehicle?"/></SelectTrigger><SelectContent>{finalLocations.map(location => <SelectItem key={location.id} value={location.id}>{label(location)}</SelectItem>)}</SelectContent></Select>}
+          {opened.status === 'In Transit' && <>
+            <Select value={otherBay ? 'other' : finalBay} onValueChange={value => { setOtherBay(value === 'other'); setBayNumber(''); setFinalBay(value === 'other' ? '' : value); }}><SelectTrigger><SelectValue placeholder="Where did you park the vehicle?"/></SelectTrigger><SelectContent>{finalLocations.map(location => <SelectItem key={location.id} value={location.id}>{label(location)}</SelectItem>)}{opened.destination_type === 'Workshop Bay' && <SelectItem value="other">Other · Enter Bay Number</SelectItem>}</SelectContent></Select>
+            {otherBay && <div className="space-y-2">
+              <Input aria-label="Enter Bay Number" placeholder="Enter Bay Number" inputMode="numeric" value={bayNumber} onChange={event => {
+                const value = event.target.value; setBayNumber(value);
+                const match = /^\d+$/.test(value.trim()) ? finalLocations.find(location => location.zone === 'Workshop' && Number(location.bayNumber) === Number(value)) : undefined;
+                setFinalBay(match?.id ?? '');
+              }} />
+              {finalLocation ? <p>Selected parking: {label(finalLocation)}</p> : bayNumber && <p role="alert" className="text-destructive">Workshop bay not found.</p>}
+            </div>}
+            {bayBlocked && <div role="alert" className="space-y-2 rounded-lg border border-amber-500 bg-amber-50 p-3 text-amber-950">
+              <p className="font-semibold">{finalOccupants.length || finalLocation?.status === 'Occupied' ? 'Vehicle Existing not Moved' : 'Parking location unavailable'}</p>
+              {finalOccupants.length > 0 && <p>{finalOccupants.map(vehicle => vehicle.plateNumber).join(', ')}</p>}
+              {opened.destination_type === 'Workshop Bay' && !isCentreBay && <>
+                <p>Would you like to park in Workshop Centre Bay?</p>
+                <p className="font-semibold">Warning: Temporary parking only allowed.</p>
+                <div className="flex gap-2"><Button type="button" disabled={!centreBay} onClick={() => { setFinalBay(centreBay?.id ?? ''); setOtherBay(false); setBayNumber(''); }}>Yes · Workshop Centre Bay</Button><Button type="button" variant="outline" onClick={() => { setFinalBay(''); setOtherBay(true); setBayNumber(''); }}>No · Choose another bay</Button></div>
+              </>}
+            </div>}
+            {isCentreBay && <p role="alert" className="rounded-lg border border-amber-500 bg-amber-50 p-3 font-semibold text-amber-950">Warning: Workshop Centre Bay — temporary parking only allowed.</p>}
+          </>}
         </div>}
         <DialogFooter>
           {opened?.status === 'Requested' && canCancel(opened) && <Button variant="destructive" disabled={busy} onClick={() => void action('Cancelled')}>Cancel Request</Button>}
           {opened?.status === 'Requested' && canAccept(opened) && <Button disabled={busy} onClick={() => void action('In Transit')}>Accept</Button>}
-          {opened?.status === 'In Transit' && canComplete(opened) && <Button disabled={busy || !finalBay} onClick={() => void action('Completed')}>Finish · Complete Parking</Button>}
+          {opened?.status === 'In Transit' && canComplete(opened) && <Button disabled={busy || !finalBay || bayBlocked} onClick={() => void action('Completed')}>Finish · Complete Parking</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>

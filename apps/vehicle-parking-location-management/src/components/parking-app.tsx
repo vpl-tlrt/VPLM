@@ -561,7 +561,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const appShell = (
     <div className={`enterprise-backdrop industrial-grid min-h-screen bg-background text-foreground md:grid md:grid-cols-[240px_1fr] ${isNeumorphism ? 'neumorphism-mode' : ''}`} onPointerDown={handlePullStart} onPointerMove={handlePullMove} onPointerUp={handlePullEnd} onPointerCancel={handlePullEnd}>
       <aside className="glass-shell m-3 hidden rounded-3xl border text-sidebar-foreground md:flex md:flex-col">
-        <Brand />
+        <Brand onHome={() => setScreen('dashboard')} />
         <nav className="space-y-1 p-3">
           {visibleNavigation.map(({ id, label, icon: Icon }) => <Button key={id} variant={screen === id ? 'default' : 'ghost'} className="w-full justify-start" onClick={() => setScreen(id)}><Icon />{label}</Button>)}
         </nav>
@@ -596,7 +596,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
                   </nav>
                 </SheetContent>
               </Sheet>
-              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-md"><CarFront className="h-6 w-6" /></div>
+              <button type="button" aria-label="Go to home page" onClick={() => setScreen('dashboard')} className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-md"><CarFront className="h-6 w-6" /></button>
               <div className="hidden min-w-0 sm:block"><p className="truncate font-bold">Vehicle Parking</p><p className="truncate text-xs text-muted-foreground">Location Management</p></div>
             </div>
 
@@ -661,7 +661,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   return appShell;
 }
 
-function Brand() { return <div className="flex h-20 items-center gap-3 border-b px-5"><div className="grid h-10 w-10 place-items-center rounded-lg bg-primary text-primary-foreground"><CarFront /></div><div><p className="font-bold">Vehicle Parking</p><p className="text-xs text-muted-foreground">Location Management</p></div></div>; }
+function Brand({ onHome }: { onHome: () => void }) { return <button type="button" aria-label="Go to home page" onClick={onHome} className="flex h-20 w-full items-center gap-3 border-b px-5 text-left"><div className="grid h-10 w-10 place-items-center rounded-lg bg-primary text-primary-foreground"><CarFront /></div><div><p className="font-bold">Vehicle Parking</p><p className="text-xs text-muted-foreground">Location Management</p></div></button>; }
 
 type AnalysisMatch = { plateNumber: string; bayLabel: string; locationId: string; confidence: number };
 
