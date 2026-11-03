@@ -677,7 +677,7 @@ export default function AiAssistant({
         </section>
       )}
 
-      <VplmCodexPet awake={open} onToggle={() => setOpen(current => !current)} />
+      <VplmCodexPet awake={open} busy={busy} onToggle={() => setOpen(current => !current)} />
     </div>
   );
 }

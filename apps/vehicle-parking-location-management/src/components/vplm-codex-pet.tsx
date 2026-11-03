@@ -1,25 +1,46 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import supraBotSheet from '@/assets/supra-bot.webp';
 
-/** Codex Pets v1 sprite atlas: 8 columns, 9 rows, 192x208px frames.
- * Uses the Bandit example spritesheet from the MIT-licensed codex-pets-web demo.
- * https://github.com/FroeMic/codex-pets-web
- */
-const SHEET = 'https://froemic.github.io/codex-pets-web/pets/bandit/spritesheet.webp';
-const STATES = { idle: [0, 6], 'running-right': [1, 8], 'running-left': [2, 8], waving: [3, 4], jumping: [4, 5], waiting: [6, 6] } as const;
+/** Supra Bot v2: 8 columns, 11 rows, 192x208px cells. Bundled with the app. */
+const SHEET = supraBotSheet;
+const STATES = {
+  idle: [0, 6], 'running-right': [1, 8], 'running-left': [2, 8],
+  waving: [3, 4], jumping: [4, 5], failed: [5, 8], waiting: [6, 6],
+  running: [7, 6], review: [8, 6],
+} as const;
 type Mood = keyof typeof STATES;
-const SCALE = 0.46;
+const DURATIONS: Record<Mood, readonly number[]> = {
+  idle: [280, 110, 110, 140, 140, 320],
+  'running-right': [120, 120, 120, 120, 120, 120, 120, 220],
+  'running-left': [120, 120, 120, 120, 120, 120, 120, 220],
+  waving: [140, 140, 140, 280], jumping: [140, 140, 140, 140, 280],
+  failed: [140, 140, 140, 140, 140, 140, 140, 240],
+  waiting: [150, 150, 150, 150, 150, 260],
+  running: [120, 120, 120, 120, 120, 220], review: [150, 150, 150, 150, 150, 280],
+};
+const SCALE = 0.75;
 const WIDTH = 192 * SCALE;
 const HEIGHT = 208 * SCALE;
 const MARGIN = 12;
 
-export function VplmCodexPet({ awake, onToggle }: { awake: boolean; onToggle: () => void }) {
+export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean; busy?: boolean; onToggle: () => void }) {
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const [mood, setMood] = useState<Mood>('idle');
   const [frame, setFrame] = useState(0);
   const [imageFailed, setImageFailed] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const [lookDirection, setLookDirection] = useState<number | null>(null);
   const drag = useRef<{ pointerId: number; x: number; y: number; originX: number; originY: number; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
   const button = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReducedMotion(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
 
   useEffect(() => {
     const fit = () => setPosition(current => current && ({
@@ -31,26 +52,51 @@ export function VplmCodexPet({ awake, onToggle }: { awake: boolean; onToggle: ()
   }, []);
 
   useEffect(() => {
-    setMood(awake ? 'waving' : 'idle');
+    setLookDirection(null);
+    setMood(busy ? 'running' : awake ? 'waving' : 'idle');
     setFrame(0);
-    if (!awake) return;
+    if (!awake || busy) return;
     const timer = window.setTimeout(() => setMood('waiting'), 950);
     return () => window.clearTimeout(timer);
-  }, [awake]);
+  }, [awake, busy]);
 
   useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const fps = mood === 'idle' ? 3 : 9;
-    const timer = window.setInterval(() => setFrame(current => (current + 1) % STATES[mood][1]), 1000 / fps);
-    return () => window.clearInterval(timer);
-  }, [mood]);
+    if (reducedMotion || lookDirection !== null) return;
+    const timer = window.setTimeout(() => setFrame(current => (current + 1) % STATES[mood][1]), DURATIONS[mood][frame % STATES[mood][1]]);
+    return () => window.clearTimeout(timer);
+  }, [mood, frame, reducedMotion, lookDirection]);
 
   const currentPosition = position ?? {
     x: typeof window === 'undefined' ? 24 : Math.max(MARGIN, window.innerWidth - WIDTH - 24),
     y: typeof window === 'undefined' ? 24 : Math.max(MARGIN, window.innerHeight - HEIGHT - 78),
   };
+
+  useEffect(() => {
+    if (awake || busy || reducedMotion || !window.matchMedia('(pointer: fine)').matches) return;
+    const look = (event: globalThis.PointerEvent) => {
+      if (drag.current || event.pointerType === 'touch') return;
+      const bounds = button.current?.getBoundingClientRect();
+      if (!bounds) return;
+      const dx = event.clientX - (bounds.left + WIDTH / 2);
+      const dy = event.clientY - (bounds.top + HEIGHT / 2);
+      if (Math.hypot(dx, dy) < 42) { setLookDirection(null); return; }
+      const angle = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360;
+      setLookDirection(Math.round(angle / 22.5) % 16);
+    };
+    const rest = () => setLookDirection(null);
+    window.addEventListener('pointermove', look);
+    window.addEventListener('blur', rest);
+    document.documentElement.addEventListener('pointerleave', rest);
+    return () => {
+      window.removeEventListener('pointermove', look);
+      window.removeEventListener('blur', rest);
+      document.documentElement.removeEventListener('pointerleave', rest);
+    };
+  }, [awake, busy, reducedMotion]);
+
   const start = (event: PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
+    setLookDirection(null);
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, originX: currentPosition.x, originY: currentPosition.y, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -70,7 +116,7 @@ export function VplmCodexPet({ awake, onToggle }: { awake: boolean; onToggle: ()
     if (drag.current?.pointerId !== event.pointerId) return;
     suppressClick.current = drag.current.moved;
     drag.current = null;
-    setMood(awake ? 'waiting' : 'idle');
+    setMood(busy ? 'running' : awake ? 'waiting' : 'idle');
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
@@ -80,17 +126,17 @@ export function VplmCodexPet({ awake, onToggle }: { awake: boolean; onToggle: ()
       type="button"
       aria-label={awake ? 'Close Ask VPLM AI' : 'Open Ask VPLM AI'}
       aria-expanded={awake}
-      title="Drag to move · Tap to chat with Ask VPLM AI"
+      title="Supra Bot · Drag to move · Tap to chat with Ask VPLM AI"
       onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } onToggle(); }}
       onPointerDown={start}
       onPointerMove={move}
       onPointerUp={finish}
       onPointerCancel={finish}
-      className="fixed z-[110] flex touch-none select-none flex-col items-center border-0 bg-transparent p-0 text-foreground outline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
+      className="fixed z-[110] flex touch-none select-none flex-col items-center border-0 bg-transparent p-0 text-foreground shadow-none outline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
       style={{ left: currentPosition.x, top: currentPosition.y, width: WIDTH, cursor: drag.current?.moved ? 'grabbing' : 'grab' }}
     >
       {imageFailed ? (
-        <span className="flex h-[96px] w-[88px] items-center justify-center text-5xl" aria-hidden="true">🐾</span>
+        <span className="flex items-center justify-center text-5xl" style={{ width: WIDTH, height: HEIGHT }} aria-hidden="true">🤖</span>
       ) : (
         <span
           aria-hidden="true"
@@ -98,17 +144,19 @@ export function VplmCodexPet({ awake, onToggle }: { awake: boolean; onToggle: ()
           style={{
             width: WIDTH, height: HEIGHT,
             backgroundImage: `url("${SHEET}")`,
-            backgroundSize: `${1536 * SCALE}px ${1872 * SCALE}px`,
-            backgroundPosition: `-${frame * WIDTH}px -${STATES[mood][0] * HEIGHT}px`,
+            backgroundSize: `${1536 * SCALE}px ${2288 * SCALE}px`,
+            backgroundPosition: reducedMotion ? '0px 0px' : lookDirection !== null
+              ? `-${(lookDirection % 8) * WIDTH}px -${(9 + Math.floor(lookDirection / 8)) * HEIGHT}px`
+              : `-${(frame % STATES[mood][1]) * WIDTH}px -${STATES[mood][0] * HEIGHT}px`,
             backgroundRepeat: 'no-repeat',
-            imageRendering: 'pixelated',
+            imageRendering: 'auto',
             filter: 'drop-shadow(0 5px 5px rgba(0,0,0,.32))',
           }}
         />
       )}
       <img src={SHEET} alt="" className="hidden" onError={() => setImageFailed(true)} />
       <span className="whitespace-nowrap rounded-full border border-cyan-400/60 bg-slate-950/90 px-2.5 py-1 text-[11px] font-bold text-white shadow-lg">
-        {awake ? 'AI awake' : 'Ask VPLM AI'}
+        {busy ? 'AI working' : awake ? 'AI awake' : 'Ask VPLM AI'}
       </span>
     </button>
   );
