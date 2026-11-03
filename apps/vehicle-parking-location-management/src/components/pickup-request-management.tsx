@@ -30,6 +30,11 @@ type Props = {
 const active = (status: Status) => status === 'Requested' || status === 'In Transit';
 const label = (location: ParkingLocation) => `${location.zone} · ${location.bayNumber}`;
 const isWorkshop = (location: ParkingLocation) => /workshop|\bbay\b|\bbp[123]\b/i.test(`${location.zone} ${location.bayNumber}`);
+const matchesDestination = (location: ParkingLocation, destination: Destination) => destination === 'Workshop Bay'
+  ? isWorkshop(location)
+  : destination === 'Reception for Delivery'
+  ? /reception/i.test(location.zone)
+  : ['A', 'B', 'C'].includes(location.zone);
 const originType = (location: ParkingLocation | undefined) => /reception/i.test(location?.zone ?? '') ? 'Reception' : /workshop|\bbay\b|\bbp[123]\b/i.test(location?.zone ?? '') ? 'Workshop' : 'Other';
 
 export function PickupRequestManagement({ vehicles, locations, actor, userId, isAdministrator, canViewFullHistory, onClose, onFinishParking }: Props) {
@@ -91,6 +96,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
     && Boolean(vehicle.currentLocationId) && vehicle.status !== 'Delivered'
   ).slice(0, 30), [vehicles, query]);
   const workshopBays = locations.filter(isWorkshop);
+  const finalLocations = opened ? locations.filter(location => matchesDestination(location, opened.destination_type)) : [];
   const locationById = (id: string | null | undefined) => locations.find(location => location.id === id);
   const driverUsers = users.filter(user => user.role === 'Drivers' && user.name.trim());
   const dateMatches = (value: string | null) => {
@@ -154,7 +160,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
     if (status === 'Completed') {
       if (!finalBay) return toast.error('Select where the vehicle was actually parked.');
       // Validate final destination in the host before changing request state.
-      if (!locations.some(location => location.id === finalBay)) return toast.error('Invalid parking location.');
+      if (!finalLocations.some(location => location.id === finalBay)) return toast.error('Select a parking location matching the requested destination.');
     }
     setBusy(true);
     const timestamp = new Date().toISOString();
@@ -248,7 +254,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
       <Button key={status} variant={view === status ? 'default' : 'outline'} onClick={() => setView(status)}>{status} ({filteredRequests.filter(item => item.status === status).length})</Button>
     )}</div>
     {loading ? <p>Loading pickup requests…</p> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{selected.map(request =>
-      <button key={request.id} type="button" onClick={() => setOpened(request)} className="rounded-xl border bg-card p-4 text-left shadow-md transition hover:border-primary hover:shadow-lg">
+      <button key={request.id} type="button" onClick={() => { setOpened(request); setFinalBay(''); }} className="rounded-xl border bg-card p-4 text-left shadow-md transition hover:border-primary hover:shadow-lg">
         <span className="text-xs text-muted-foreground">{originType(locationById(request.origin_location_id))} pickup</span>
         <p className="text-xl font-black">{request.plate_number}</p><p className="text-sm">{request.destination_type}</p>
         <p className="text-xs text-muted-foreground">Requested by {request.requested_by}</p>
@@ -268,7 +274,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
           <p>Requested for: {opened.destination_type}{opened.requested_bay_id ? ` · ${label(locationById(opened.requested_bay_id) ?? { zone: '', bayNumber: opened.requested_bay_id } as ParkingLocation)}` : ''}</p>
           <p>Requested by: {opened.requested_by}</p>{opened.accepted_by && <p>Accepted by: {opened.accepted_by}</p>}
           <p>Assigned to: {opened.assigned_to ?? 'Any driver'}</p>
-          {opened.status === 'In Transit' && <Select value={finalBay} onValueChange={setFinalBay}><SelectTrigger><SelectValue placeholder="Where did you park the vehicle?"/></SelectTrigger><SelectContent>{locations.map(location => <SelectItem key={location.id} value={location.id}>{label(location)}</SelectItem>)}</SelectContent></Select>}
+          {opened.status === 'In Transit' && <Select value={finalBay} onValueChange={setFinalBay}><SelectTrigger><SelectValue placeholder="Where did you park the vehicle?"/></SelectTrigger><SelectContent>{finalLocations.map(location => <SelectItem key={location.id} value={location.id}>{label(location)}</SelectItem>)}</SelectContent></Select>}
         </div>}
         <DialogFooter>
           {opened?.status === 'Requested' && canCancel(opened) && <Button variant="destructive" disabled={busy} onClick={() => void action('Cancelled')}>Cancel Request</Button>}

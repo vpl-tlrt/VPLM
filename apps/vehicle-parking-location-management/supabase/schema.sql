@@ -177,6 +177,23 @@ create policy "Workspace members can update pickup requests"
     where user_id = (select auth.uid())
   ));
 
+-- Only this boolean lookup bypasses membership RLS; membership rows stay private.
+create schema if not exists private;
+grant usage on schema private to authenticated;
+create or replace function private.is_pickup_driver(driver_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select auth.uid() is not null
+    and exists (select 1 from public.workspace_members where user_id = auth.uid())
+    and exists (select 1 from public.workspace_members where user_id = driver_id and role = 'Drivers');
+$$;
+revoke all on function private.is_pickup_driver(uuid) from public, anon;
+grant execute on function private.is_pickup_driver(uuid) to authenticated;
+
 create or replace function public.enforce_pickup_request_changes()
 returns trigger
 language plpgsql
@@ -199,10 +216,7 @@ begin
       raise exception 'Pickup requests must be created by the signed-in requester.';
     end if;
     if (new.assigned_to_id is null and new.assigned_to is not null)
-      or (new.assigned_to_id is not null and not exists (
-        select 1 from public.workspace_members as driver
-        where driver.user_id = new.assigned_to_id and driver.role = 'Drivers'
-      )) then
+      or (new.assigned_to_id is not null and not private.is_pickup_driver(new.assigned_to_id)) then
       raise exception 'Pickup assignments must target a registered Driver.';
     end if;
     return new;
