@@ -10,7 +10,8 @@ export const supportsXParkingLocation = (location?: ParkingLocation): boolean =>
   if (!location) return false;
   const bayNumber = Number(location.bayNumber);
   return (location.zone === 'A' && bayNumber >= 24 && bayNumber <= 46)
-    || (location.zone === 'B' && bayNumber >= 47 && bayNumber <= 90);
+    || (location.zone === 'B' && bayNumber >= 47 && bayNumber <= 90)
+    || (location.zone === 'C' && bayNumber >= 91 && bayNumber <= 107);
 };
 export interface VehicleHistorySnapshot { vehicle: Vehicle; locationLabel: string; fromLocationLabel?: string; toLocationLabel?: string; assignment: { assignedDate?: string; assignedBy?: string; currentLocationId?: string }; action: string; fromLocationId?: string; toLocationId?: string }
 export interface Movement { id: string; vehicleId: string; fromLocationId?: string; toLocationId?: string; movementType: MovementType; actionDateTime: string; performedBy: string; notes: string; snapshot?: VehicleHistorySnapshot }

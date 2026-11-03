@@ -1,0 +1,39 @@
+name: Weekly business data backup
+
+on:
+  schedule:
+    - cron: '0 9 * * 5'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-business-backup
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required configuration
+        env:
+          SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          BACKUP_SCHEDULER_SECRET: ${{ secrets.BACKUP_SCHEDULER_SECRET }}
+        run: |
+          test -n "$SUPABASE_URL" || { echo "Missing VITE_SUPABASE_URL repository variable"; exit 1; }
+          test -n "$SUPABASE_PUBLISHABLE_KEY" || { echo "Missing VITE_SUPABASE_ANON_KEY repository variable"; exit 1; }
+          test -n "$BACKUP_SCHEDULER_SECRET" || { echo "Missing BACKUP_SCHEDULER_SECRET repository secret"; exit 1; }
+      - name: Back up and prune archived operational history
+        env:
+          SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          BACKUP_SCHEDULER_SECRET: ${{ secrets.BACKUP_SCHEDULER_SECRET }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST "$SUPABASE_URL/functions/v1/business-backup" \
+            --header "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+            --header "Authorization: Bearer $BACKUP_SCHEDULER_SECRET" \
+            --header "x-backup-scheduler-secret: $BACKUP_SCHEDULER_SECRET" \
+            --header "Content-Type: application/json" \
+            --data '{"action":"weekly-archive"}'

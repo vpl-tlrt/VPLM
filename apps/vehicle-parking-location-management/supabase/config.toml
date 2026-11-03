@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.workspace-sync]
 verify_jwt = false
+
+[functions.business-backup]
+verify_jwt = false

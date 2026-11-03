@@ -155,7 +155,7 @@ export function VehicleOverviewDialog(props: VehicleOverviewDialogProps) {
     if (!interactive) return;
     if (!draft?.plateNumber.trim()) return toast.error('Registration number is required.');
     if (draft.xParking === 'Yes' && vehicle.xParking !== 'Yes' && !supportsXParkingLocation(location)) {
-      return toast.error('X Parking is only available in the marked A and B bay rows.');
+      return toast.error('X Parking is only available in the marked A, B, and C bay rows.');
     }
     interactive.onUpdate(vehicle.id, {
       ...draft,

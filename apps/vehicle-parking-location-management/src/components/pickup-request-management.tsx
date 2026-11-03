@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { format } from 'date-fns';
+import { format, isToday } from 'date-fns';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
@@ -24,7 +24,7 @@ type Pickup = {
 type WorkspaceUser = { id: string; name: string; loginId: string; role: string };
 type Props = {
   vehicles: Vehicle[]; locations: ParkingLocation[]; actor: string; userId: string;
-  isAdministrator: boolean; onClose: () => void;
+  isAdministrator: boolean; canViewFullHistory: boolean; onClose: () => void;
   onFinishParking: (vehicleId: string, from: string, to: string) => boolean;
 };
 const active = (status: Status) => status === 'Requested' || status === 'In Transit';
@@ -32,7 +32,7 @@ const label = (location: ParkingLocation) => `${location.zone} · ${location.bay
 const isWorkshop = (location: ParkingLocation) => /workshop|\bbay\b|\bbp[123]\b/i.test(`${location.zone} ${location.bayNumber}`);
 const originType = (location: ParkingLocation | undefined) => /reception/i.test(location?.zone ?? '') ? 'Reception' : /workshop|\bbay\b|\bbp[123]\b/i.test(location?.zone ?? '') ? 'Workshop' : 'Other';
 
-export function PickupRequestManagement({ vehicles, locations, actor, userId, isAdministrator, onClose, onFinishParking }: Props) {
+export function PickupRequestManagement({ vehicles, locations, actor, userId, isAdministrator, canViewFullHistory, onClose, onFinishParking }: Props) {
   const [requests, setRequests] = useState<Pickup[]>([]);
   const [users, setUsers] = useState<WorkspaceUser[]>([]);
   const [query, setQuery] = useState('');
@@ -95,7 +95,10 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
   const driverUsers = users.filter(user => user.role === 'Drivers' && user.name.trim());
   const dateMatches = (value: string | null) => {
     if (!value) return false;
-    const date = format(new Date(value), 'yyyy-MM-dd');
+    const parsedDate = new Date(value);
+    if (!Number.isFinite(parsedDate.getTime())) return false;
+    if (!canViewFullHistory) return isToday(parsedDate);
+    const date = format(parsedDate, 'yyyy-MM-dd');
     return (!dateFrom || date >= dateFrom) && (!dateTo || date <= dateTo);
   };
   const userMatches = (request: Pickup) => userFilter === 'all'
@@ -107,9 +110,13 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
   const filteredRequests = requests.filter(request => {
     const myTask = request.requested_by_id === userId || request.assigned_to_id === userId
       || request.accepted_by_id === userId || request.completed_by_id === userId || request.cancelled_by_id === userId;
+    const requestDates = [request.requested_at, request.accepted_at, request.completed_at, request.cancelled_at];
+    const matchesDateRange = (!dateFrom && !dateTo) || requestDates.some(dateMatches);
+    const visibleForRole = canViewFullHistory
+      ? matchesDateRange
+      : active(request.status) || requestDates.some(dateMatches);
     return (taskView === 'all' || myTask) && userMatches(request)
-      && (!dateFrom && !dateTo || dateMatches(request.requested_at) || dateMatches(request.accepted_at)
-        || dateMatches(request.completed_at) || dateMatches(request.cancelled_at));
+      && visibleForRole;
   });
   const dailyActivity = useMemo(() => {
     const byUser = new Map<string, { userId: string; userName: string; pickups: number; transfers: number }>();
@@ -132,7 +139,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
       }
     }
     return [...byUser.values()].sort((a, b) => a.userName.localeCompare(b.userName));
-  }, [dateFrom, dateTo, requests, userFilter, users]);
+  }, [canViewFullHistory, dateFrom, dateTo, requests, userFilter, users]);
   const action = async (status: Status) => {
     if (!opened || !supabase || busy) return;
     if (status === 'Cancelled' && !isAdministrator && opened.requested_by_id !== userId) {
@@ -226,7 +233,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
         <Button onClick={() => void submit()} disabled={busy || !supabase}>Submit Request</Button>
       </div>}
     </CardContent></Card>
-    <Card><CardHeader><CardTitle>Task filters</CardTitle></CardHeader><CardContent className="grid gap-3 lg:grid-cols-4">
+    <Card><CardHeader><CardTitle>Task filters</CardTitle><CardDescription>{canViewFullHistory ? 'Filter pickup activity by date and user.' : 'Today’s requests and activity are shown; open requests remain visible until completed or cancelled.'}</CardDescription></CardHeader><CardContent className="grid gap-3 lg:grid-cols-4">
       <div className="grid gap-3">
         {([{ value: 'mine', label: '1 My Task' }, { value: 'all', label: '2 All Task' }] as const).map(option =>
           <button key={option.value} type="button" aria-pressed={taskView === option.value}
@@ -235,8 +242,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
         )}
       </div>
       <Select value={userFilter} onValueChange={setUserFilter}><SelectTrigger aria-label="Filter by user"><SelectValue placeholder="All users"/></SelectTrigger><SelectContent><SelectItem value="all">All users</SelectItem>{users.map(user => <SelectItem key={user.id} value={user.id}>{user.name} · {user.role}</SelectItem>)}</SelectContent></Select>
-      <Input type="date" aria-label="Filter from date" value={dateFrom} onChange={event => setDateFrom(event.target.value)} />
-      <Input type="date" aria-label="Filter to date" value={dateTo} onChange={event => setDateTo(event.target.value)} />
+      {canViewFullHistory && <><Input type="date" aria-label="Filter from date" value={dateFrom} onChange={event => setDateFrom(event.target.value)} /><Input type="date" aria-label="Filter to date" value={dateTo} onChange={event => setDateTo(event.target.value)} /></>}
     </CardContent></Card>
     <div className="flex flex-wrap gap-2">{(['Requested','In Transit','Completed','Cancelled'] as const).map(status =>
       <Button key={status} variant={view === status ? 'default' : 'outline'} onClick={() => setView(status)}>{status} ({filteredRequests.filter(item => item.status === status).length})</Button>

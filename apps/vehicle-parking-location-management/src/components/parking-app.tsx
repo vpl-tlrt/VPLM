@@ -18,6 +18,7 @@ import AiAssistant from '@/components/ai-assistant';
 import { emptyVehicleForm, VehicleFormFields, vehicleColorClass, type VehicleFormData } from '@/components/vehicle-form-fields';
 import { RoadTestManagement } from '@/components/road-test-management';
 import { PickupRequestManagement } from '@/components/pickup-request-management';
+import { BackupPlayback } from '@/components/backup-playback';
 import { loadBayManagementState, saveBayManagementState, type BayAuditEntry, type BayMaintenance, type BayReservation } from '@/lib/bay-management-data';
 import { getVehicleRoadTest, loadRoadTestAudit, loadRoadTests, type RoadTestRecord } from '@/lib/road-test-data';
 import {
@@ -62,6 +63,7 @@ const navigation = [
   { id: 'reservations', label: 'Reservations', icon: CalendarDays, minimumRole: 'Supervisor' },
   { id: 'management', label: 'Management', icon: UserCog, minimumRole: 'Supervisor' },
   { id: 'settings', label: 'Settings', icon: Settings, minimumRole: 'Administrator' },
+  { id: 'backup-playback', label: 'Backup Playback', icon: ArchiveRestore, minimumRole: 'Administrator' },
   { id: 'profile', label: 'Profile', icon: UserRound, minimumRole: 'Operator' },
 ] as const;
 
@@ -205,7 +207,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const canRecoverDeliveredVehicle = role === 'Administrator' || role === 'Supervisor' || role === 'TechnicalLeader';
   const isAdministrator = role === 'Administrator' && (access.data?.can('ApplicationSettings', 'ManageSetting') ?? false);
   const canAccessRoadTests = Boolean(access.data && !rolesWithoutRoadTests.includes(role));
-  const visibleNavigation = access.data ? navigation.filter((item) => item.id !== 'layout' && (!localGuest || item.id !== 'pickup-requests') && (item.id !== 'road-tests' || canAccessRoadTests) && roleRank[role] >= roleRank[item.minimumRole as Role]) : navigation.filter((item) => item.id === 'profile');
+  const visibleNavigation = access.data ? navigation.filter((item) => item.id !== 'layout' && (!localGuest || item.id !== 'pickup-requests') && (item.id !== 'road-tests' || canAccessRoadTests) && (item.id !== 'backup-playback' || isAdministrator) && roleRank[role] >= roleRank[item.minimumRole as Role]) : navigation.filter((item) => item.id === 'profile');
   const mobileNavigation = [...visibleNavigation].sort((a, b) => mobileNavigationOrder.indexOf(a.id) - mobileNavigationOrder.indexOf(b.id));
   const moveMobileNavigationItem = (id: Screen, direction: -1 | 1) => {
     setMobileNavigationOrder((current: Screen[]) => {
@@ -355,8 +357,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     if (!validation.valid) { toast.error(validation.error); return false; }
     if (!toUnassignedBay && !location) { toast.error('Choose an available bay or assign to the Unassigned Bay tray.'); return false; }
     const isXParking = validation.value.xParking === 'Yes';
-    if (isXParking && (toUnassignedBay || !location)) { toast.error('Choose an X Parking space beside a supported A or B bay.'); return false; }
-    if (location && isXParking && !supportsXParkingLocation(location)) { toast.error('X Parking is only available in the marked A and B bay rows.'); return false; }
+    if (isXParking && (toUnassignedBay || !location)) { toast.error('Choose an X Parking space beside a supported A, B, or C bay.'); return false; }
+    if (location && isXParking && !supportsXParkingLocation(location)) { toast.error('X Parking is only available in the marked A, B, and C bay rows.'); return false; }
     if (location && !isXParking && !containerCanAccept(location) && (location.status !== 'Available' || linkedVehicleLocationIds.has(normalizedBayId))) { toast.error('This bay is no longer available.'); return false; }
     if (location && isXParking && activeVehicles.some((item: Vehicle) => item.xParking === 'Yes' && parkingRecordKey(item.currentLocationId) === normalizedBayId && item.id !== existing?.id)) {
       toast.error('This bay already has an X-Parked vehicle in front of it. Choose another bay.');
@@ -433,7 +435,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     const target = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(destinationId));
     if (!target) { toast.error('Choose a valid destination.'); return false; }
     if (toXParking) {
-      if (!supportsXParkingLocation(target)) { toast.error('X Parking is only available in the marked A and B bay rows.'); return false; }
+      if (!supportsXParkingLocation(target)) { toast.error('X Parking is only available in the marked A, B, and C bay rows.'); return false; }
       if (activeVehicles.some((item: Vehicle) => item.xParking === 'Yes' && item.id !== vehicle.id && parkingRecordKey(item.currentLocationId) === parkingRecordKey(target.id))) {
         toast.error('This X Parking space is already occupied.');
         return false;
@@ -634,8 +636,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           <div className="relative mt-3 overflow-hidden rounded-2xl bg-background lg:hidden"><span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-base font-bold tabular-nums text-muted-foreground" aria-hidden="true">{format(currentTime, 'HH:mm:ss')}</span><Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-24" aria-label="Global vehicle search" /></div>
         </header>
         <motion.div key={screen} initial={{ opacity: 0, y: 12, scale: 0.995 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] as const }} className="mx-auto max-w-[1600px] p-4 md:p-6 xl:p-8">
-          {screen === 'pickup-requests' && <PickupRequestManagement vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} onClose={() => setScreen('dashboard')} onFinishParking={(vehicleId, from, to) => { const vehicle = vehicles.find(item => item.id === vehicleId); if (!vehicle || vehicle.currentLocationId !== from) { toast.error('Vehicle location has changed. Refresh before completing.'); return false; } return transferVehicleById(vehicleId, to, 'Pickup Request completed'); }} />}
-          {screen === 'road-tests' && canAccessRoadTests && <RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} canCreateAssignment initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} /> }
+          {screen === 'pickup-requests' && <PickupRequestManagement vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} onFinishParking={(vehicleId, from, to) => { const vehicle = vehicles.find(item => item.id === vehicleId); if (!vehicle || vehicle.currentLocationId !== from) { toast.error('Vehicle location has changed. Refresh before completing.'); return false; } return transferVehicleById(vehicleId, to, 'Pickup Request completed'); }} />}
+          {screen === 'road-tests' && canAccessRoadTests && <RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} actorRole={role} canCreateAssignment canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} isAdministrator={isAdministrator} initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} /> }
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
           {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage} canEditVehicle={canEditVehicle} canTransferVehicle={canTransferVehicle} canAssignVehicle={canAssignVehicle} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} onContactVehicle={() => toast.info('Team sharing requires a configured cloud service.')} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} onAssignSelectedBay={(selectedBayId: string, vehicleForm: VehicleFormData) => { setBayId(selectedBayId); setZone(locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(selectedBayId))?.zone ?? zone); setAssignmentVehicle(vehicleForm); }} assignSelectedBay={(selectedBayId?: string) => handleAssign(selectedBayId)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
           {screen === 'assignment' && <Assignment assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} zone={zone} setZone={setZone} bayId={bayId} setBayId={setBayId} availableBays={availableBays} locations={locations} vehicles={activeVehicles} zoneNames={zoneNames} handleAssign={(targetBayId?: string, occupant?: XParkingOccupant) => handleAssign(targetBayId, false, occupant)} handleAssignUnassigned={() => handleAssign(undefined, true)} handleRelease={handleRelease} handleOcr={handleOcr} fileRef={fileRef} />}
@@ -646,6 +648,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           {screen === 'reservations' && <ReservationsScreen reservations={reservations} vehicles={vehicles} locations={locations} selectedVehicleId={selectedVehicleId} setSelectedVehicleId={setSelectedVehicleId} newLocationId={newLocationId} setNewLocationId={setNewLocationId} handleReserve={handleReserve} cancel={(id: string) => { const reservation = reservations.find((item: Reservation) => item.id === id); if (!reservation) return; setReservations((current: Reservation[]) => current.map((item: Reservation) => item.id === id ? { ...item, status: 'Cancelled' } : item)); logAudit('Cancel', 'Reservation', reservation.reservationId); toast.success('Reservation cancelled.'); }} locationLabel={locationLabel} />}
           {screen === 'management' && canManage && <ManagementScreen role={role} locations={locations} setLocations={setLocations} vehicles={vehicles} setVehicles={setVehicles} movements={movements} auditEvents={auditEvents} setAuditEvents={setAuditEvents} logAudit={logAudit} actorId={queueOwnerId} garageLayout={garageLayout} setGarageLayout={setGarageLayout} />}
           {screen === 'settings' && isAdministrator && <SettingsScreen users={onlineUsers} connected={presenceConnected} />}
+          {screen === 'backup-playback' && isAdministrator && <BackupPlayback />}
           {screen === 'profile' && <Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />}
         </motion.div>
       </main>
@@ -822,7 +825,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     const destination = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(destinationId));
     if (!vehicle || !destination) return toast.error('Choose a valid destination.');
     if (toXParking) {
-      if (!supportsXParkingLocation(destination)) return toast.error('X Parking is only available in the marked A and B bay rows.');
+      if (!supportsXParkingLocation(destination)) return toast.error('X Parking is only available in the marked A, B, and C bay rows.');
       if (activeVehicles.some((item: Vehicle) => item.xParking === 'Yes' && item.id !== vehicle.id && parkingRecordKey(item.currentLocationId) === parkingRecordKey(destination.id))) {
         return toast.error('This X Parking space is already occupied.');
       }
@@ -871,7 +874,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     const vehicle = vehicles.find((item: Vehicle) => item.id === vehicleId);
     if (changes.xParking === 'Yes' && vehicle && vehicle.xParking !== 'Yes') {
       const location = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(vehicle.currentLocationId));
-      if (!supportsXParkingLocation(location)) { toast.error('X Parking is only available in the marked A and B bay rows.'); return; }
+      if (!supportsXParkingLocation(location)) { toast.error('X Parking is only available in the marked A, B, and C bay rows.'); return; }
     }
 
     const updated = vehicle ? { ...vehicle, ...changes } : undefined;
@@ -968,7 +971,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                               ? [0, 2, 4, 6].includes(laneIndex)
                               : false;
                           const xParkingBays = laneBays.filter(supportsXParkingLocation);
-                          const xParkingSpacesAbove = zoneItem.zone === 'B' && xParkingBays.some((bay: ParkingLocation) => Number(bay.bayNumber) <= 69);
+                          const xParkingSpacesAbove = zoneItem.zone === 'C' || (zoneItem.zone === 'B' && xParkingBays.some((bay: ParkingLocation) => Number(bay.bayNumber) <= 69));
                           return <div key={`${zoneItem.zone}-${lane}`}>
                             <div className="mb-1 px-2 text-xs font-bold text-foreground">{lane}</div>
                             {xParkingBays.length > 0 && xParkingSpacesAbove && <><div className="x-parking-row-label">X Parking spaces</div>{renderXParkingSpaces(xParkingBays)}</>}
