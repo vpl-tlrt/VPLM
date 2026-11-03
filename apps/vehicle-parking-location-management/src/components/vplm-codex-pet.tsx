@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import supraBotSheet from '@/assets/supra-bot.webp';
+import transformationSheet from '@/assets/supra-transformation.webp';
 
 /** Supra Bot v2: 8 columns, 11 rows, 192x208px cells. Bundled with the app. */
 const SHEET = supraBotSheet;
@@ -30,6 +31,13 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
   const [imageFailed, setImageFailed] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [lookDirection, setLookDirection] = useState<number | null>(null);
+  const [transformationFrame, setTransformationFrame] = useState(awake ? 7 : 0);
+  const transformationProgress = useRef(awake ? 7 : 0);
+  const [transformationReady, setTransformationReady] = useState(false);
+  const [transformationFailed, setTransformationFailed] = useState(false);
+  const transformationTarget = awake ? 7 : 0;
+  const transforming = !transformationFailed && transformationFrame !== transformationTarget;
+  const showTransformation = !transformationFailed && (!awake || transformationFrame < 7);
   const drag = useRef<{ pointerId: number; x: number; y: number; originX: number; originY: number; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
   const button = useRef<HTMLButtonElement>(null);
@@ -52,19 +60,42 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
   }, []);
 
   useEffect(() => {
+    if (!transformationReady || transformationFailed) return;
+    const from = transformationProgress.current;
+    if (reducedMotion) {
+      transformationProgress.current = transformationTarget;
+      setTransformationFrame(transformationTarget);
+      return;
+    }
+    const started = performance.now();
+    const duration = Math.max(1, Math.abs(transformationTarget - from) * 180);
+    let animation = 0;
+    const advance = (now: number) => {
+      const elapsed = Math.min(1, (now - started) / duration);
+      const eased = elapsed * elapsed * (3 - 2 * elapsed);
+      const progress = elapsed === 1 ? transformationTarget : from + (transformationTarget - from) * eased;
+      transformationProgress.current = progress;
+      setTransformationFrame(progress);
+      if (elapsed < 1) animation = window.requestAnimationFrame(advance);
+    };
+    animation = window.requestAnimationFrame(advance);
+    return () => window.cancelAnimationFrame(animation);
+  }, [transformationTarget, transformationReady, transformationFailed, reducedMotion]);
+
+  useEffect(() => {
     setLookDirection(null);
     setMood(busy ? 'running' : awake ? 'waving' : 'idle');
     setFrame(0);
-    if (!awake || busy) return;
+    if (!awake || busy || transforming) return;
     const timer = window.setTimeout(() => setMood('waiting'), 950);
     return () => window.clearTimeout(timer);
-  }, [awake, busy]);
+  }, [awake, busy, transforming]);
 
   useEffect(() => {
-    if (reducedMotion || lookDirection !== null) return;
+    if (reducedMotion || lookDirection !== null || showTransformation) return;
     const timer = window.setTimeout(() => setFrame(current => (current + 1) % STATES[mood][1]), DURATIONS[mood][frame % STATES[mood][1]]);
     return () => window.clearTimeout(timer);
-  }, [mood, frame, reducedMotion, lookDirection]);
+  }, [mood, frame, reducedMotion, lookDirection, showTransformation]);
 
   const currentPosition = position ?? {
     x: typeof window === 'undefined' ? 24 : Math.max(MARGIN, window.innerWidth - WIDTH - 24),
@@ -72,7 +103,7 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
   };
 
   useEffect(() => {
-    if (awake || busy || reducedMotion || !window.matchMedia('(pointer: fine)').matches) return;
+    if (!awake || transforming || busy || reducedMotion || !window.matchMedia('(pointer: fine)').matches) return;
     const look = (event: globalThis.PointerEvent) => {
       if (drag.current || event.pointerType === 'touch') return;
       const bounds = button.current?.getBoundingClientRect();
@@ -92,7 +123,7 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
       window.removeEventListener('blur', rest);
       document.documentElement.removeEventListener('pointerleave', rest);
     };
-  }, [awake, busy, reducedMotion]);
+  }, [awake, busy, reducedMotion, transforming]);
 
   const start = (event: PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
@@ -140,23 +171,45 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
       ) : (
         <span
           aria-hidden="true"
-          className="block shrink-0"
+          className="relative block shrink-0"
           style={{
             width: WIDTH, height: HEIGHT,
-            backgroundImage: `url("${SHEET}")`,
-            backgroundSize: `${1536 * SCALE}px ${2288 * SCALE}px`,
-            backgroundPosition: reducedMotion ? '0px 0px' : lookDirection !== null
+            backgroundImage: showTransformation ? 'none' : `url("${SHEET}")`,
+            backgroundSize: `${1536 * SCALE}px ${(showTransformation ? 208 : 2288) * SCALE}px`,
+            backgroundPosition: showTransformation
+              ? `-${Math.floor(transformationFrame) * WIDTH}px 0px`
+              : reducedMotion ? '0px 0px' : lookDirection !== null
               ? `-${(lookDirection % 8) * WIDTH}px -${(9 + Math.floor(lookDirection / 8)) * HEIGHT}px`
               : `-${(frame % STATES[mood][1]) * WIDTH}px -${STATES[mood][0] * HEIGHT}px`,
             backgroundRepeat: 'no-repeat',
             imageRendering: 'auto',
             filter: 'drop-shadow(0 5px 5px rgba(0,0,0,.32))',
           }}
-        />
+        >
+          {showTransformation && (
+            <span className="absolute inset-0 block" style={{
+              backgroundImage: `url("${transformationSheet}")`,
+              backgroundSize: `${1536 * SCALE}px ${208 * SCALE}px`,
+              backgroundPosition: `-${Math.floor(transformationFrame) * WIDTH}px 0px`,
+              backgroundRepeat: 'no-repeat',
+              opacity: 1 - (transformationFrame - Math.floor(transformationFrame)),
+            }} />
+          )}
+          {showTransformation && (
+            <span className="absolute inset-0 block" style={{
+              backgroundImage: `url("${transformationSheet}")`,
+              backgroundSize: `${1536 * SCALE}px ${208 * SCALE}px`,
+              backgroundPosition: `-${Math.min(7, Math.floor(transformationFrame) + 1) * WIDTH}px 0px`,
+              backgroundRepeat: 'no-repeat',
+              opacity: transformationFrame - Math.floor(transformationFrame),
+            }} />
+          )}
+        </span>
       )}
       <img src={SHEET} alt="" className="hidden" onError={() => setImageFailed(true)} />
+      <img src={transformationSheet} alt="" className="hidden" onLoad={() => setTransformationReady(true)} onError={() => setTransformationFailed(true)} />
       <span className="whitespace-nowrap rounded-full border border-cyan-400/60 bg-slate-950/90 px-2.5 py-1 text-[11px] font-bold text-white shadow-lg">
-        {busy ? 'AI working' : awake ? 'AI awake' : 'Ask VPLM AI'}
+        {transforming ? 'Transforming…' : busy ? 'AI working' : awake ? 'AI awake' : 'Ask VPLM AI'}
       </span>
     </button>
   );
