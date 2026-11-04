@@ -135,5 +135,6 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     };
   }, [localOnly, sync]);
 
-  return { sync, state, lastSyncAt, pendingCount, hasPublishedSnapshot: true };
+  const getRevision = useCallback(() => revision.current, []);
+  return { sync, getRevision, state, lastSyncAt, pendingCount, hasPublishedSnapshot: true };
 }

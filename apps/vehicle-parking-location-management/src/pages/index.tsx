@@ -321,6 +321,7 @@ export default function HomePage() {
   const [passwordSetup, setPasswordSetup] = useState(isPasswordSetupUrl);
   const [workspaceRevision, setWorkspaceRevision] = useState<number | null>(null);
   const [workspaceGuest, setWorkspaceGuest] = useState(false);
+  const [pickupToReopen, setPickupToReopen] = useState<string>();
   const [workspaceRefresh, setWorkspaceRefresh] = useState(0);
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
   const [workspaceUserId, setWorkspaceUserId] = useState<string>();
@@ -358,6 +359,7 @@ export default function HomePage() {
       if (workspaceUserId) clearWorkspaceSnapshot();
       setGuestWorkspace(false);
       setWorkspaceGuest(false);
+      setPickupToReopen(undefined);
       return;
     }
     let active = true;
@@ -432,6 +434,8 @@ export default function HomePage() {
     <ParkingApp
       key={`${session.user.id}:${workspaceRefresh}`}
       workspaceGuest={workspaceGuest}
+      initialPickupRequestId={pickupToReopen}
+      onPickupWorkspaceRefresh={id => { setPickupToReopen(id); setWorkspaceLoaded(false); setWorkspaceRefresh(value => value + 1); }}
       onGuestRefresh={() => { setWorkspaceLoaded(false); setWorkspaceRefresh(value => value + 1); }}
       signedInUserId={typeof session.user.user_metadata.login_id === 'string' ? session.user.user_metadata.login_id : session.user.email ?? 'Signed-in user'}
       initialCloudRevision={workspaceRevision}

@@ -10,10 +10,10 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 
-import { submitPickupRequest, type PickupDestination as Destination } from '@/lib/pickup-request-data';
+import { loadPickupVehicleLocation, pickupLocationWarning, pickupParkingNotice, submitPickupRequest, type PickupDestination as Destination } from '@/lib/pickup-request-data';
 type Status = 'Requested' | 'In Transit' | 'Completed' | 'Cancelled';
 type Pickup = {
-  id: string; vehicle_id: string; plate_number: string; origin_location_id: string;
+  management_revision: number; id: string; vehicle_id: string; plate_number: string; origin_location_id: string;
   destination_type: Destination; requested_bay_id: string | null; status: Status;
   requested_by: string; requested_at: string; accepted_by: string | null; accepted_at: string | null;
   completed_by: string | null; completed_at: string | null; final_location_id: string | null;
@@ -25,6 +25,9 @@ type Pickup = {
 type WorkspaceUser = { id: string; name: string; loginId: string; role: string };
 type Props = {
   readOnly?: boolean;
+  initialRequestId?: string;
+  getWorkspaceRevision: () => number | null;
+  onRefreshWorkspace: (requestId: string) => void;
   vehicles: Vehicle[]; locations: ParkingLocation[]; actor: string; userId: string;
   isAdministrator: boolean; canViewFullHistory: boolean; onClose: () => void;
   onFinishParking: (vehicleId: string, from: string, to: string, centreBayVehicleId?: string) => boolean;
@@ -39,7 +42,7 @@ const matchesDestination = (location: ParkingLocation, destination: Destination)
   : ['A', 'B', 'C'].includes(location.zone);
 const originType = (location: ParkingLocation | undefined) => /reception/i.test(location?.zone ?? '') ? 'Reception' : /workshop|\bbay\b|\bbp[123]\b/i.test(location?.zone ?? '') ? 'Workshop' : 'Other';
 
-export function PickupRequestManagement({ readOnly = false, vehicles, locations, actor, userId, isAdministrator, canViewFullHistory, onClose, onFinishParking }: Props) {
+export function PickupRequestManagement({ readOnly = false, initialRequestId, onRefreshWorkspace, getWorkspaceRevision, vehicles, locations, actor, userId, isAdministrator, canViewFullHistory, onClose, onFinishParking }: Props) {
   const [requests, setRequests] = useState<Pickup[]>([]);
   const [users, setUsers] = useState<WorkspaceUser[]>([]);
   const [query, setQuery] = useState('');
@@ -48,6 +51,20 @@ export function PickupRequestManagement({ readOnly = false, vehicles, locations,
   const [workshopBay, setWorkshopBay] = useState('');
   const [assignedDriverId, setAssignedDriverId] = useState('unassigned');
   const [opened, setOpened] = useState<Pickup | null>(null);
+  const [resumed, setResumed] = useState(false);
+  const [liveLocation, setLiveLocation] = useState<{ vehicleId: string; location: Awaited<ReturnType<typeof loadPickupVehicleLocation>>['data'] }>();
+  const openedVehicleId = opened && active(opened.status) ? opened.vehicle_id : undefined;
+  useEffect(() => {
+    if (!openedVehicleId) return;
+    let active = true;
+    const check = async () => {
+      const { data, error } = await loadPickupVehicleLocation(openedVehicleId);
+      if (active && !error) setLiveLocation({ vehicleId: openedVehicleId, location: data });
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), 12000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [openedVehicleId]);
   const [finalBay, setFinalBay] = useState('');
   const [otherBay, setOtherBay] = useState(false);
   const [bayNumber, setBayNumber] = useState('');
@@ -58,6 +75,12 @@ export function PickupRequestManagement({ readOnly = false, vehicles, locations,
   const [userFilter, setUserFilter] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  useEffect(() => {
+    if (resumed || !initialRequestId || loading) return;
+    setResumed(true);
+    const request = requests.find(item => item.id === initialRequestId);
+    if (request) { setView(request.status); setOpened(request); setFinalBay(request.requested_bay_id ?? ''); }
+  }, [initialRequestId, loading, requests, resumed]);
   const refresh = async () => {
     if (!supabase) { setLoading(false); return; }
     const pageSize = 1000;
@@ -113,11 +136,22 @@ export function PickupRequestManagement({ readOnly = false, vehicles, locations,
   const canMoveToCentre = Boolean(plannedCentreMove && !vehicles.some(vehicle => vehicle.xParking === 'Yes' && vehicle.status !== 'Delivered' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(finalBay)) && centreBay && !['Reserved', 'Maintenance'].includes(centreBay.status)
     && vehicles.filter(vehicle => vehicle.status !== 'Delivered' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(centreBay.id)).length < centreBay.capacity);
   const pickupVehicle = vehicles.find(vehicle => vehicle.id === opened?.vehicle_id && vehicle.status !== 'Delivered');
+  const currentBay = pickupVehicle?.currentLocationId;
+  const checkedLocation = liveLocation?.vehicleId === opened?.vehicle_id ? liveLocation?.location : undefined;
+  const needsWorkspaceRefresh = checkedLocation !== undefined && (
+    (checkedLocation && checkedLocation.workspace_revision > (getWorkspaceRevision() ?? 0))
+    ||
+    parkingRecordKey(checkedLocation?.location_id ?? undefined) !== parkingRecordKey(currentBay)
+    || (checkedLocation?.vehicle_status === 'Delivered') !== (vehicles.find(item => item.id === opened?.vehicle_id)?.status === 'Delivered')
+    || (checkedLocation?.x_parking === 'Yes') !== (pickupVehicle?.xParking === 'Yes'));
+  const displayedBay = checkedLocation === undefined ? currentBay : checkedLocation?.location_id;
+  const locationChanged = opened && active(opened.status) && parkingRecordKey(displayedBay ?? undefined) !== parkingRecordKey(opened.origin_location_id);
   const alreadyParked = Boolean(finalLocation && pickupVehicle?.xParking !== 'Yes'
     && parkingRecordKey(pickupVehicle?.currentLocationId) === parkingRecordKey(finalLocation.id));
   const bayBlocked = Boolean(finalLocation && (finalLocation.status === 'Reserved' || finalLocation.status === 'Maintenance'
     || (finalLocation.lane === 'Container' ? finalOccupants.length >= finalLocation.capacity
       : (!canMoveToCentre && (finalOccupants.length > 0 || (finalLocation.status === 'Occupied' && !alreadyParked))))));
+  const selectedPickup = requests.find(item => item.vehicle_id === selectedVehicle?.id && active(item.status));
   const driverUsers = users.filter(user => user.role === 'Drivers' && user.name.trim());
   const dateMatches = (value: string | null) => {
     if (!value) return false;
@@ -168,8 +202,8 @@ export function PickupRequestManagement({ readOnly = false, vehicles, locations,
   }, [canViewFullHistory, dateFrom, dateTo, requests, userFilter, users]);
   const action = async (status: Status) => {
     if (readOnly || !opened || !supabase || busy) return;
-    if (status === 'Cancelled' && !isAdministrator && opened.requested_by_id !== userId) {
-      return toast.error('Only an Administrator or the person who requested this pickup can cancel it.');
+    if (status === 'Cancelled' && !canCancel(opened)) {
+      return toast.error('Only an Administrator can cancel an in-transit pickup. A requester can cancel before acceptance.');
     }
     if (status === 'In Transit' && !isAdministrator && opened.assigned_to_id && opened.assigned_to_id !== userId) {
       return toast.error('This pickup is assigned to another driver.');
@@ -180,42 +214,66 @@ export function PickupRequestManagement({ readOnly = false, vehicles, locations,
     if (status === 'Completed') {
       if (!finalBay) return toast.error('Select where the vehicle was actually parked.');
       if (bayBlocked) return toast.error('Vehicle Existing not Moved, or parking location is unavailable.');
-      if (!alreadyParked && (!pickupVehicle || parkingRecordKey(pickupVehicle.currentLocationId) !== parkingRecordKey(opened.origin_location_id))) return toast.error('Vehicle location has changed. Refresh before completing.');
+      if (!currentBay || needsWorkspaceRefresh) return toast.error(pickupLocationWarning);
       // Validate final destination in the host before changing request state.
       if (!finalLocations.some(location => location.id === finalBay)) return toast.error('Select a parking location matching the requested destination.');
     }
     setBusy(true);
+    if (status === 'Completed' || status === 'In Transit') {
+      const { data, error } = await loadPickupVehicleLocation(opened.vehicle_id);
+      if (!error) setLiveLocation({ vehicleId: opened.vehicle_id, location: data });
+      if (error || !data || data.vehicle_status === 'Delivered' || !data.location_id
+        || parkingRecordKey(data.location_id) !== parkingRecordKey(currentBay)
+        || (data.x_parking === 'Yes') !== (pickupVehicle?.xParking === 'Yes')
+        || (status === 'Completed' && data.workspace_revision !== getWorkspaceRevision())) {
+        setBusy(false);
+        return toast.error(error ? 'Could not verify the current vehicle location.' : pickupLocationWarning);
+      }
+    }
     const timestamp = new Date().toISOString();
     const update = status === 'In Transit'
       ? { status, accepted_by: actor, accepted_by_id: userId, accepted_at: timestamp }
       : status === 'Completed'
       ? { status, completed_by: actor, completed_by_id: userId, completed_at: timestamp, final_location_id: finalBay }
       : { status, cancelled_by: actor, cancelled_by_id: userId, cancelled_at: timestamp };
-    const expected = status === 'In Transit' ? 'Requested' : status === 'Completed' ? 'In Transit' : 'Requested';
-    const { data, error } = await supabase.from('pickup_requests').update(update).eq('id', opened.id).eq('status', expected).select('id');
+    const expected = status === 'In Transit' ? 'Requested' : status === 'Completed' ? 'In Transit' : opened.status;
+    const { data, error } = await supabase.from('pickup_requests').update(update).eq('id', opened.id).eq('status', expected).eq('management_revision', opened.management_revision).select('id');
     setBusy(false);
-    if (error || !data?.length) { toast.error(error?.message ?? 'Request changed on another device. Refresh and retry.'); void refresh(); return; }
-    if (status === 'Completed' && !alreadyParked && !onFinishParking(opened.vehicle_id, opened.origin_location_id, finalBay, canMoveToCentre ? opened.centre_bay_vehicle_id ?? undefined : undefined)) {
+    if (error || !data?.length) { toast.error(error?.message ?? 'Request changed on another device. Refresh and retry.'); setOpened(null); void refresh(); return; }
+    if (status === 'Completed' && !alreadyParked && !onFinishParking(opened.vehicle_id, currentBay!, finalBay, canMoveToCentre ? opened.centre_bay_vehicle_id ?? undefined : undefined)) {
       toast.error('Pickup record completed, but vehicle transfer failed. Contact a supervisor to reconcile the location.');
       setOpened(null); void refresh(); return;
     }
     toast.success(status === 'Completed' ? 'Parking completed.' : status === 'In Transit' ? 'Pickup accepted.' : 'Pickup cancelled.');
     setOpened(null); setFinalBay(''); void refresh();
   };
+  const deleteRequest = async () => {
+    if (readOnly || !isAdministrator || !opened || !supabase || busy || !window.confirm(`Delete the pickup request for ${opened.plate_number}?`)) return;
+    setBusy(true);
+    const { data, error } = await supabase.from('pickup_requests').delete().eq('id', opened.id)
+      .eq('management_revision', opened.management_revision).select('id');
+    setBusy(false);
+    if (error || !data?.length) { toast.error(error?.message ?? 'Request changed on another device. Reopen it and retry.'); setOpened(null); void refresh(); return; }
+    setOpened(null);
+    toast.success('Pickup request deleted.');
+    void refresh();
+  };
   const submit = async () => {
     if (readOnly || !supabase || !selectedVehicle || busy) return;
     if (destination === 'Workshop Bay' && !workshopBay) return toast.error('Select a workshop bay.');
     if (!selectedVehicle.currentLocationId) return toast.error('Vehicle has no recorded parking location.');
-    if (requests.some(item => item.vehicle_id === selectedVehicle.id && active(item.status))) return toast.error('An active pickup already exists for this vehicle.');
+    const existing = requests.find(item => item.vehicle_id === selectedVehicle.id && active(item.status));
+    if (existing) return toast.error(pickupParkingNotice(existing, locations));
     setBusy(true);
     const error = await submitPickupRequest(selectedVehicle, destination, destination === 'Workshop Bay' ? workshopBay : null,
-      actor, userId, driverUsers.find(user => user.id === assignedDriverId));
+      actor, userId, driverUsers.find(user => user.id === assignedDriverId), undefined, locations);
     setBusy(false);
     if (error) return toast.error(error);
     toast.success('Pickup requested.'); setSelectedVehicle(null); setQuery(''); setWorkshopBay(''); setAssignedDriverId('unassigned'); void refresh();
   };
   const selected = filteredRequests.filter(item => item.status === view);
-  const canCancel = (request: Pickup) => isAdministrator || request.requested_by_id === userId;
+  const canCancel = (request: Pickup) => request.status === 'Requested' ? isAdministrator || request.requested_by_id === userId
+    : request.status === 'In Transit' && isAdministrator;
   const canAccept = (request: Pickup) => isAdministrator || !request.assigned_to_id || request.assigned_to_id === userId;
   const canComplete = (request: Pickup) => isAdministrator || (request.accepted_by_id
     ? request.accepted_by_id === userId
@@ -224,9 +282,8 @@ export function PickupRequestManagement({ readOnly = false, vehicles, locations,
     : !canComplete(opened) ? 'The driver who accepted this pickup or an Administrator can finish parking.'
     : !finalBay ? 'Select an available bay to finish parking.'
     : bayBlocked ? 'Clear the selected bay or choose an available destination.'
-    : !pickupVehicle || (!alreadyParked && parkingRecordKey(pickupVehicle.currentLocationId) !== parkingRecordKey(opened.origin_location_id))
-      ? 'The vehicle location has changed. Check its current location before finishing.'
-      : '';
+    : needsWorkspaceRefresh ? 'Refresh workspace data to use the current pickup bay.'
+    : !currentBay ? 'The vehicle has no recorded parking bay.'      : '';
   const counters = [
     { title: 'Reception', count: filteredRequests.filter(item => item.status === 'Requested' && originType(locationById(item.origin_location_id)) === 'Reception').length },
     { title: 'Workshop', count: filteredRequests.filter(item => item.status === 'Requested' && originType(locationById(item.origin_location_id)) === 'Workshop').length },
@@ -248,6 +305,7 @@ export function PickupRequestManagement({ readOnly = false, vehicles, locations,
       )}{matching.length === 0 && <p className="text-sm text-muted-foreground">No parked vehicles match.</p>}</div>}
       {selectedVehicle && <div className="space-y-3 rounded-xl border p-3">
         <div className="flex items-center justify-between gap-2"><p className="font-semibold">Request pickup for {selectedVehicle.plateNumber}</p><Button type="button" variant="ghost" size="icon" aria-label="Close new pickup request" onClick={() => setSelectedVehicle(null)}><X /></Button></div>
+        {selectedPickup && <p role="alert" className="font-semibold text-amber-700">{pickupParkingNotice(selectedPickup, locations)}</p>}
         <Select value={destination} onValueChange={value => { setDestination(value as Destination); setWorkshopBay(''); }}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>
           <SelectItem value="Workshop Bay">Workshop Bays</SelectItem><SelectItem value="Park Accommodation">Park Accommodation</SelectItem><SelectItem value="Reception for Delivery">Reception for Delivery</SelectItem>
         </SelectContent></Select>
@@ -258,7 +316,7 @@ export function PickupRequestManagement({ readOnly = false, vehicles, locations,
           {driverUsers.length === 0 && <SelectItem value="no-drivers" disabled>No registered Drivers users</SelectItem>}
         </SelectContent>
         </Select>
-        <Button onClick={() => void submit()} disabled={busy || !supabase}>Submit Request</Button>
+        <Button onClick={() => void submit()} disabled={busy || !supabase || Boolean(selectedPickup)}>Submit Request</Button>
       </div>}
     </CardContent></Card>}
     <Card><CardHeader><CardTitle>Task filters</CardTitle><CardDescription>{canViewFullHistory ? 'Filter pickup activity by date and user.' : 'Today’s requests and activity are shown; open requests remain visible until completed or cancelled.'}</CardDescription></CardHeader><CardContent className="grid gap-3 lg:grid-cols-4">
@@ -289,10 +347,16 @@ export function PickupRequestManagement({ readOnly = false, vehicles, locations,
         {dailyActivity.length === 0 && <tr><td className="p-3 text-center text-muted-foreground" colSpan={3}>No pickup or transfer activity in this date range.</td></tr>}
       </tbody></table></div>
     </CardContent></Card>
-    <Dialog open={Boolean(opened)} onOpenChange={isOpen => { if (!isOpen) { setOpened(null); setFinalBay(''); } }}>
+    <Dialog open={Boolean(opened)} onOpenChange={isOpen => { if (!isOpen && !busy) { setOpened(null); setFinalBay(''); } }}>
       <DialogContent className="max-h-[90dvh] grid-rows-[auto_minmax(0,1fr)_auto]"><DialogHeader><DialogTitle>{opened?.plate_number} · {opened?.status}</DialogTitle></DialogHeader>
         {opened && <div className="min-h-0 space-y-2 overflow-y-auto pr-1 text-sm">
-          <p>From: {locationById(opened.origin_location_id) ? label(locationById(opened.origin_location_id)!) : opened.origin_location_id}</p>
+          <p>Original pickup bay: {locationById(opened.origin_location_id) ? label(locationById(opened.origin_location_id)!) : opened.origin_location_id}</p>
+          {active(opened.status) && <>
+            <p className="font-semibold">Current pickup bay: {displayedBay ? locationById(displayedBay) ? label(locationById(displayedBay)!) : displayedBay : 'No recorded bay'}</p>
+            {locationChanged && <p role="alert" className="font-semibold text-amber-700">{pickupLocationWarning}</p>}
+            {needsWorkspaceRefresh && <Button size="sm" variant="outline" disabled={busy} onClick={() => onRefreshWorkspace(opened.id)}>Refresh workspace and reopen pickup</Button>}
+            <p>{pickupParkingNotice(opened, locations)}</p>
+          </>}
           <p>Requested for: {opened.destination_type}{opened.requested_bay_id ? ` · ${label(locationById(opened.requested_bay_id) ?? { zone: '', bayNumber: opened.requested_bay_id } as ParkingLocation)}` : ''}</p>
           <p>Requested by: {opened.requested_by}</p>{opened.accepted_by && <p>Accepted by: {opened.accepted_by}</p>}
           <p>Assigned to: {opened.assigned_to ?? 'Any driver'}</p>
@@ -322,8 +386,9 @@ export function PickupRequestManagement({ readOnly = false, vehicles, locations,
           </>}
         </div>}
         <DialogFooter>
-          {!readOnly && opened?.status === 'Requested' && canCancel(opened) && <Button variant="destructive" disabled={busy} onClick={() => void action('Cancelled')}>Cancel Request</Button>}
-          {!readOnly && opened?.status === 'Requested' && canAccept(opened) && <Button disabled={busy} onClick={() => void action('In Transit')}>Accept</Button>}
+          {!readOnly && isAdministrator && opened && <Button variant="destructive" disabled={busy} onClick={() => void deleteRequest()}>Delete request</Button>}
+          {!readOnly && opened && canCancel(opened) && <Button variant="destructive" disabled={busy} onClick={() => void action('Cancelled')}>Cancel Request</Button>}
+          {!readOnly && opened?.status === 'Requested' && canAccept(opened) && <Button disabled={busy || needsWorkspaceRefresh || !currentBay} onClick={() => void action('In Transit')}>Accept</Button>}
           {!readOnly && opened?.status === 'In Transit' && <div className="grid w-full gap-2">
             {completionBlock && <p id="pickup-completion-status" className="text-sm text-muted-foreground">{completionBlock}</p>}
             <Button disabled={busy || !supabase || Boolean(completionBlock)} aria-describedby={completionBlock ? 'pickup-completion-status' : undefined}

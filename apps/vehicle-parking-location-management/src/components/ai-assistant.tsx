@@ -1,3 +1,4 @@
+import { findActivePickup, loadPickupVehicleLocation, pickupLocationWarning, pickupParkingNotice } from '@/lib/pickup-request-data';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { BookOpen, Bot, CarFront, CircleParking, LoaderCircle, MapPin, MoveRight, Route, Search, Send, Sparkles, X } from 'lucide-react';
 import { mapParkingLocationId, supportsXParkingLocation, type Movement, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
@@ -171,23 +172,25 @@ export default function AiAssistant({
     const details = `${vehicle.plateNumber} — ${vehicle.brand} ${vehicle.model}, ${vehicle.color}.`;
     const version = responseVersion.current;
     const own = ownRunningRoadTest(vehicle);
-    if (vehicle.status === 'Delivered' || !vehicle.currentLocationId || own) {
+    const pickup = vehicle.status !== 'Delivered' ? await findActivePickup(vehicle.id) : undefined;
+    const live = pickup?.data ? await loadPickupVehicleLocation(vehicle.id) : undefined;
+    if (version !== responseVersion.current) return;
+    const currentLocationId = live && !live.error ? live.data?.location_id ?? undefined : vehicle.currentLocationId;
+    const pickupNotice = pickup?.data ? pickupParkingNotice(pickup.data, locations) : '';
+    const pickupMoved = pickup?.data && normalizeLocation(currentLocationId ?? '') !== normalizeLocation(pickup.data.origin_location_id);
+    const pickupDetails = [pickupNotice, pickupMoved ? pickupLocationWarning : ''].filter(Boolean).join('\n');
+    if (vehicle.status === 'Delivered' || !currentLocationId || own) {
       const test = loadRoadTests().find(item => item.vehicleId === vehicle.id && item.status === 'In Road Test');
-      const pickup = !test && vehicle.status !== 'Delivered' && supabase
-        ? await supabase.from('pickup_requests').select('origin_location_id, accepted_at').eq('vehicle_id', vehicle.id)
-          .eq('status', 'In Transit').order('accepted_at', { ascending: false }).limit(1).maybeSingle()
-        : undefined;
-      if (version !== responseVersion.current) return;
       const lastMovement = movements.filter(item => item.vehicleId === vehicle.id)
         .sort((a, b) => b.actionDateTime.localeCompare(a.actionDateTime))[0];
       const lastBay = lastMovement?.toLocationId ?? lastMovement?.fromLocationId;
-      const status = vehicle.status === 'Delivered' ? 'Delivered' : test ? 'In Road Test' : pickup?.data ? 'In Transit' : vehicle.status;
+      const status = vehicle.status === 'Delivered' ? 'Delivered' : test ? 'In Road Test' : pickup?.data?.status === 'In Transit' ? 'In Transit' : vehicle.status;
       const from = vehicle.status === 'Delivered' ? vehicle.finalParkingBay || (lastBay ? locationLabel(lastBay) : '')
         : (test?.departureLocationId ?? pickup?.data?.origin_location_id ?? lastBay);
       const place = from && vehicle.status !== 'Delivered' ? locationLabel(from) : from;
       const seenAt = vehicle.deliveredAt ?? test?.startTimestamp ?? pickup?.data?.accepted_at ?? lastMovement?.actionDateTime;
       const time = seenAt ? new Date(seenAt).toLocaleString('en-GB', { timeZone: 'Asia/Qatar' }) : '';
-      addAssistantMessage(`${details}\nLast Seen: ${status}${place ? ` · ${place}` : ''}${time ? ` · ${time}` : ''}.${pickup?.error ? ' Pickup status could not be checked.' : ''}`);
+      addAssistantMessage(`${details}\nLast Seen: ${status}${place ? ` · ${place}` : ''}${time ? ` · ${time}` : ''}.${pickup?.error ? ' Pickup status could not be checked.' : ''}${pickupDetails ? `\n${pickupDetails}` : ''}`);
       if (own && vehicle.status !== 'Delivered') {
         setActiveFunction(null);
         setTransferFlow(null);
@@ -196,7 +199,11 @@ export default function AiAssistant({
       }
       return;
     }
-    const parkedDetails = `${details} Current bay: ${locationLabel(vehicle.currentLocationId)}.`;
+    const parkedDetails = `${details} Current bay: ${locationLabel(currentLocationId)}.${pickupDetails ? `\n${pickupDetails}` : ''}`;
+    if (normalizeLocation(currentLocationId) !== normalizeLocation(vehicle.currentLocationId ?? '')) {
+      addAssistantMessage(`${parkedDetails}\nRefresh the workspace before transferring this vehicle.`);
+      return;
+    }
     if (!offerTransfer) {
       addAssistantMessage(parkedDetails);
       return;
