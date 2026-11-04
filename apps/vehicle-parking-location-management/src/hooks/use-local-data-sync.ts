@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { saveWorkspace, WorkspaceConflictError } from '@/lib/workspace-cloud';
+import { mergeWorkspaceChanges } from '@/lib/workspace-recovery';
+import { loadWorkspace, saveWorkspace, WorkspaceConflictError } from '@/lib/workspace-cloud';
 import { supabase } from '@/lib/supabase';
 import { readWorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
@@ -8,11 +9,26 @@ import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
 const RETRY_BASE_MS = 1500;
 const RETRY_MAX_MS = 30_000;
 
-export function useLocalDataSync(initialRevision: number | null, localOnly = false) {
+export function useLocalDataSync(initialRevision: number | null, localOnly = false, userId?: string, onRecovered?: () => void) {
   const [state, setState] = useState<'idle' | 'offline' | 'syncing' | 'error'>(() => localOnly || navigator.onLine ? 'idle' : 'offline');
   const [lastSyncAt, setLastSyncAt] = useState<string>();
   const [pendingCount, setPendingCount] = useState(0);
   const revision = useRef(initialRevision);
+  const baseline = useRef<ReturnType<typeof readWorkspaceSnapshot> | null>(null);
+  if (!baseline.current && !localOnly) baseline.current = readWorkspaceSnapshot();
+  const recoveryKey = userId ? `vplm-unsynced-recovery:${userId}` : undefined;
+  const [conflictDetail, setConflictDetail] = useState('');
+  useEffect(() => {
+    if (!recoveryKey || localOnly) return;
+    try {
+      if (window.localStorage.getItem(recoveryKey)) setConflictDetail('A previous session left an unsynced copy');
+    } catch { /* Recovery storage is unavailable in this browser. */ }
+  }, [localOnly, recoveryKey]);
+  const saveRecovery = (draft: ReturnType<typeof readWorkspaceSnapshot>) => {
+    if (!recoveryKey) return;
+    try { window.localStorage.setItem(recoveryKey, JSON.stringify(draft)); }
+    catch { /* The in-memory workspace remains available for download. */ }
+  };
   const timer = useRef<number | undefined>(undefined);
   const retryTimer = useRef<number | undefined>(undefined);
   const retryAttempt = useRef(0);
@@ -54,6 +70,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       return false;
     }
     if (!navigator.onLine) {
+      saveRecovery(readWorkspaceSnapshot());
       setState('offline');
       setPendingCount(1);
       if (announce) toast.info('Saved on this device. Sync will resume when the connection returns.');
@@ -72,11 +89,39 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     setState('syncing');
     setPendingCount(1);
     try {
-      const nextRevision = await saveWorkspace(readWorkspaceSnapshot(), revision.current);
+      const snapshot = readWorkspaceSnapshot();
+      let nextRevision;
+      try {
+        nextRevision = await saveWorkspace(snapshot, revision.current);
+        baseline.current = snapshot;
+      } catch (error) {
+        if (!(error instanceof WorkspaceConflictError) || !userId || !baseline.current || !onRecovered) throw error;
+        const latest = await loadWorkspace(userId);
+        if (!latest.snapshot || latest.isGuest) throw error;
+        const draft = readWorkspaceSnapshot();
+        try {
+          const merged = mergeWorkspaceChanges(baseline.current, draft, latest.snapshot);
+          nextRevision = await saveWorkspace(merged, latest.revision);
+          if (JSON.stringify(readWorkspaceSnapshot()) !== JSON.stringify(draft)) {
+            throw new Error('More local changes arrived during recovery.');
+          }
+          revision.current = nextRevision;
+          toast.success('Non-conflicting workspace changes synced. Reloading the current workspace.');
+          onRecovered();
+          return true;
+        } catch (mergeError) {
+          saveRecovery(readWorkspaceSnapshot());
+          setConflictDetail(mergeError instanceof Error ? mergeError.message : 'The workspace changed.');
+          throw error;
+        }
+      }
       revision.current = nextRevision;
       retryAttempt.current = 0;
       if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
       retryTimer.current = undefined;
+      if (recoveryKey && !conflictDetail) {
+        try { window.localStorage.removeItem(recoveryKey); } catch { /* Cloud save already succeeded. */ }
+      }
       setLastSyncAt(new Date().toISOString());
       setPendingCount(0);
       setState('idle');
@@ -92,6 +137,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       } else {
         // navigator.onLine can remain true when Wi-Fi is connected but the internet is unavailable.
         // Retry in the background until the workspace service responds.
+        saveRecovery(readWorkspaceSnapshot());
         retryAttempt.current += 1;
         const delay = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** Math.min(retryAttempt.current - 1, 5)));
         if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
@@ -113,11 +159,13 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
         window.dispatchEvent(new Event(WORKSPACE_DATA_CHANGED));
       }
     }
-  }, [localOnly]);
+  }, [localOnly, userId, onRecovered, recoveryKey, conflictDetail]);
 
   useEffect(() => {
     const scheduleSync = () => {
-      if (localOnly || syncBlocked.current) return;
+      if (localOnly) return;
+      if (syncBlocked.current || !navigator.onLine) saveRecovery(readWorkspaceSnapshot());
+      if (syncBlocked.current) return;
       if (timer.current !== undefined) window.clearTimeout(timer.current);
       if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
       retryTimer.current = undefined;
@@ -133,8 +181,14 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       if (timer.current !== undefined) window.clearTimeout(timer.current);
       if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
     };
-  }, [localOnly, sync]);
+  }, [localOnly, recoveryKey, sync]);
 
   const getRevision = useCallback(() => revision.current, []);
-  return { sync, getRevision, state, lastSyncAt, pendingCount, hasPublishedSnapshot: true };
+  const downloadRecovery = () => {
+    const saved = recoveryKey ? window.localStorage.getItem(recoveryKey) : null;
+    const url = URL.createObjectURL(new Blob([saved ?? JSON.stringify(readWorkspaceSnapshot())], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url; link.download = 'vplm-unsynced-recovery.json'; link.click(); URL.revokeObjectURL(url);
+  };
+  return { sync, getRevision, conflictDetail, downloadRecovery, state, lastSyncAt, pendingCount, hasPublishedSnapshot: true };
 }

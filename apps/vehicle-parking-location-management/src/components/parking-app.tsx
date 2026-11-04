@@ -1,3 +1,4 @@
+import { ReviewWorkspaceAccess } from '@/components/workspace-access-requests';
 import { useActivePickup } from '@/hooks/use-active-pickup';
 import { pickupParkingNotice } from '@/lib/pickup-request-data';
 import { TaskManagement } from '@/components/task-management';
@@ -163,12 +164,13 @@ type ParkingAppProps = {
   localGuest?: boolean;
   workspaceGuest?: boolean;
   onGuestRefresh?: () => void;
+  onSyncRecovered?: () => void;
   initialPickupRequestId?: string;
   onPickupWorkspaceRefresh?: (id: string) => void;
   onExit: () => void;
 };
 
-export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = false, workspaceGuest = false, onGuestRefresh, initialPickupRequestId, onPickupWorkspaceRefresh, onExit }: ParkingAppProps) {
+export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = false, workspaceGuest = false, onGuestRefresh, onSyncRecovered, initialPickupRequestId, onPickupWorkspaceRefresh, onExit }: ParkingAppProps) {
   const { data: user } = useUser();
   const { soundEnabled, toggleSound, playSound } = useNotificationSound(user?.objectId ?? user?.userPrincipalName);
   const notificationClickTimer = useRef<number | undefined>(undefined);
@@ -202,7 +204,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const [dashboardVehicleId, setDashboardVehicleId] = useState<string>();
   const [pullDistance, setPullDistance] = useState(0);
   const pullStartY = useRef<number | undefined>(undefined);
-  const { sync, getRevision, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview);
+  const { sync, getRevision, conflictDetail, downloadRecovery, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview, user?.objectId, onSyncRecovered);
   const isOnline = syncState !== 'offline';
   const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline · pending' : syncState === 'error' ? 'Sync needs attention' : pendingChanges ? 'Changes pending' : 'Cloud synced';
 
@@ -487,26 +489,6 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setNotes('');
     return true;
   };
-  const finishPickupParking = (vehicleId: string, from: string, to: string, centreBayVehicleId?: string) => {
-    const vehicle = activeVehicles.find(item => item.id === vehicleId);
-    if (!vehicle || parkingRecordKey(vehicle.currentLocationId) !== parkingRecordKey(from)) {
-      toast.error('The vehicle location has changed. Check its current location before finishing.');
-      return false;
-    }
-    if (centreBayVehicleId) {
-      const centre = locations.find(item => item.zone === 'Workshop Centre Bay');
-      const occupant = activeVehicles.find(item => item.id === centreBayVehicleId);
-      const target = locations.find(item => item.id === to && item.zone === 'Workshop');
-      if (!target || ['Reserved', 'Maintenance'].includes(target.status) || !centre || !containerCanAccept(centre)
-        || !occupant || occupant.xParking === 'Yes' || parkingRecordKey(occupant.currentLocationId) !== parkingRecordKey(to)
-        || activeVehicles.some(item => item.id !== occupant.id && item.id !== vehicleId && parkingRecordKey(item.currentLocationId) === parkingRecordKey(to))) {
-        toast.error('Workshop or Centre Bay occupancy changed. Refresh before completing.');
-        return false;
-      }
-      if (!transferVehicleById(occupant.id, centre.id, 'Temporary Centre Bay parking for pickup', false, { deferSync: true })) return false;
-    }
-    return transferVehicleById(vehicleId, to, 'Pickup Request completed', false, { movedOccupantId: centreBayVehicleId });
-  };
   const handleTransfer = (toXParking = false) => {
     if (!selectedVehicle) return toast.error('Select a parked vehicle and an available destination.');
     transferVehicleById(selectedVehicle.id, newLocationId, notes, toXParking);
@@ -530,34 +512,61 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     addMovement(vehicleId, fromId, toId, out ? 'Release' : 'Assign');
     if (updatedVehicle) logAudit(out ? 'Road Test Start' : 'Road Test Return', 'Vehicle', `${updatedVehicle.plateNumber}: ${locationLabel(fromId)} → ${locationLabel(toId)}`, updatedVehicle, fromId, toId);
   };
-  const recoverDeliveredVehicle = (vehicleId: string) => {
+  const recoverDeliveredVehicle = (vehicleId: string, reason?: string) => {
     if (!canRecoverDeliveredVehicle) return toast.error('Only Administrators, Supervisors, and Technical Leaders can recover delivered vehicles.');
     const vehicle = vehicles.find((item: Vehicle) => item.id === vehicleId && item.status === 'Delivered');
     if (!vehicle) return toast.error('This vehicle is not in the Delivered Archive.');
     const recoveredVehicle: Vehicle = { ...vehicle, status: 'Released', operationalStatus: 'Checked Out', currentLocationId: undefined, deliveredAt: undefined, deliveredBy: undefined, finalParkingBay: undefined, checkOutAt: undefined };
     setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === vehicleId ? recoveredVehicle : item));
     enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicleId, payload: { vehicleName: vehicle.vehicleId, plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, locationId: '', ownerId: queueOwnerId, ownerName: vehicle.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
-    logAudit('Restore', 'Vehicle', `${vehicle.plateNumber} recovered from Delivered Archive`, recoveredVehicle);
+    logAudit('Restore', 'Vehicle', `${vehicle.plateNumber} recovered from Delivered Archive${reason ? ` · ${reason}` : ''}`, recoveredVehicle);
     toast.success(`${vehicle.plateNumber} recovered and is ready for reassignment.`);
     if (navigator.onLine) void sync(false);
   };
 
 
-  const handleOcr = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleOcr = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) toast.success('Vehicle image captured. Complete the vehicle profile to continue.');
     event.target.value = '';
+    if (!file) return;
+    const Detector = (globalThis as typeof globalThis & { TextDetector?: new () => {
+      detect: (image: ImageBitmap) => Promise<{ rawValue: string }[]>;
+    } }).TextDetector;
+    if (!Detector) return toast.info('Text recognition is unavailable on this browser. Enter the plate manually.');
+    try {
+      const bitmap = await createImageBitmap(file);
+      try {
+        const text = await new Detector().detect(bitmap);
+        const candidates = new Set(text.flatMap(item => item.rawValue.match(/(?<!\d)\d{4,7}(?!\d)/g) ?? []));
+        if (candidates.size !== 1) return toast.info('No single plate number could be identified. Enter it manually.');
+        const suggested = [...candidates][0];
+        if (window.confirm(`Use suggested plate ${suggested}? Check the image before confirming.`)) {
+          setAssignmentVehicle(current => ({ ...current, plateNumber: suggested }));
+        }
+      } finally { bitmap.close(); }
+    } catch {
+      toast.info('The plate could not be read. Enter it manually.');
+    }
   };
 
-  const handleReserve = () => {
+  const handleReserve = (start: string, end: string) => {
     if (!(access.data?.can('Reservations', 'Create') ?? false)) return toast.error('You do not have permission to create reservations.');
     if (!selectedVehicleId || !newLocationId) return toast.error('Select a vehicle and available bay.');
     const vehicle = vehicles.find((item: Vehicle) => item.id === selectedVehicleId);
-    const startDate = new Date(Date.now() + 86400000).toISOString();
-    const reservation: Reservation = { id: `res-${crypto.randomUUID()}`, reservationId: `RS-${Date.now().toString().slice(-4)}`, vehicleId: selectedVehicleId, locationId: newLocationId, reservationDate: startDate, reservedBy: actor, status: 'Upcoming' };
+    const startTime = Date.parse(`${start}+03:00`);
+    const endTime = Date.parse(`${end}+03:00`);
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime || endTime <= Date.now()) {
+      return toast.error('Choose a valid start and end time in Qatar time.');
+    }
+    const startDate = new Date(startTime).toISOString();
+    const endDate = new Date(endTime).toISOString();
+    if (reservations.some(item => item.locationId === newLocationId && ['Upcoming','Active'].includes(item.status)
+      && Date.parse(item.reservationDate) < endTime && (item.endDate ? Date.parse(item.endDate) : Date.parse(item.reservationDate) + 3600000) > startTime)) {
+      return toast.error('The bay already has a reservation during this time.');
+    }
+    const reservation: Reservation = { id: `res-${crypto.randomUUID()}`, reservationId: `RS-${Date.now().toString().slice(-4)}`, vehicleId: selectedVehicleId, locationId: newLocationId, reservationDate: startDate, endDate, reservedBy: actor, status: 'Upcoming' };
     setReservations((current: Reservation[]) => [reservation, ...current]);
-    setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => item.id === newLocationId ? { ...item, status: 'Reserved' } : item));
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Reservation', action: 'create', recordId: reservation.id, payload: { name: reservation.reservationId, vehicleId: selectedVehicleId, vehicleName: vehicle?.vehicleId ?? selectedVehicleId, locationId: newLocationId, startDate, endDate: new Date(new Date(startDate).getTime() + 3600000).toISOString(), actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: new Date().toISOString() });
+    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Reservation', action: 'create', recordId: reservation.id, payload: { name: reservation.reservationId, vehicleId: selectedVehicleId, vehicleName: vehicle?.vehicleId ?? selectedVehicleId, locationId: newLocationId, startDate, endDate, actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: new Date().toISOString() });
     if (vehicle) logAudit('Reservation', 'Vehicle', `${vehicle.plateNumber} → ${locationLabel(newLocationId)}`, { ...vehicle, operationalStatus: 'Reserved' }, vehicle.currentLocationId, newLocationId);
     toast.success('Parking bay reservation saved.');
     playSound('assignment');
@@ -661,6 +670,10 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           </div>
           <div className="relative mt-3 overflow-hidden rounded-2xl bg-background lg:hidden"><span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-base font-bold tabular-nums text-muted-foreground" aria-hidden="true">{format(currentTime, 'HH:mm:ss')}</span><Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-24" aria-label="Global vehicle search" /></div>
         </header>
+        {conflictDetail && <div role="alert" className="flex flex-wrap items-center gap-2 border-b bg-muted p-3 text-sm">
+          <span>Sync conflict: {conflictDetail}. Local work is available to download.</span>
+          <Button size="sm" variant="outline" onClick={downloadRecovery}>Download pending changes</Button>
+        </div>}
         {workspaceGuest && <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-sm">
           <span>Guest preview. Vehicle changes are temporary. Pickup requests are view-only.</span>
           <Button size="sm" variant="outline" onClick={() => {
@@ -673,16 +686,28 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
               if (!window.confirm('Reload the workspace and discard unsynced changes on this device?')) return;
             }
             onPickupWorkspaceRefresh?.(id);
-          }} readOnly={guestPreview} vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} onFinishParking={finishPickupParking} />}
+          }} readOnly={guestPreview} vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} hasUnsyncedChanges={Boolean(pendingChanges || syncState === 'syncing' || syncState === 'error')} />}
           {screen === 'road-tests' && canAccessRoadTests && <RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} actorRole={role} canCreateAssignment canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} isAdministrator={isAdministrator} initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} /> }
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
           {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage} canEditVehicle={canEditVehicle} canTransferVehicle={canTransferVehicle} canAssignVehicle={canAssignVehicle} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} onContactVehicle={() => toast.info('Team sharing requires a configured cloud service.')} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} onAssignSelectedBay={(selectedBayId: string, vehicleForm: VehicleFormData) => { setBayId(selectedBayId); setZone(locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(selectedBayId))?.zone ?? zone); setAssignmentVehicle(vehicleForm); }} assignSelectedBay={(selectedBayId?: string) => handleAssign(selectedBayId)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
           {screen === 'assignment' && <Assignment assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} zone={zone} setZone={setZone} bayId={bayId} setBayId={setBayId} availableBays={availableBays} locations={locations} vehicles={activeVehicles} zoneNames={zoneNames} handleAssign={(targetBayId?: string, occupant?: XParkingOccupant) => handleAssign(targetBayId, false, occupant)} handleAssignUnassigned={() => handleAssign(undefined, true)} handleRelease={handleRelease} handleOcr={handleOcr} fileRef={fileRef} />}
-          {screen === 'search' && <SearchScreen archiveOnSearchMiss={role === 'TechnicalLeader' || role === 'Drivers' || role === 'Technician'} query={searchQuery} setQuery={setSearchQuery} result={searchQuery ? searchResult : undefined} locationLabel={locationLabel} locations={locations} vehicles={vehicles} movements={movements} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} />}
+          {screen === 'search' && <SearchScreen onRecoverDeliveredVehicle={canRecoverDeliveredVehicle ? recoverDeliveredVehicle : undefined} archiveOnSearchMiss={role === 'TechnicalLeader' || role === 'Drivers' || role === 'Technician'} query={searchQuery} setQuery={setSearchQuery} result={searchQuery ? searchResult : undefined} locationLabel={locationLabel} locations={locations} vehicles={vehicles} movements={movements} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} />}
           {screen === 'layout' && <LayoutScreen locations={locations} zoneFilter={zoneFilter} setZoneFilter={setZoneFilter} zoneStats={zoneStats} />}
           {screen === 'transfer' && <Transfer vehicles={vehicles} locations={locations} movements={movements} selectedVehicleId={selectedVehicleId} setSelectedVehicleId={setSelectedVehicleId} selectedVehicle={selectedVehicle} newLocationId={newLocationId} setNewLocationId={setNewLocationId} notes={notes} setNotes={setNotes} handleTransfer={handleTransfer} locationLabel={locationLabel} canAcceptContainer={containerCanAccept} />}
           {screen === 'history' && <HistoryScreen movements={movements} auditEvents={auditEvents} vehicles={vehicles} historyFilter={historyFilter} setHistoryFilter={setHistoryFilter} locationLabel={locationLabel} canRecoverDeliveredVehicle={canRecoverDeliveredVehicle} onRecoverDeliveredVehicle={recoverDeliveredVehicle} />}
-          {screen === 'reservations' && <ReservationsScreen reservations={reservations} vehicles={vehicles} locations={locations} selectedVehicleId={selectedVehicleId} setSelectedVehicleId={setSelectedVehicleId} newLocationId={newLocationId} setNewLocationId={setNewLocationId} handleReserve={handleReserve} cancel={(id: string) => { const reservation = reservations.find((item: Reservation) => item.id === id); if (!reservation) return; setReservations((current: Reservation[]) => current.map((item: Reservation) => item.id === id ? { ...item, status: 'Cancelled' } : item)); logAudit('Cancel', 'Reservation', reservation.reservationId); toast.success('Reservation cancelled.'); }} locationLabel={locationLabel} />}
+          {screen === 'reservations' && <ReservationsScreen reservations={reservations} vehicles={vehicles} locations={locations} selectedVehicleId={selectedVehicleId} setSelectedVehicleId={setSelectedVehicleId} newLocationId={newLocationId} setNewLocationId={setNewLocationId} handleReserve={handleReserve} closeReservation={(id, status) => {
+            const reservation = reservations.find(item => item.id === id);
+            if (!reservation || !['Upcoming','Active'].includes(reservation.status) || (status === 'Completed' && reservation.status !== 'Active')) return;
+            setReservations(current => current.map(item => item.id === id ? { ...item, status } : item));
+            const bayState = loadBayManagementState();
+            if (!reservations.some(item => item.id !== id && item.locationId === reservation.locationId && item.status === 'Active')
+              && !vehicles.some(item => item.status !== 'Delivered' && item.currentLocationId === reservation.locationId && item.xParking !== 'Yes')
+              && !bayState.reservations.some(item => item.bayId === reservation.locationId && item.status !== 'Released')
+              && !bayState.maintenance.some(item => item.bayId === reservation.locationId && item.status === 'Active')) {
+              setLocations(current => current.map(item => item.id === reservation.locationId && item.status === 'Reserved' ? { ...item, status: 'Available' } : item));
+            }
+            logAudit(status, 'Reservation', reservation.reservationId);
+          }} locationLabel={locationLabel} />}
           {screen === 'management' && canManage && (manageTasks
             ? <TaskManagement actor={actor} vehicles={vehicles} locations={locations} reservations={reservations}
               setVehicles={setVehicles} setLocations={setLocations} setReservations={setReservations} logAudit={logAudit} onClose={() => setManageTasks(false)} />
@@ -1646,7 +1671,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
           <div className="space-y-2"><Label htmlFor="management-zone-details">Details</Label><Textarea id="management-zone-details" value={zoneDetailsDraft} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setZoneDetailsDraft(event.target.value)} /></div>
         </div>
         <DialogFooter className="gap-2 sm:justify-between">
-  <TabsContent value="approvals"><Card><CardContent className="p-6 text-sm text-muted-foreground">Access approval requires a configured authentication and shared-data service. Browser-only profiles are not authenticated.</CardContent></Card></TabsContent>
+  <TabsContent value="approvals"><ReviewWorkspaceAccess administrator={role === 'Administrator'} /></TabsContent>
           {editingZoneCode && <Button variant="destructive" onClick={() => removeZone(editingZoneCode)}><Trash2 /> Remove zone</Button>}
           <div className="flex gap-2"><Button variant="outline" onClick={() => setIsZoneEditorOpen(false)}>Cancel</Button><Button onClick={editingZoneCode ? saveZoneEdit : createZone}><Save /> Save zone</Button></div>
         </DialogFooter>
@@ -1694,7 +1719,7 @@ function SettingsScreen({ users, connected }: { users: OnlineUser[]; connected: 
   </div>;
 }
 
-function SearchScreen({ archiveOnSearchMiss, query, setQuery, result, locationLabel, locations, vehicles, movements, onLocateVehicle }: { archiveOnSearchMiss: boolean; query: string; setQuery: (value: string) => void; result?: Vehicle; locationLabel: (id?: string) => string; locations: ParkingLocation[]; vehicles: Vehicle[]; movements: Movement[]; onLocateVehicle: (vehicleId: string) => void }) {
+function SearchScreen({ onRecoverDeliveredVehicle, archiveOnSearchMiss, query, setQuery, result, locationLabel, locations, vehicles, movements, onLocateVehicle }: { onRecoverDeliveredVehicle?: (id: string, reason: string) => void; archiveOnSearchMiss: boolean; query: string; setQuery: (value: string) => void; result?: Vehicle; locationLabel: (id?: string) => string; locations: ParkingLocation[]; vehicles: Vehicle[]; movements: Movement[]; onLocateVehicle: (vehicleId: string) => void }) {
   const pickup = useActivePickup(result?.id);
   const [archiveQuery, setArchiveQuery] = useState('');
   const current = locations.find((item: ParkingLocation) => item.id === result?.currentLocationId);
@@ -1743,9 +1768,18 @@ function SearchScreen({ archiveOnSearchMiss, query, setQuery, result, locationLa
             <Button type="button" variant="outline" className="col-span-2" onClick={() => onLocateVehicle(result.id)}>Open complete vehicle profile <ChevronRight /></Button>
           </CardContent>
         </Card>
-        <Card className="lg:col-span-3"><CardHeader><CardTitle>Schematic location</CardTitle><CardDescription>{isOut ? 'Vehicle is away from the facility' : `Zone ${current?.zone ?? '—'}, Lane ${current?.lane ?? '—'}`}</CardDescription></CardHeader><CardContent><div className="grid min-h-52 place-items-center rounded-xl border bg-muted p-6 text-center"><div><p className="text-4xl font-black text-muted-foreground">404</p><p className="mt-2 font-semibold">Temporarily Unavailable</p></div></div></CardContent></Card>
+        <Card className="lg:col-span-3"><CardHeader><CardTitle>{result.currentLocationId ? 'Live Parking Garage' : 'Last Seen'}</CardTitle></CardHeader><CardContent>
+          {result.currentLocationId ? <Button variant="outline" onClick={() => onLocateVehicle(result.id)}>Show bay on Live Parking Garage</Button> : (() => {
+            const last = movements.filter(item => item.vehicleId === result.id).sort((a, b) => b.actionDateTime.localeCompare(a.actionDateTime))[0];
+            return <p>{isOut ? 'Out for road test' : result.status} · {locationLabel(roadTest?.departureLocationId ?? last?.toLocationId ?? last?.fromLocationId)}
+              {last?.actionDateTime && ` · ${format(new Date(last.actionDateTime), 'dd MMM yyyy, HH:mm')}`}</p>;
+          })()}</CardContent></Card>
       </div> : query.trim() && !showArchiveFallback && <Card><CardContent className="p-8 text-center"><Search className="mx-auto mb-3"/><p className="font-semibold">No matching vehicle</p></CardContent></Card>}
-      {(!archiveOnSearchMiss || showArchiveFallback) && <Card className="lg:col-span-6"><CardHeader><div className="flex flex-wrap items-center justify-between gap-3"><div><CardTitle>{showArchiveFallback ? 'Delivered vehicle results' : 'Delivered Archive'}</CardTitle><CardDescription>{showArchiveFallback ? 'No active vehicle matched this search.' : 'Find and download complete retained history for delivered vehicles.'}</CardDescription></div>{!archiveOnSearchMiss && <Badge variant="outline">{deliveredVehicles.length} delivered</Badge>}</div></CardHeader><CardContent className="space-y-3">{!archiveOnSearchMiss && <div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" /><Input value={archiveQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setArchiveQuery(event.target.value)} placeholder="Search delivered registration or VIN" className="pl-10" /></div>}{archiveMatches.length ? archiveMatches.map((vehicle: Vehicle) => <div key={vehicle.id} className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3 text-card-foreground"><ArchiveRestore /><div className="min-w-52 flex-1"><p className="font-bold">{vehicle.plateNumber} · {vehicle.brand} {vehicle.model}</p><p className="text-sm text-muted-foreground">Delivered {vehicle.deliveredAt ? format(new Date(vehicle.deliveredAt), 'dd MMM yyyy, HH:mm') : '—'} by {vehicle.deliveredBy ?? '—'} · Final bay {vehicle.finalParkingBay ?? '—'}</p></div><Button variant="outline" onClick={() => downloadArchive(vehicle)}><Download /> Download all history</Button></div>) : <p className="py-5 text-center text-sm text-muted-foreground">{archiveQuery ? 'No delivered vehicle matches this archive search.' : 'No delivered vehicles archived.'}</p>}</CardContent></Card>}
+      {(!archiveOnSearchMiss || showArchiveFallback) && <Card className="lg:col-span-6"><CardHeader><div className="flex flex-wrap items-center justify-between gap-3"><div><CardTitle>{showArchiveFallback ? 'Delivered vehicle results' : 'Delivered Archive'}</CardTitle><CardDescription>{showArchiveFallback ? 'No active vehicle matched this search.' : 'Find and download complete retained history for delivered vehicles.'}</CardDescription></div>{!archiveOnSearchMiss && <Badge variant="outline">{deliveredVehicles.length} delivered</Badge>}</div></CardHeader><CardContent className="space-y-3">{!archiveOnSearchMiss && <div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" /><Input value={archiveQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setArchiveQuery(event.target.value)} placeholder="Search delivered registration or VIN" className="pl-10" /></div>}{archiveMatches.length ? archiveMatches.map((vehicle: Vehicle) => <div key={vehicle.id} className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3 text-card-foreground"><ArchiveRestore /><div className="min-w-52 flex-1"><p className="font-bold">{vehicle.plateNumber} · {vehicle.brand} {vehicle.model}</p><p className="text-sm text-muted-foreground">Delivered {vehicle.deliveredAt ? format(new Date(vehicle.deliveredAt), 'dd MMM yyyy, HH:mm') : '—'} by {vehicle.deliveredBy ?? '—'} · Final bay {vehicle.finalParkingBay ?? '—'}</p></div><Button variant="outline" onClick={() => downloadArchive(vehicle)}><Download /> Download all history</Button>
+        {onRecoverDeliveredVehicle && <Button variant="outline" onClick={() => {
+          const reason = window.prompt(`Why are you recovering delivered vehicle ${vehicle.plateNumber}?`)?.trim();
+          if (reason) onRecoverDeliveredVehicle(vehicle.id, reason);
+        }}>Recover vehicle</Button>}</div>) : <p className="py-5 text-center text-sm text-muted-foreground">{archiveQuery ? 'No delivered vehicle matches this archive search.' : 'No delivered vehicles archived.'}</p>}</CardContent></Card>}
     </div>
   );
 }
@@ -1820,10 +1854,20 @@ function Transfer({ vehicles, locations, movements, selectedVehicleId, setSelect
 function HistoryScreen({ movements, auditEvents, vehicles, historyFilter, setHistoryFilter, locationLabel, canRecoverDeliveredVehicle, onRecoverDeliveredVehicle }: { movements: Movement[]; auditEvents: OfflineAuditEvent[]; vehicles: Vehicle[]; historyFilter: string; setHistoryFilter: (value: string) => void; locationLabel: (id?: string) => string; canRecoverDeliveredVehicle: boolean; onRecoverDeliveredVehicle: (vehicleId: string) => void }) {
   const vehicleEvents = auditEvents.filter((event: OfflineAuditEvent) => event.entity === 'Vehicle' || event.entity === 'Reservation');
   const rows = [...movements.map((movement: Movement) => ({ id: movement.id, action: movement.movementType, timestamp: movement.actionDateTime, actor: movement.performedBy, vehicleId: movement.vehicleId, fromLocationId: movement.fromLocationId, toLocationId: movement.toLocationId, detail: movement.notes, snapshot: movement.snapshot ? JSON.stringify(movement.snapshot) : undefined })), ...vehicleEvents.map((event: OfflineAuditEvent) => ({ ...event, vehicleId: event.recordId }))].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).filter((event) => { const vehicle = vehicles.find((item: Vehicle) => item.id === event.vehicleId); const query = historyFilter.toLowerCase(); let snapshot: Movement['snapshot']; try { snapshot = event.snapshot ? JSON.parse(event.snapshot) as Movement['snapshot'] : undefined; } catch { snapshot = undefined; } const fromLabel = snapshot?.fromLocationLabel ?? locationLabel(event.fromLocationId); const toLabel = snapshot?.toLocationLabel ?? locationLabel(event.toLocationId); return !query || vehicle?.plateNumber.toLowerCase().includes(query) || snapshot?.vehicle.plateNumber.toLowerCase().includes(query) || event.action.toLowerCase().includes(query) || fromLabel.toLowerCase().includes(query) || toLabel.toLowerCase().includes(query); });
-  return <div className="space-y-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="technical-label">Complete vehicle action audit</p><h2 className="text-2xl font-bold">Parking history</h2><p className="text-muted-foreground">Complete vehicle profile, location, assignment, and movement records.</p></div><Button variant="outline" disabled><Download /> Export unavailable</Button></div><Input value={historyFilter} onChange={(event: ChangeEvent<HTMLInputElement>) => setHistoryFilter(event.target.value)} placeholder="Filter by vehicle, action, or location" /> <div className="grid gap-3">{rows.map((event) => { const currentVehicle = vehicles.find((item: Vehicle) => item.id === event.vehicleId); let snapshot: Movement['snapshot']; try { snapshot = event.snapshot ? JSON.parse(event.snapshot) as Movement['snapshot'] : undefined; } catch { snapshot = undefined; } const vehicle = snapshot?.vehicle ?? currentVehicle; const fromLabel = snapshot?.fromLocationLabel ?? locationLabel(event.fromLocationId); const toLabel = snapshot?.toLocationLabel ?? locationLabel(event.toLocationId); const routeLabel = event.action === 'Transfer' || event.action === 'Release' || event.action === 'Assign' || event.action === 'Delivered' || event.action === 'Assignment' || event.action.startsWith('Road Test') ? `${fromLabel} → ${toLabel}` : toLabel !== '—' ? toLabel : snapshot?.locationLabel ?? 'No bay change'; const canRecoverThisVehicle = canRecoverDeliveredVehicle && event.action === 'Delivered' && currentVehicle?.status === 'Delivered'; return <Card key={`${event.id}-${event.action}`}><CardContent className="grid gap-4 p-4 lg:grid-cols-[auto_1fr_auto]"><div className="rounded-md bg-secondary p-2 text-secondary-foreground"><History /></div><div className="min-w-0 space-y-2"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{vehicle?.plateNumber ?? 'Vehicle'} · {event.action}</p><Badge variant="outline">{routeLabel}</Badge></div><p className="text-sm text-muted-foreground">Done by {event.actor} · {event.detail || 'Vehicle action recorded'}</p>{vehicle && <div className="grid gap-2 rounded-lg bg-muted p-3 text-sm sm:grid-cols-2 lg:grid-cols-4"><Info label="Vehicle" value={`${vehicle.brand} ${vehicle.model}`} /><Info label="VIN" value={vehicle.vin} /><Info label="Customer / owner" value={vehicle.driverOwner || vehicle.customerName} /><Info label="Assignment" value={`${snapshot?.locationLabel ?? toLabel} · ${snapshot?.assignment.assignedBy ?? vehicle.assignedBy ?? event.actor}`} /><Info label="Status" value={vehicle.operationalStatus} /><Info label="Department" value={vehicle.department} /><Info label="Color" value={vehicle.color} /></div>}</div><div className="flex flex-col items-end gap-3"><time className="whitespace-nowrap text-xs text-muted-foreground">{format(new Date(event.timestamp), 'dd MMM yyyy')}<br />{format(new Date(event.timestamp), 'HH:mm:ss')}</time>{canRecoverThisVehicle && event.vehicleId && <Button variant="outline" size="sm" onClick={() => onRecoverDeliveredVehicle(event.vehicleId!)}><ArchiveRestore /> Recover vehicle</Button>}</div></CardContent></Card>; })}</div></div>;
+  const exportHistory = () => {
+    const cell = (value: string) => '"' + (/^[=+@\-\t\r]/.test(value) ? "'" : '') + value.replaceAll('"', '""') + '"';
+    const data = [['Vehicle', 'Action', 'Previous bay', 'New bay', 'Actor', 'Timestamp', 'Details'],
+      ...rows.map(event => [vehicles.find(item => item.id === event.vehicleId)?.plateNumber ?? event.vehicleId ?? '',
+        event.action, locationLabel(event.fromLocationId), locationLabel(event.toLocationId), event.actor, event.timestamp, event.detail ?? ''])];
+    const url = URL.createObjectURL(new Blob([data.map(row => row.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url; link.download = 'vplm-parking-history.csv'; link.click();
+    URL.revokeObjectURL(url);
+  };
+  return <div className="space-y-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="technical-label">Complete vehicle action audit</p><h2 className="text-2xl font-bold">Parking history</h2><p className="text-muted-foreground">Complete vehicle profile, location, assignment, and movement records.</p></div><Button variant="outline" disabled={!rows.length} onClick={exportHistory}><Download /> Export filtered history</Button></div><Input value={historyFilter} onChange={(event: ChangeEvent<HTMLInputElement>) => setHistoryFilter(event.target.value)} placeholder="Filter by vehicle, action, or location" /> <div className="grid gap-3">{rows.map((event) => { const currentVehicle = vehicles.find((item: Vehicle) => item.id === event.vehicleId); let snapshot: Movement['snapshot']; try { snapshot = event.snapshot ? JSON.parse(event.snapshot) as Movement['snapshot'] : undefined; } catch { snapshot = undefined; } const vehicle = snapshot?.vehicle ?? currentVehicle; const fromLabel = snapshot?.fromLocationLabel ?? locationLabel(event.fromLocationId); const toLabel = snapshot?.toLocationLabel ?? locationLabel(event.toLocationId); const routeLabel = event.action === 'Transfer' || event.action === 'Release' || event.action === 'Assign' || event.action === 'Delivered' || event.action === 'Assignment' || event.action.startsWith('Road Test') ? `${fromLabel} → ${toLabel}` : toLabel !== '—' ? toLabel : snapshot?.locationLabel ?? 'No bay change'; const canRecoverThisVehicle = canRecoverDeliveredVehicle && event.action === 'Delivered' && currentVehicle?.status === 'Delivered'; return <Card key={`${event.id}-${event.action}`}><CardContent className="grid gap-4 p-4 lg:grid-cols-[auto_1fr_auto]"><div className="rounded-md bg-secondary p-2 text-secondary-foreground"><History /></div><div className="min-w-0 space-y-2"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{vehicle?.plateNumber ?? 'Vehicle'} · {event.action}</p><Badge variant="outline">{routeLabel}</Badge></div><p className="text-sm text-muted-foreground">Done by {event.actor} · {event.detail || 'Vehicle action recorded'}</p>{vehicle && <div className="grid gap-2 rounded-lg bg-muted p-3 text-sm sm:grid-cols-2 lg:grid-cols-4"><Info label="Vehicle" value={`${vehicle.brand} ${vehicle.model}`} /><Info label="VIN" value={vehicle.vin} /><Info label="Customer / owner" value={vehicle.driverOwner || vehicle.customerName} /><Info label="Assignment" value={`${snapshot?.locationLabel ?? toLabel} · ${snapshot?.assignment.assignedBy ?? vehicle.assignedBy ?? event.actor}`} /><Info label="Status" value={vehicle.operationalStatus} /><Info label="Department" value={vehicle.department} /><Info label="Color" value={vehicle.color} /></div>}</div><div className="flex flex-col items-end gap-3"><time className="whitespace-nowrap text-xs text-muted-foreground">{format(new Date(event.timestamp), 'dd MMM yyyy')}<br />{format(new Date(event.timestamp), 'HH:mm:ss')}</time>{canRecoverThisVehicle && event.vehicleId && <Button variant="outline" size="sm" onClick={() => onRecoverDeliveredVehicle(event.vehicleId!)}><ArchiveRestore /> Recover vehicle</Button>}</div></CardContent></Card>; })}</div></div>;
 }
 
-function ReservationsScreen({ reservations, vehicles, locations, selectedVehicleId, setSelectedVehicleId, newLocationId, setNewLocationId, handleReserve, cancel, locationLabel }: { reservations: Reservation[]; vehicles: Vehicle[]; locations: ParkingLocation[]; selectedVehicleId: string; setSelectedVehicleId: (value: string) => void; newLocationId: string; setNewLocationId: (value: string) => void; handleReserve: () => void; cancel: (id: string) => void; locationLabel: (id?: string) => string }) { return <div className="grid gap-5 lg:grid-cols-6"><h2 className="text-2xl font-black lg:col-span-6">Reservations</h2><Card className="lg:col-span-6"><CardContent className="grid gap-4 p-5 sm:grid-cols-3"><Select value={selectedVehicleId} onValueChange={setSelectedVehicleId}><SelectTrigger className="h-12"><SelectValue /></SelectTrigger><SelectContent>{vehicles.filter((item: Vehicle) => item.id).map((item: Vehicle) => <SelectItem key={item.id} value={item.id}>{item.plateNumber}</SelectItem>)}</SelectContent></Select><Select value={newLocationId || 'none'} onValueChange={(value: string) => setNewLocationId(value === 'none' ? '' : value)}><SelectTrigger className="h-12"><SelectValue placeholder="Available bay" /></SelectTrigger><SelectContent><SelectItem value="none">Available bay</SelectItem>{locations.filter((item: ParkingLocation) => item.id && item.status === 'Available').map((item: ParkingLocation) => <SelectItem key={item.id} value={item.id}>{parkingLocationLabel(item)}</SelectItem>)}</SelectContent></Select><Button size="lg" onClick={handleReserve}><CalendarDays /> Reserve bay</Button></CardContent></Card><div className="grid gap-3 lg:col-span-6 lg:grid-cols-2">{reservations.map((reservation: Reservation) => { const vehicle = vehicles.find((item: Vehicle) => item.id === reservation.vehicleId); return <Card key={reservation.id}><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-secondary p-3 text-secondary-foreground"><CalendarDays /></div><div className="flex-1"><p className="font-semibold">{vehicle?.plateNumber} · {locationLabel(reservation.locationId)}</p><p className="text-sm text-muted-foreground">{format(new Date(reservation.reservationDate), 'dd MMM yyyy, HH:mm')} · {reservation.reservedBy}</p></div><Badge variant={statusVariant(reservation.status)}>{reservation.status}</Badge>{reservation.status === 'Upcoming' && <Button variant="ghost" size="icon" onClick={() => cancel(reservation.id)} aria-label="Cancel reservation"><X /></Button>}</CardContent></Card>; })}</div></div>; }
+function ReservationsScreen({ reservations, vehicles, locations, selectedVehicleId, setSelectedVehicleId, newLocationId, setNewLocationId, handleReserve, closeReservation, locationLabel }: { reservations: Reservation[]; vehicles: Vehicle[]; locations: ParkingLocation[]; selectedVehicleId: string; setSelectedVehicleId: (value: string) => void; newLocationId: string; setNewLocationId: (value: string) => void; handleReserve: (start: string, end: string) => void; closeReservation: (id: string, status: 'Cancelled' | 'Completed') => void; locationLabel: (id?: string) => string }) { const [start, setStart] = useState(''); const [end, setEnd] = useState(''); return <div className="grid gap-5 lg:grid-cols-6"><h2 className="text-2xl font-black lg:col-span-6">Reservations</h2><Card className="lg:col-span-6"><CardContent className="grid gap-4 p-5 sm:grid-cols-3"><Select value={selectedVehicleId} onValueChange={setSelectedVehicleId}><SelectTrigger className="h-12"><SelectValue /></SelectTrigger><SelectContent>{vehicles.filter((item: Vehicle) => item.id).map((item: Vehicle) => <SelectItem key={item.id} value={item.id}>{item.plateNumber}</SelectItem>)}</SelectContent></Select><Select value={newLocationId || 'none'} onValueChange={(value: string) => setNewLocationId(value === 'none' ? '' : value)}><SelectTrigger className="h-12"><SelectValue placeholder="Available bay" /></SelectTrigger><SelectContent><SelectItem value="none">Available bay</SelectItem>{locations.filter((item: ParkingLocation) => item.id && item.status === 'Available').map((item: ParkingLocation) => <SelectItem key={item.id} value={item.id}>{parkingLocationLabel(item)}</SelectItem>)}</SelectContent></Select><label>Start (Qatar)<Input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} /></label><label>End (Qatar)<Input type="datetime-local" value={end} onChange={e => setEnd(e.target.value)} /></label><Button size="lg" onClick={() => handleReserve(start, end)}><CalendarDays /> Reserve bay</Button></CardContent></Card><div className="grid gap-3 lg:col-span-6 lg:grid-cols-2">{reservations.map((reservation: Reservation) => { const vehicle = vehicles.find((item: Vehicle) => item.id === reservation.vehicleId); return <Card key={reservation.id}><CardContent className="flex items-center gap-3 p-4"><div className="rounded-lg bg-secondary p-3 text-secondary-foreground"><CalendarDays /></div><div className="flex-1"><p className="font-semibold">{vehicle?.plateNumber} · {locationLabel(reservation.locationId)}</p><p className="text-sm text-muted-foreground">{format(new Date(reservation.reservationDate), 'dd MMM yyyy, HH:mm')} {reservation.endDate ? `– ${format(new Date(reservation.endDate), 'dd MMM yyyy, HH:mm')}` : ''} · {reservation.reservedBy}</p></div><Badge variant={statusVariant(reservation.status)}>{reservation.status}</Badge>{reservation.status === 'Active' && <Button size="sm" onClick={() => closeReservation(reservation.id, 'Completed')}>Complete</Button>}{['Upcoming','Active'].includes(reservation.status) && <Button variant="ghost" size="icon" onClick={() => closeReservation(reservation.id, 'Cancelled')} aria-label="Cancel reservation"><X /></Button>}</CardContent></Card>; })}</div></div>; }
 
 function RegisteredUsersSummary() {
   const [users, setUsers] = useState<ManagedUser[]>([]);

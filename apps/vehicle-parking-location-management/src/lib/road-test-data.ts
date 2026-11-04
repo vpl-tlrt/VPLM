@@ -41,6 +41,7 @@ export interface RoadTestRecord {
   cancellationTimestamp?: string;
   cancelledBy?: string;
   cancellationReason?: string;
+  returnParkingPending?: boolean;
 }
 
 export interface RoadTestAuditEntry {

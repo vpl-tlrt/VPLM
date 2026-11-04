@@ -269,7 +269,8 @@ Deno.serve(async (request) => {
       const currentSnapshot = (workspace?.state ?? {}) as Snapshot;
       if (!isRecord(currentSnapshot)) throw new Error('The workspace snapshot is invalid. No data was changed.');
       const prepared = prepareArchive(currentSnapshot, (pickupRows ?? []) as PickupRequest[]);
-      if (!prepared.hasArchivedData) {
+      const pruneEnabled = Deno.env.get('BACKUP_ENABLE_PRUNING') === 'true';
+      if (pruneEnabled && !prepared.hasArchivedData) {
         return respond({ status: 'nothing-to-archive', retained: prepared.retained });
       }
       const exportedAt = new Date().toISOString();
@@ -279,6 +280,7 @@ Deno.serve(async (request) => {
         sourceRevision: workspace?.revision ?? null,
         archived: prepared.archived,
         retained: prepared.retained,
+        restore: { workspace: currentSnapshot, pickupRequests: pickupRows },
       };
       const content = JSON.stringify(payload, null, 2);
       if (new TextEncoder().encode(content).length > 20_000_000) {
@@ -289,6 +291,8 @@ Deno.serve(async (request) => {
       const date = exportedAt.slice(0, 10);
       const filePath = `${backupPath}/${date.slice(0, 4)}/${date.slice(5, 7)}/${date}-${hash}.json`;
       await uploadAndVerify(repository, filePath, branch, token, content);
+
+      if (!pruneEnabled) return respond({ status: 'backup-only', backupPath: filePath, retained: prepared.retained });
 
       if (workspace && JSON.stringify(prepared.nextSnapshot) !== JSON.stringify(currentSnapshot)) {
         const { data: updated, error } = await adminClient.from('workspace_state')
