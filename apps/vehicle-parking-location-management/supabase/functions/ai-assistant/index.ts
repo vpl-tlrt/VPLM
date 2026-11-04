@@ -1,5 +1,12 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.118.0';
 
+const replyLanguages = new Map([
+  ['en', 'English'],
+  ['hi', 'Hindi (Devanagari script)'],
+  ['si', 'Sinhala (Sinhala script)'],
+  ['ta', 'Tamil (Tamil script)'],
+]);
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, apikey, x-client-info, content-type',
@@ -74,6 +81,8 @@ Deno.serve(async (request) => {
     if (!message) return respond({ error: 'Enter a message to continue.' }, 400);
     if (message.length > 2000) return respond({ error: 'Messages must be 2,000 characters or fewer.' }, 413);
 
+    const language = 'language' in input && typeof input.language === 'string' ? replyLanguages.get(input.language) : undefined;
+
     const apiKey = Deno.env.get('GEMINI_API_KEY');
     if (!apiKey) return respond({ error: 'The AI provider key is not configured. Ask the administrator to set GEMINI_API_KEY.' }, 503);
     const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash';
@@ -88,6 +97,7 @@ Deno.serve(async (request) => {
       'Never claim to have searched live records, located a real vehicle, checked current capacity, updated a record, or completed an action. For a specific vehicle lookup, direct the user to enter its registration in the assistant; the application handles the lookup locally.',
       'Do not request or encourage users to provide confidential, personal, customer, registration, VIN, or other operationally sensitive information in general AI questions.',
       'Be concise, practical, and clear when information is uncertain.',
+      ...(language ? [`Write your reply in ${language}. Keep VPLM command shortcuts and identifiers in their original form.`] : []),
     ].join(' ');
 
     let response: Response | null = null;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { BookOpen, Bot, CarFront, CircleParking, LoaderCircle, MapPin, MoveRight, Route, Search, Send, Sparkles, X } from 'lucide-react';
 import { mapParkingLocationId, supportsXParkingLocation, type Movement, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
+import { assistantLanguages, isAssistantLanguage, readAssistantLanguage } from '@/lib/assistant-language';
 import { supabase } from '@/lib/supabase';
 import { VplmCodexPet } from '@/components/vplm-codex-pet';
 
@@ -11,6 +12,7 @@ import { loadRoadTests, type RoadTestType } from '@/lib/road-test-data';
 type ChatMessage = {
   role: 'assistant' | 'user';
   content: string;
+  language?: keyof typeof assistantLanguages;
 };
 
 type AssistantFunction = 'find' | 'assign' | 'transfer' | 'road-test' | 'availability' | 'pickup-request';
@@ -75,6 +77,20 @@ export default function AiAssistant({
   onAssign,
   onTransfer,
 }: AiAssistantProps) {
+  const languageKey = `vplm-assistant-language:${userId}`;
+  const [language, setLanguage] = useState(() => readAssistantLanguage(languageKey));
+  const languageText = assistantLanguages[language];
+  useEffect(() => setLanguage(readAssistantLanguage(languageKey)), [languageKey]);
+  const changeLanguage = (value: string) => {
+    if (!isAssistantLanguage(value)) return;
+    setLanguage(value);
+    try {
+      window.localStorage.setItem(languageKey, value);
+    } catch {
+      // Keep the selected language for this session.
+    }
+  };
+
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -96,8 +112,8 @@ export default function AiAssistant({
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, open, busy, transferFlow, activeFunction, roadTest, pickupPlate]);
 
-  const addAssistantMessage = (content: string) => {
-    setMessages((current) => [...current, { role: 'assistant', content }]);
+  const addAssistantMessage = (content: string, language?: ChatMessage['language']) => {
+    setMessages((current) => [...current, { role: 'assistant', content, language }]);
   };
 
   const activeFlowVehicle = transferFlow?.vehicleId
@@ -578,13 +594,13 @@ export default function AiAssistant({
 
     try {
       const { data, error } = await supabase.functions.invoke('ai-assistant', {
-        body: { message },
+        body: { message, language },
       });
       if (error) throw error;
       if (typeof data?.reply !== 'string' || !data.reply.trim()) {
         throw new Error(typeof data?.error === 'string' ? data.error : 'The AI service returned an empty response.');
       }
-      if (version === responseVersion.current) addAssistantMessage(data.reply);
+      if (version === responseVersion.current) addAssistantMessage(data.reply, language);
     } catch (error) {
       let detail = error instanceof Error ? error.message : 'Unknown error';
       if (typeof error === 'object' && error !== null && 'context' in error && error.context instanceof Response) {
@@ -635,6 +651,15 @@ export default function AiAssistant({
           </header>
 
           <div className="border-b border-border bg-muted/40 px-4 py-2 text-xs leading-relaxed text-muted-foreground">
+            <label className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm font-medium text-foreground" lang={language}>
+              {languageText.label}
+              <select value={language} onChange={event => changeLanguage(event.target.value)}
+                className="min-h-9 max-w-full rounded-lg border border-input bg-background px-2">
+                {Object.entries(assistantLanguages).map(([code, text]) => (
+                  <option key={code} value={code} lang={code}>{text.name}</option>
+                ))}
+              </select>
+            </label>
             Workspace data is used for vehicle and bay lookups. Transfers and requests are saved only after you submit their app forms and confirmations. AI answers may be incorrect.
           </div>
 
@@ -642,6 +667,7 @@ export default function AiAssistant({
             {messages.map((message, index) => (
               <div
                 key={`${message.role}-${index}`}
+                lang={message.language}
                 className={`max-w-[95%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2.5 text-sm leading-relaxed ${
                   message.role === 'user'
                     ? 'ml-auto rounded-br-sm bg-primary text-primary-foreground'
@@ -748,6 +774,7 @@ export default function AiAssistant({
             <label className="sr-only" htmlFor="vplm-ai-message">Message the VPLM AI assistant</label>
             <textarea
               id="vplm-ai-message"
+              lang={language}
               rows={1}
               maxLength={2000}
               value={input}
@@ -758,7 +785,7 @@ export default function AiAssistant({
                   void sendMessage();
                 }
               }}
-              placeholder={transferFlow?.step === 'destination' ? 'Type a bay, e.g. B-47, or Cancel…' : roadTest ? 'Type your road-test reply…' : 'Enter a prompt or function shortcut…'}
+              placeholder={transferFlow?.step === 'destination' ? 'Type a bay, e.g. B-47, or Cancel…' : roadTest ? 'Type your road-test reply…' : languageText.prompt}
               className="max-h-28 min-h-10 flex-1 resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <button
