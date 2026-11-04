@@ -21,6 +21,7 @@ export interface RoadTestRecord {
   status: RoadTestStatus;
   startTimestamp?: string;
   startedBy?: string;
+  startedById?: string;
   departureLocationId?: string;
   odometerStart?: number;
   finishTimestamp?: string;

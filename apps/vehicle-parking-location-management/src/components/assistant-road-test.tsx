@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useImperativeHandle, useState, type Ref } from 'react';
 import { Button } from '@/components/ui/button';
 import { parkingRecordKey, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import {
@@ -6,7 +6,15 @@ import {
   roadTestLocationLabel, saveRoadTestData, startRoadTestRecord, type RoadTestResult, type RoadTestType,
 } from '@/lib/road-test-data';
 
+export type RoadTestChatHandle = { answer: (message: string) => void };
 type Props = {
+  ref: Ref<RoadTestChatHandle>;
+  initialVehicleId?: string;
+  resumeId?: string;
+  canCreate: boolean;
+  findOwnRunningTest: (vehicle: Vehicle) => ReturnType<typeof loadRoadTests>[number] | undefined;
+  userId: string;
+  onMessage: (message: string) => void;
   type: RoadTestType;
   vehicles: Vehicle[];
   locations: ParkingLocation[];
@@ -15,9 +23,9 @@ type Props = {
   onClose: (message?: string) => void;
 };
 
-export function AssistantRoadTest({ type, vehicles, locations, actor, onLocationChange, onClose }: Props) {
-  const [selected, setSelected] = useState('');
-  const [step, setStep] = useState<'select' | 'completed' | 'parking'>('select');
+export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, findOwnRunningTest, userId, onMessage, type, vehicles, locations, actor, onLocationChange, onClose }: Props) {
+  const [selected, setSelected] = useState(initialVehicleId ?? '');
+  const [step, setStep] = useState<'select' | 'completed' | 'parking'>(resumeId ? 'completed' : 'select');
   const [zone, setZone] = useState('');
   const [bay, setBay] = useState('');
   const [result, setResult] = useState<RoadTestResult>();
@@ -27,28 +35,35 @@ export function AssistantRoadTest({ type, vehicles, locations, actor, onLocation
     const vehicle = vehicles.find(item => item.id === task.vehicleId);
     return vehicle ? [{ task, vehicle }] : [];
   });
-  const test = loadRoadTests().find(item => item.id === selected);
-  const vehicle = vehicles.find(item => item.id === test?.vehicleId);
+  const [runningId, setRunningId] = useState(resumeId);
+  const test = loadRoadTests().find(item => item.id === runningId);
+  const vehicle = vehicles.find(item => item.id === (test?.vehicleId ?? selected) && item.status !== 'Delivered');
   const available = locations.filter(location => location.status === 'Available'
     && !vehicles.some(item => parkingRecordKey(item.currentLocationId) === parkingRecordKey(location.id)));
   const save = (finish: boolean) => {
     const tests = loadRoadTests();
-    const current = tests.find(item => item.id === selected);
-    if (!current || !vehicle || current.status !== (finish ? 'In Road Test' : 'Assigned')) {
-      setError('This task changed. Close and reopen the road test shortcut.');
-      return;
+    if (!vehicle) return setError('Enter a registered vehicle number.');
+    const pendingTask = tests.find(item => item.vehicleId === vehicle.id && item.status === 'Assigned');
+    const current = finish ? tests.find(item => item.id === runningId) : pendingTask;
+    if (finish && current?.status !== 'In Road Test') return setError('This road test is no longer in progress.');
+    if (!finish && tests.some(item => item.vehicleId === vehicle.id && item.status === 'In Road Test')) {
+      return setError('Another road test is already in progress for this vehicle.');
     }
-    if (!finish && tests.some(item => item.id !== current.id && item.vehicleId === vehicle.id && item.status === 'In Road Test')) {
-      setError('Another road test is already in progress for this vehicle.');
-      return;
+    if (!finish && current && (current.testType ?? 'Initial Road Test') !== type) {
+      return setError('This vehicle has a pending assignment for a different road test type.');
     }
+    if (!finish && !current && !canCreate) return setError('Select a vehicle with a pending task.');
     if (finish && (!result || !available.some(item => item.id === bay))) {
-      setError('Choose a result and an available final parking bay.');
-      return;
+      return setError('Choose a result and an available final parking bay.');
     }
+    const assignment = current ?? {
+      id: `rt-${crypto.randomUUID()}`, vehicleId: vehicle.id, jobCardNumber: '', purpose: '', assignedBy: actor,
+      assignedTo: '', priority: 'Normal' as const, testType: type, remarks: '', assignmentTimestamp: new Date().toISOString(),
+      status: 'Assigned' as const, furtherActionRequired: false, approved: false, immutable: false,
+    };
     const updated = finish && result
-      ? finishRoadTestRecord(current, actor, bay, result)
-      : startRoadTestRecord(current, actor, vehicle.currentLocationId);
+      ? finishRoadTestRecord(assignment, actor, bay, result)
+      : { ...startRoadTestRecord(assignment, actor, vehicle.currentLocationId), startedById: userId || undefined };
     const timestamp = updated.finishTimestamp ?? updated.startTimestamp!;
     const from = updated.departureLocationId;
     const detail = finish ? `${result} result recorded; vehicle parked at ${roadTestLocationLabel(bay, locations)}.`
@@ -61,34 +76,99 @@ export function AssistantRoadTest({ type, vehicles, locations, actor, onLocation
         recipient: updated.assignedBy, detail: `Immediate attention: ${updated.jobCardNumber || vehicle.plateNumber} failed.`, timestamp, read: false });
     }
     onLocationChange(vehicle.id, finish ? undefined : from, finish ? bay : undefined, !finish);
-    saveRoadTestData(tests.map(item => item.id === updated.id ? updated : item), [{
+    saveRoadTestData(current ? tests.map(item => item.id === updated.id ? updated : item) : [updated, ...tests], [{
       id: crypto.randomUUID(), roadTestId: updated.id, vehicleId: vehicle.id, actor, timestamp,
       action: finish ? 'Completed' : 'Started', detail, fromLocationId: from, toLocationId: finish ? bay : undefined,
-    }, ...loadRoadTestAudit()], notifications);
+    }, ...(!current ? [{
+      id: crypto.randomUUID(), roadTestId: updated.id, vehicleId: vehicle.id, actor, timestamp: assignment.assignmentTimestamp,
+      action: 'Assigned', detail: `${type} created in AI Assist.`,
+    }] : []), ...loadRoadTestAudit()], notifications);
     setError('');
     if (finish) onClose(`Road test completed for ${vehicle.plateNumber}. Final parking: ${roadTestLocationLabel(bay, locations)}.`);
-    else setStep('completed');
+    else {
+      setRunningId(updated.id);
+      setStep('completed');
+      onMessage(`Road test started for ${vehicle.plateNumber}. Did you complete the road test? Reply Yes or No.`);
+    }
   };
+
+  const finishPrompt = () => {
+    setStep('parking');
+    setError('');
+    onMessage('Enter the final parking zone and bay (for example, Workshop-12), then enter Pass or Fail and type Finish.');
+  };
+  useImperativeHandle(ref, () => ({
+    answer(message) {
+      const value = message.trim();
+      const key = value.toLowerCase();
+      if (key === 'cancel' || key === 'close' || (step !== 'parking' && /^(no|n)$/.test(key))) {
+        onClose(step !== 'select' ? 'Road test remains in progress.' : 'Road test prompt closed.');
+        return;
+      }
+      setError('');
+      if (step === 'select') {
+        if (/^(yes|y|start)$/.test(key)) return save(false);
+        const plateKey = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const matches = vehicles.filter(item => item.status !== 'Delivered' && plateKey(item.plateNumber) === plateKey(value));
+        if (matches.length !== 1) return setError(matches.length ? 'More than one vehicle matches this number.' : 'Vehicle number not found.');
+        const match = matches[0];
+        const running = findOwnRunningTest(match);
+        if (running) {
+          setRunningId(running.id);
+          setStep('completed');
+          onMessage('Did you complete the road test? Reply Yes or No.');
+          return;
+        }
+        setSelected(match.id);
+        const pendingTask = pending.some(item => item.vehicleId === match.id);
+        onMessage(`${match.plateNumber} · ${match.model || '—'} · ${match.color || '—'} · Current bay: ${roadTestLocationLabel(match.currentLocationId, locations)}. ${pendingTask || canCreate ? 'Reply Yes to start, or No to close.' : 'This vehicle has no pending task of this type.'}`);
+        return;
+      }
+      if (step === 'completed') {
+        if (/^(yes|y)$/.test(key)) finishPrompt();
+        else setError('Reply Yes or No.');
+        return;
+      }
+      if (/^(finish|complete)$/.test(key)) return save(true);
+      if (key === 'pass' || key === 'fail') {
+        setResult(key === 'pass' ? 'Pass' : 'Fail');
+        return;
+      }
+      const normalized = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const target = available.find(item => parkingRecordKey(item.id) === parkingRecordKey(value)
+        || `${item.zone}${item.bayNumber}`.toLowerCase().replace(/[^a-z0-9]/g, '') === normalized
+        || (item.zone === zone && /^\d+$/.test(value) && Number(item.bayNumber) === Number(value))
+        || (item.bayNumber && value.match(/\d+$/) && `${item.zone.replace(/[^a-z0-9]/gi, '').toLowerCase()}${Number(item.bayNumber)}` === normalized));
+      if (target) {
+        setZone(target.zone);
+        setBay(target.id);
+        return;
+      }
+      const matchingZone = available.find(item => item.zone.toLowerCase() === key)?.zone;
+      if (matchingZone) { setZone(matchingZone); setBay(''); }
+      else setError('Enter an available zone and bay, Pass or Fail, or Finish.');
+    },
+  }));
 
   return <div className="space-y-3 rounded-lg border p-3 text-sm">
     <div className="flex items-center justify-between gap-2"><strong>{type}</strong><Button size="sm" variant="ghost" onClick={() => onClose()}>Close</Button></div>
     {step === 'select' && <>
       <p>{pending.length} pending road test {pending.length === 1 ? 'task' : 'tasks'}</p>
       {taskVehicles.length > 0 && <label className="grid gap-1">Vehicle number
-        <select className="rounded border bg-background p-2" value={selected} onChange={event => { setSelected(event.target.value); setError(''); }}>
+        <select className="rounded border bg-background p-2" value={taskVehicles.some(item => item.vehicle.id === selected) ? selected : ''} onChange={event => { setSelected(event.target.value); setError(''); }}>
           <option value="">Select vehicle number</option>
-          {taskVehicles.map(({ task, vehicle }) => <option key={task.id} value={task.id}>{vehicle.plateNumber}</option>)}
+          {taskVehicles.map(({ task, vehicle }) => <option key={task.id} value={vehicle.id}>{vehicle.plateNumber}</option>)}
         </select>
       </label>}
       {vehicle && <>
         <p>Model: {vehicle.model || '—'} · Colour: {vehicle.color || '—'} · Current bay: {roadTestLocationLabel(vehicle.currentLocationId, locations)}</p>
-        <p>Are you taking this vehicle for a road test?</p>
-        <div className="flex gap-2"><Button size="sm" onClick={() => save(false)}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose()}>No</Button></div>
+        <p>{pending.some(item => item.vehicleId === vehicle.id) ? 'Are you taking this vehicle for a road test?' : canCreate ? 'Create and start a road test for this vehicle?' : 'This vehicle has no pending task of this type.'}</p>
+        <div className="flex gap-2"><Button size="sm" disabled={!canCreate && !pending.some(item => item.vehicleId === vehicle.id)} onClick={() => save(false)}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose()}>No</Button></div>
       </>}
     </>}
     {step === 'completed' && <>
-      <p>Road test started for {vehicle?.plateNumber}. Did you complete the road test?</p>
-      <div className="flex gap-2"><Button size="sm" onClick={() => setStep('parking')}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose('Road test remains in progress. You can finish it from Road Tests.')}>No</Button></div>
+      <p>Road test in progress for {vehicle?.plateNumber}. Did you complete the road test?</p>
+      <div className="flex gap-2"><Button size="sm" onClick={finishPrompt}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose('Road test remains in progress. You can finish it from Road Tests.')}>No</Button></div>
     </>}
     {step === 'parking' && <>
       <label className="grid gap-1">Final parking zone<select className="rounded border bg-background p-2" value={zone} onChange={event => { setZone(event.target.value); setBay(''); }}>
