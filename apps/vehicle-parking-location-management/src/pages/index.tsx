@@ -1,3 +1,4 @@
+import { setGuestWorkspace } from '@/lib/local-storage-scope';
 import { useEffect, useState, type FormEvent } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { CarFront, Lock, ShieldCheck, UserRound } from 'lucide-react';
@@ -319,6 +320,8 @@ export default function HomePage() {
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [passwordSetup, setPasswordSetup] = useState(isPasswordSetupUrl);
   const [workspaceRevision, setWorkspaceRevision] = useState<number | null>(null);
+  const [workspaceGuest, setWorkspaceGuest] = useState(false);
+  const [workspaceRefresh, setWorkspaceRefresh] = useState(0);
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
   const [workspaceUserId, setWorkspaceUserId] = useState<string>();
   const [workspaceError, setWorkspaceError] = useState('');
@@ -339,7 +342,6 @@ export default function HomePage() {
       queryClient.removeQueries({ queryKey: ['authenticated-user'] });
       setSession(nextSession);
       if (event === 'PASSWORD_RECOVERY') setPasswordSetup(true);
-      if (!nextSession) clearWorkspaceSnapshot();
     });
     return () => {
       active = false;
@@ -353,16 +355,19 @@ export default function HomePage() {
       setWorkspaceRevision(null);
       setWorkspaceUserId(undefined);
       setWorkspaceError('');
-      clearWorkspaceSnapshot();
+      if (workspaceUserId) clearWorkspaceSnapshot();
+      setGuestWorkspace(false);
+      setWorkspaceGuest(false);
       return;
     }
     let active = true;
     setWorkspaceLoaded(false);
     setWorkspaceError('');
-    clearWorkspaceSnapshot();
-    void loadWorkspace(session.user.id).then(({ snapshot, revision }) => {
+    void loadWorkspace(session.user.id).then(({ snapshot, revision, isGuest }) => {
       if (!active) return;
-      if (snapshot) applyWorkspaceSnapshot(snapshot);
+      setGuestWorkspace(isGuest);
+      applyWorkspaceSnapshot(snapshot ?? {});
+      setWorkspaceGuest(isGuest);
       setWorkspaceRevision(revision);
       setWorkspaceUserId(session.user.id);
       setWorkspaceLoaded(true);
@@ -373,7 +378,7 @@ export default function HomePage() {
       setWorkspaceLoaded(true);
     });
     return () => { active = false; };
-  }, [session?.user.id]);
+  }, [session?.user.id, workspaceRefresh]);
 
   if (!isSupabaseConfigured || !client) {
     return (
@@ -425,6 +430,9 @@ export default function HomePage() {
 
   return (
     <ParkingApp
+      key={`${session.user.id}:${workspaceRefresh}`}
+      workspaceGuest={workspaceGuest}
+      onGuestRefresh={() => { setWorkspaceLoaded(false); setWorkspaceRefresh(value => value + 1); }}
       signedInUserId={typeof session.user.user_metadata.login_id === 'string' ? session.user.user_metadata.login_id : session.user.email ?? 'Signed-in user'}
       initialCloudRevision={workspaceRevision}
       onExit={() => { void client.auth.signOut(); }}

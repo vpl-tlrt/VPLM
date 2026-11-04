@@ -85,9 +85,10 @@ const canChangeRoadTests = (previous: string | null | undefined, next: string | 
 };
 
 const canSave = (role: Role, before: Snapshot | null, after: Snapshot): boolean => {
+  if (role === 'Guest Users') return false;
   const changedKeys = snapshotKeys.filter((key) => changed(before?.[key], after[key]));
   const restrictedRoadTests = ['vplm-road-tests-v2', 'vplm-road-test-audit-v2', 'vplm-road-test-notifications-v2'];
-  if (role === 'Drivers' || role === 'Guest Users' || role === 'Others') {
+  if (role === 'Drivers' || role === 'Others') {
     if (changedKeys.some((key) => restrictedRoadTests.includes(key))) return false;
   }
   if (role !== 'Administrator' && role !== 'Supervisor') {

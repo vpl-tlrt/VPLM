@@ -37,7 +37,7 @@ import { validateVehicle } from '@/lib/vehicle-validation';
 import { enqueueSync } from '@/lib/sync-queue';
 import { supabase } from '@/lib/supabase';
 import { useOnlineUsers, type OnlineUser } from '@/lib/use-online-users';
-import { appStorageKey } from '@/lib/local-storage-scope';
+import { appStorageKey, workspaceDataStorage } from '@/lib/local-storage-scope';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -146,7 +146,7 @@ const defaultGarageLayout: GarageLayoutItem[] = [
 
 const loadGarageLayout = (): GarageLayoutItem[] => {
   try {
-    const saved = window.localStorage.getItem(appStorageKey('vplm-garage-layout-v1'));
+    const saved = workspaceDataStorage().getItem(appStorageKey('vplm-garage-layout-v1'));
     if (!saved) return defaultGarageLayout;
     const parsed = JSON.parse(saved) as GarageLayoutItem[];
     return parsed.map((item: GarageLayoutItem) => ({ ...item, facing: item.facing ?? 'north', name: item.name ?? (item.kind === 'zone' ? `Zone ${item.zone}` : undefined), details: item.details ?? '' }));
@@ -159,10 +159,12 @@ type ParkingAppProps = {
   signedInUserId: string;
   initialCloudRevision: number | null;
   localGuest?: boolean;
+  workspaceGuest?: boolean;
+  onGuestRefresh?: () => void;
   onExit: () => void;
 };
 
-export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = false, onExit }: ParkingAppProps) {
+export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = false, workspaceGuest = false, onGuestRefresh, onExit }: ParkingAppProps) {
   const { data: user } = useUser();
   const { soundEnabled, toggleSound, playSound } = useNotificationSound(user?.objectId ?? user?.userPrincipalName);
   const notificationClickTimer = useRef<number | undefined>(undefined);
@@ -181,7 +183,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const [currentTime, setCurrentTime] = useState(() => new Date());
 
   const access = useAppAccess(user?.userPrincipalName, user?.objectId, localGuest);
-  const role: Role = access.data?.role ?? 'Operator';
+  const role: Role = workspaceGuest ? 'Guest Users' : access.data?.role ?? 'Operator';
+  const guestPreview = workspaceGuest || role === 'Guest Users';
   const [vehicles, setVehicles] = useState<Vehicle[]>(() => loadOfflineState()?.vehicles ?? []);
   const [garageLayout, setGarageLayout] = useState<GarageLayoutItem[]>(loadGarageLayout);
   const [auditEvents, setAuditEvents] = useState<OfflineAuditEvent[]>(() => loadOfflineState()?.auditEvents ?? []);
@@ -195,9 +198,9 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const [dashboardVehicleId, setDashboardVehicleId] = useState<string>();
   const [pullDistance, setPullDistance] = useState(0);
   const pullStartY = useRef<number | undefined>(undefined);
-  const { sync, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest);
+  const { sync, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview);
   const isOnline = syncState !== 'offline';
-  const syncLabel = localGuest ? 'Guest · this device' : syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline · pending' : syncState === 'error' ? 'Sync needs attention' : pendingChanges ? 'Changes pending' : 'Cloud synced';
+  const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline · pending' : syncState === 'error' ? 'Sync needs attention' : pendingChanges ? 'Changes pending' : 'Cloud synced';
 
   const [zone, setZone] = useState('A');
   const [assignmentVehicle, setAssignmentVehicle] = useState<VehicleFormData>(emptyVehicleForm);
@@ -294,8 +297,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   useEffect(() => {
     const key = appStorageKey('vplm-garage-layout-v1');
     const serialized = JSON.stringify(garageLayout);
-    if (window.localStorage.getItem(key) === serialized) return;
-    window.localStorage.setItem(key, serialized);
+    if (workspaceDataStorage().getItem(key) === serialized) return;
+    workspaceDataStorage().setItem(key, serialized);
     notifyWorkspaceDataChanged();
   }, [garageLayout]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -303,7 +306,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const [historyFilter, setHistoryFilter] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const actor = localGuest ? 'Guest User' : user?.fullName ?? 'Local Operator';
-  const { users: onlineUsers, connected: presenceConnected } = useOnlineUsers(!localGuest && queueOwnerId ? { id: queueOwnerId, name: actor, role } : null);
+  const { users: onlineUsers, connected: presenceConnected } = useOnlineUsers(!localGuest && !guestPreview && queueOwnerId ? { id: queueOwnerId, name: actor, role } : null);
 
   const activeVehicles = vehicles.filter((item: Vehicle) => item.status !== 'Delivered');
   const containerVehicleCount = (locationId: string) => activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId)).length;
@@ -627,9 +630,9 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
               <Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} onFocus={() => { if (searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-28" aria-label="Global vehicle search" />
             </div>
             <div className="ml-auto flex items-center gap-2">
-              {localGuest && <Badge variant="secondary" className="shrink-0 border border-amber-500/60 bg-amber-100 font-black text-amber-950">GUEST LICENSE · LOCAL ONLY</Badge>}
+              {guestPreview && <Badge variant="secondary" className="shrink-0 border border-amber-500/60 bg-amber-100 font-black text-amber-950">GUEST PREVIEW · NO CLOUD SAVES</Badge>}
               <div className="hidden text-right xl:block"><p className="text-sm font-semibold">{format(currentTime, 'EEE, d MMM')}</p><p className="text-xs text-muted-foreground">{format(currentTime, 'HH:mm:ss')}</p></div>
-              <Button variant={isOnline && syncState !== 'error' ? 'default' : 'secondary'} size="sm" className="rounded-xl" onClick={() => void sync(true)} aria-label={`Data storage status: ${syncLabel}`} title={localGuest ? 'Guest data stays on this device and is not uploaded.' : lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Click to sync workspace data'}><span className="live-dot" /><span className="hidden lg:inline">{syncLabel}</span></Button>
+              <Button variant={isOnline && syncState !== 'error' ? 'default' : 'secondary'} size="sm" className="rounded-xl" onClick={() => void sync(true)} aria-label={`Data storage status: ${syncLabel}`} title={localGuest || guestPreview ? 'Guest changes are not uploaded.' : lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Click to sync workspace data'}><span className="live-dot" /><span className="hidden lg:inline">{syncLabel}</span></Button>
               <Button variant="outline" size="icon" className="rounded-xl" onClick={handleNotificationClick} onDoubleClick={(event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault()} aria-label={`Notifications. Sound ${soundEnabled ? 'on' : 'off'}. Double-click to toggle sound.`} title={`Notification sound ${soundEnabled ? 'on' : 'off'} · double-click to toggle`}>{soundEnabled ? <Bell /> : <BellOff />}</Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -654,8 +657,14 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           </div>
           <div className="relative mt-3 overflow-hidden rounded-2xl bg-background lg:hidden"><span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-base font-bold tabular-nums text-muted-foreground" aria-hidden="true">{format(currentTime, 'HH:mm:ss')}</span><Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-24" aria-label="Global vehicle search" /></div>
         </header>
+        {workspaceGuest && <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-sm">
+          <span>Guest preview. Vehicle changes are temporary. Pickup requests are view-only.</span>
+          <Button size="sm" variant="outline" onClick={() => {
+            if (window.confirm('Refresh from the live workspace? Temporary guest changes will be discarded.')) onGuestRefresh?.();
+          }}>Refresh live data</Button>
+        </div>}
         <motion.div key={screen} initial={{ opacity: 0, y: 12, scale: 0.995 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] as const }} className="mx-auto max-w-[1600px] p-4 md:p-6 xl:p-8">
-          {screen === 'pickup-requests' && <PickupRequestManagement vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} onFinishParking={finishPickupParking} />}
+          {screen === 'pickup-requests' && <PickupRequestManagement readOnly={guestPreview} vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} onFinishParking={finishPickupParking} />}
           {screen === 'road-tests' && canAccessRoadTests && <RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} actorRole={role} canCreateAssignment canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} isAdministrator={isAdministrator} initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} /> }
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
           {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage} canEditVehicle={canEditVehicle} canTransferVehicle={canTransferVehicle} canAssignVehicle={canAssignVehicle} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} onContactVehicle={() => toast.info('Team sharing requires a configured cloud service.')} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} onAssignSelectedBay={(selectedBayId: string, vehicleForm: VehicleFormData) => { setBayId(selectedBayId); setZone(locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(selectedBayId))?.zone ?? zone); setAssignmentVehicle(vehicleForm); }} assignSelectedBay={(selectedBayId?: string) => handleAssign(selectedBayId)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
@@ -1530,7 +1539,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
   const reorderBay = (targetId: string) => { if (!draggedBay || draggedBay === targetId) return; setLocations((current: ParkingLocation[]) => { const sourceIndex = current.findIndex((item: ParkingLocation) => item.id === draggedBay); const targetIndex = current.findIndex((item: ParkingLocation) => item.id === targetId); const next = [...current]; const [source] = next.splice(sourceIndex, 1); if (source) next.splice(targetIndex, 0, source); return next; }); logAudit('Layout', 'Parking map', `Reordered bay near ${targetId}`); setDraggedBay(undefined); };
   const reviewAi = (id: string, approved: boolean) => { const match = pendingAi.find((item: { id: string }) => item.id === id); if (!match) return; setPendingAi((current) => current.filter((item: { id: string }) => item.id !== id)); logAudit(approved ? 'Approval' : 'Rejection', 'AI match', `${match.plate} → ${match.bay}`); toast.success(`AI assignment ${approved ? 'approved' : 'rejected'}.`); };
   const saveManagementChanges = () => {
-    window.localStorage.setItem(appStorageKey('vplm-garage-layout-v1'), JSON.stringify(garageLayout));
+    workspaceDataStorage().setItem(appStorageKey('vplm-garage-layout-v1'), JSON.stringify(garageLayout));
     logAudit('Save', 'Management center', `${locations.length} bays, ${vehicles.length} vehicles, and ${garageLayout.length} layout items`);
     toast.success('Garage layout and management changes saved on this device.');
   };

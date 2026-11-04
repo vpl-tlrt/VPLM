@@ -8,7 +8,7 @@ export class WorkspaceConflictError extends Error {
   }
 }
 
-export async function loadWorkspace(userId: string): Promise<{ snapshot: WorkspaceSnapshot | null; revision: number | null }> {
+export async function loadWorkspace(userId: string): Promise<{ snapshot: WorkspaceSnapshot | null; revision: number | null; isGuest: boolean }> {
   if (!supabase) throw new Error('Supabase is not configured.');
 
   const { data: membership, error: membershipError } = await supabase
@@ -40,6 +40,7 @@ export async function loadWorkspace(userId: string): Promise<{ snapshot: Workspa
   return {
     snapshot: data?.state as WorkspaceSnapshot | null ?? null,
     revision: data?.revision ?? null,
+    isGuest: membership.role === 'Guest Users',
   };
 }
 

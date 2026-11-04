@@ -250,6 +250,11 @@ export default function AiAssistant({
 
   const runFunction = (action: AssistantFunction, query: string) => {
     if (action === 'pickup-request') {
+      if (role === 'Guest Users') {
+        setActiveFunction(null);
+        addAssistantMessage('Guest profiles can view live pickup requests from Pickup Requests.');
+        return;
+      }
       setActiveFunction(null);
       const plate = findVehicle(query).vehicle?.plateNumber
         ?? query.replace(/^(?:\/?pickup(?: request)?|pick up|request vehicle pickup|request pickup)\b\s*/i, '').trim();
@@ -346,6 +351,11 @@ export default function AiAssistant({
       return;
     }
     if (action === 'pickup-request') {
+      if (role === 'Guest Users') {
+        setActiveFunction(null);
+        addAssistantMessage('Guest profiles can view live pickup requests from Pickup Requests.');
+        return;
+      }
       setPickupPlate('');
       return;
     }
@@ -689,7 +699,7 @@ export default function AiAssistant({
                 setRoadTest(undefined);
                 if (message) addAssistantMessage(message);
               }} />}
-            {pickupPlate !== undefined && <AssistantPickup key={pickupPlate} vehicles={vehicles.filter(vehicle => vehicle.status !== 'Delivered')} locations={locations}
+            {role !== 'Guest Users' && pickupPlate !== undefined && <AssistantPickup key={pickupPlate} vehicles={vehicles.filter(vehicle => vehicle.status !== 'Delivered')} locations={locations}
               initialPlate={pickupPlate} actor={actor} userId={userId} onClose={message => {
                 setPickupPlate(undefined);
                 if (message) addAssistantMessage(message);

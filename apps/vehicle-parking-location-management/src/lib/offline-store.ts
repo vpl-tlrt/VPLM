@@ -1,6 +1,6 @@
 import type { Movement, ParkingLocation, Reservation, Vehicle } from '@/lib/parking-data';
 import { notifyWorkspaceDataChanged } from '@/lib/workspace-sync-events';
-import { appStorageKey } from '@/lib/local-storage-scope';
+import { appStorageKey, workspaceDataStorage } from '@/lib/local-storage-scope';
 
 const STORAGE_KEY = appStorageKey('vehicle-parking-browser-state-v2');
 const MAX_LOCAL_HISTORY_ITEMS = 500;
@@ -32,7 +32,7 @@ export type OfflineState = {
 
 export const loadOfflineState = (): OfflineState | undefined => {
   try {
-    const value = window.localStorage.getItem(STORAGE_KEY);
+    const value = workspaceDataStorage().getItem(STORAGE_KEY);
     return value ? (JSON.parse(value) as OfflineState) : undefined;
   } catch {
     return undefined;
@@ -87,7 +87,7 @@ export const saveOfflineState = (state: OfflineState): boolean => {
 
   try {
     const savedState = createQuotaSafeState(state);
-    const previousValue = window.localStorage.getItem(STORAGE_KEY);
+    const previousValue = workspaceDataStorage().getItem(STORAGE_KEY);
     let domainDataChanged = previousValue === null;
     if (previousValue !== null) {
       try {
@@ -98,7 +98,7 @@ export const saveOfflineState = (state: OfflineState): boolean => {
         domainDataChanged = true;
       }
     }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(savedState));
+    workspaceDataStorage().setItem(STORAGE_KEY, JSON.stringify(savedState));
     if (domainDataChanged) notifyWorkspaceDataChanged();
     return true;
   } catch (error: unknown) {
@@ -109,8 +109,8 @@ export const saveOfflineState = (state: OfflineState): boolean => {
           movements: state.movements.slice(0, 100),
           auditEvents: state.auditEvents.slice(0, 100),
         };
-        window.localStorage.removeItem(STORAGE_KEY);
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(minimalState));
+        workspaceDataStorage().removeItem(STORAGE_KEY);
+        workspaceDataStorage().setItem(STORAGE_KEY, JSON.stringify(minimalState));
         notifyWorkspaceDataChanged();
         return true;
       } catch {
