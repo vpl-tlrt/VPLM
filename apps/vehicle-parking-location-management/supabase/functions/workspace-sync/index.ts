@@ -73,10 +73,14 @@ const canChangeRoadTests = (previous: string | null | undefined, next: string | 
     const updated = newRecords.get(id);
     if (!updated) return false;
     if (JSON.stringify(old) === JSON.stringify(updated) || old.status === 'Assigned') continue;
+    const returnPending = old.status === 'In Road Test' && updated.status === 'In Road Test' && updated.returnParkingPending === true
+      && [...new Set([...Object.keys(old), ...Object.keys(updated)])].every(key => ['returnParkingPending', 'cancellationReason'].includes(key)
+        || JSON.stringify(old[key]) === JSON.stringify(updated[key]));
+    if (returnPending) continue;
     if (old.status !== 'In Road Test' || !['Completed', 'Cancelled'].includes(String(updated.status))) return false;
     const allowed = new Set(['status', 'finishTimestamp', 'finishedBy', 'odometerEnd', 'durationMinutes', 'finishNotes',
       'finalLocationId', 'result', 'findings', 'recommendation', 'furtherActionRequired', 'approved', 'approvedBy',
-      'approvalTimestamp', 'immutable', 'cancellationTimestamp', 'cancelledBy', 'cancellationReason']);
+      'approvalTimestamp', 'immutable', 'cancellationTimestamp', 'cancelledBy', 'cancellationReason', 'returnParkingPending']);
     for (const key of new Set([...Object.keys(old), ...Object.keys(updated)])) {
       if (!allowed.has(key) && JSON.stringify(old[key]) !== JSON.stringify(updated[key])) return false;
     }

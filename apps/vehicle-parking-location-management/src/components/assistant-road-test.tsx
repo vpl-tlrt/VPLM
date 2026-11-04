@@ -45,6 +45,7 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
     if (!vehicle) return setError('Enter a registered vehicle number.');
     const pendingTask = tests.find(item => item.vehicleId === vehicle.id && item.status === 'Assigned');
     const current = finish ? tests.find(item => item.id === runningId) : pendingTask;
+    if (finish && current?.returnParkingPending) return setError('Open Road Tests and choose Record return for this vehicle.');
     if (finish && current?.status !== 'In Road Test') return setError('This road test is no longer in progress.');
     if (!finish && tests.some(item => item.vehicleId === vehicle.id && item.status === 'In Road Test')) {
       return setError('Another road test is already in progress for this vehicle.');

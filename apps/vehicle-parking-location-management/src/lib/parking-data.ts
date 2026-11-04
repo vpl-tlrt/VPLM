@@ -15,7 +15,7 @@ export const supportsXParkingLocation = (location?: ParkingLocation): boolean =>
 };
 export interface VehicleHistorySnapshot { vehicle: Vehicle; locationLabel: string; fromLocationLabel?: string; toLocationLabel?: string; assignment: { assignedDate?: string; assignedBy?: string; currentLocationId?: string }; action: string; fromLocationId?: string; toLocationId?: string }
 export interface Movement { id: string; vehicleId: string; fromLocationId?: string; toLocationId?: string; movementType: MovementType; actionDateTime: string; performedBy: string; notes: string; snapshot?: VehicleHistorySnapshot }
-export interface Reservation { id: string; reservationId: string; vehicleId: string; locationId: string; reservationDate: string; reservedBy: string; status: 'Upcoming' | 'Active' | 'Cancelled' | 'Completed' }
+export interface Reservation { id: string; reservationId: string; vehicleId: string; locationId: string; reservationDate: string; endDate?: string; reservedBy: string; status: 'Upcoming' | 'Active' | 'Cancelled' | 'Completed' | 'Expired' }
 
 
 

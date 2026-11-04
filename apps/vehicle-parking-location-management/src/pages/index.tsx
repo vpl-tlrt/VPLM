@@ -1,5 +1,6 @@
+import { RequestWorkspaceAccess } from '@/components/workspace-access-requests';
 import { setGuestWorkspace } from '@/lib/local-storage-scope';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { CarFront, Lock, ShieldCheck, UserRound } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -327,6 +328,11 @@ export default function HomePage() {
   const [workspaceUserId, setWorkspaceUserId] = useState<string>();
   const [workspaceError, setWorkspaceError] = useState('');
 
+  const onSyncRecovered = useCallback(() => {
+    setPickupToReopen(undefined);
+    setWorkspaceLoaded(false);
+    setWorkspaceRefresh(value => value + 1);
+  }, []);
   useEffect(() => {
     if (!client) return;
     let active = true;
@@ -420,9 +426,7 @@ export default function HomePage() {
             <CardDescription role="alert">{workspaceError}</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="mb-4 text-sm text-muted-foreground">
-              Not Configred <a className="underline" href="Will Update Soon">.. README</a>.
-            </p>
+            {workspaceError.toLowerCase().includes('member') && <RequestWorkspaceAccess userId={session.user.id} />}
             <Button variant="outline" onClick={() => { void client.auth.signOut(); }}>Sign out</Button>
           </CardContent>
         </Card>
@@ -434,6 +438,7 @@ export default function HomePage() {
     <ParkingApp
       key={`${session.user.id}:${workspaceRefresh}`}
       workspaceGuest={workspaceGuest}
+      onSyncRecovered={onSyncRecovered}
       initialPickupRequestId={pickupToReopen}
       onPickupWorkspaceRefresh={id => { setPickupToReopen(id); setWorkspaceLoaded(false); setWorkspaceRefresh(value => value + 1); }}
       onGuestRefresh={() => { setWorkspaceLoaded(false); setWorkspaceRefresh(value => value + 1); }}

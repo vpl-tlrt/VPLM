@@ -30,7 +30,7 @@ type Props = {
   onRefreshWorkspace: (requestId: string) => void;
   vehicles: Vehicle[]; locations: ParkingLocation[]; actor: string; userId: string;
   isAdministrator: boolean; canViewFullHistory: boolean; onClose: () => void;
-  onFinishParking: (vehicleId: string, from: string, to: string, centreBayVehicleId?: string) => boolean;
+  hasUnsyncedChanges: boolean;
 };
 const active = (status: Status) => status === 'Requested' || status === 'In Transit';
 const label = (location: ParkingLocation) => `${location.zone} · ${location.bayNumber}`;
@@ -42,7 +42,7 @@ const matchesDestination = (location: ParkingLocation, destination: Destination)
   : ['A', 'B', 'C'].includes(location.zone);
 const originType = (location: ParkingLocation | undefined) => /reception/i.test(location?.zone ?? '') ? 'Reception' : /workshop|\bbay\b|\bbp[123]\b/i.test(location?.zone ?? '') ? 'Workshop' : 'Other';
 
-export function PickupRequestManagement({ readOnly = false, initialRequestId, onRefreshWorkspace, getWorkspaceRevision, vehicles, locations, actor, userId, isAdministrator, canViewFullHistory, onClose, onFinishParking }: Props) {
+export function PickupRequestManagement({ readOnly = false, initialRequestId, onRefreshWorkspace, getWorkspaceRevision, vehicles, locations, actor, userId, isAdministrator, canViewFullHistory, onClose, hasUnsyncedChanges }: Props) {
   const [requests, setRequests] = useState<Pickup[]>([]);
   const [users, setUsers] = useState<WorkspaceUser[]>([]);
   const [query, setQuery] = useState('');
@@ -230,21 +230,31 @@ export function PickupRequestManagement({ readOnly = false, initialRequestId, on
         return toast.error(error ? 'Could not verify the current vehicle location.' : pickupLocationWarning);
       }
     }
+    if (status === 'Completed') {
+      if (hasUnsyncedChanges) {
+        setBusy(false);
+        return toast.error('Sync the pending workspace changes before finishing this pickup.');
+      }
+      const { error } = await supabase.rpc('complete_pickup_parking', {
+        request_id: opened.id, request_revision: opened.management_revision, workspace_revision: getWorkspaceRevision(),
+        expected_origin: currentBay, final_bay: finalBay, move_centre_occupant: canMoveToCentre,
+      });
+      setBusy(false);
+      if (error) { void refresh(); return toast.error(error.message); }
+      toast.success('Parking completed.');
+      onRefreshWorkspace(opened.id);
+      return;
+    }
     const timestamp = new Date().toISOString();
     const update = status === 'In Transit'
       ? { status, accepted_by: actor, accepted_by_id: userId, accepted_at: timestamp }
-      : status === 'Completed'
-      ? { status, completed_by: actor, completed_by_id: userId, completed_at: timestamp, final_location_id: finalBay }
+
       : { status, cancelled_by: actor, cancelled_by_id: userId, cancelled_at: timestamp };
-    const expected = status === 'In Transit' ? 'Requested' : status === 'Completed' ? 'In Transit' : opened.status;
+    const expected = status === 'In Transit' ? 'Requested' : opened.status;
     const { data, error } = await supabase.from('pickup_requests').update(update).eq('id', opened.id).eq('status', expected).eq('management_revision', opened.management_revision).select('id');
     setBusy(false);
     if (error || !data?.length) { toast.error(error?.message ?? 'Request changed on another device. Refresh and retry.'); setOpened(null); void refresh(); return; }
-    if (status === 'Completed' && !alreadyParked && !onFinishParking(opened.vehicle_id, currentBay!, finalBay, canMoveToCentre ? opened.centre_bay_vehicle_id ?? undefined : undefined)) {
-      toast.error('Pickup record completed, but vehicle transfer failed. Contact a supervisor to reconcile the location.');
-      setOpened(null); void refresh(); return;
-    }
-    toast.success(status === 'Completed' ? 'Parking completed.' : status === 'In Transit' ? 'Pickup accepted.' : 'Pickup cancelled.');
+    toast.success(status === 'In Transit' ? 'Pickup accepted.' : 'Pickup cancelled.');
     setOpened(null); setFinalBay(''); void refresh();
   };
   const deleteRequest = async () => {
@@ -280,6 +290,7 @@ export function PickupRequestManagement({ readOnly = false, initialRequestId, on
     : request.accepted_by === actor);
   const completionBlock = !opened || opened.status !== 'In Transit' ? ''
     : !canComplete(opened) ? 'The driver who accepted this pickup or an Administrator can finish parking.'
+    : hasUnsyncedChanges ? 'Sync pending workspace changes before finishing parking.'
     : !finalBay ? 'Select an available bay to finish parking.'
     : bayBlocked ? 'Clear the selected bay or choose an available destination.'
     : needsWorkspaceRefresh ? 'Refresh workspace data to use the current pickup bay.'

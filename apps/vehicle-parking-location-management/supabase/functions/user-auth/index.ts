@@ -91,10 +91,6 @@ Deno.serve(async (request) => {
         if (legacyError || !legacyLogin.user || !legacyLogin.session) {
           return respond({ error: 'User ID or password is incorrect.' }, 401);
         }
-        const { data: membership, error: membershipError } = await adminClient.from('workspace_members')
-          .select('user_id').eq('user_id', legacyLogin.user.id).maybeSingle();
-        if (membershipError) throw membershipError;
-        if (!membership) return respond({ error: 'This account does not have VPLM workspace access.' }, 403);
         return respond({ session: legacyLogin.session });
       }
       if (!account) return respond({ error: 'User ID or password is incorrect.' }, 401);
