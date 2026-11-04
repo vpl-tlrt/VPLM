@@ -5,6 +5,7 @@ const replyLanguages = new Map([
   ['hi', 'Hindi (Devanagari script)'],
   ['si', 'Sinhala (Sinhala script)'],
   ['ta', 'Tamil (Tamil script)'],
+  ['bn', 'Bengali (Bengali script)'],
 ]);
 
 const corsHeaders = {

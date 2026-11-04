@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { BookOpen, Bot, CarFront, CircleParking, LoaderCircle, MapPin, MoveRight, Route, Search, Send, Sparkles, X } from 'lucide-react';
 import { mapParkingLocationId, supportsXParkingLocation, type Movement, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
-import { assistantLanguages, isAssistantLanguage, readAssistantLanguage } from '@/lib/assistant-language';
+import { parseAssistantBay } from '@/lib/assistant-bay';
+import { assistantDisplay, assistantLanguages, isAssistantLanguage, readAssistantLanguage } from '@/lib/assistant-language';
 import { supabase } from '@/lib/supabase';
 import { VplmCodexPet } from '@/components/vplm-codex-pet';
 
@@ -77,15 +78,21 @@ export default function AiAssistant({
   onAssign,
   onTransfer,
 }: AiAssistantProps) {
-  const languageKey = `vplm-assistant-language:${userId}`;
-  const [language, setLanguage] = useState(() => readAssistantLanguage(languageKey));
-  const languageText = assistantLanguages[language];
-  useEffect(() => setLanguage(readAssistantLanguage(languageKey)), [languageKey]);
-  const changeLanguage = (value: string) => {
+  const replyKey = `vplm-assistant-language:${userId}`;
+  const displayKey = `vplm-assistant-display-language:${userId}`;
+  const [language, setLanguage] = useState(() => readAssistantLanguage(replyKey));
+  const [displayLanguage, setDisplayLanguage] = useState(() => readAssistantLanguage(displayKey));
+  const languageText = assistantDisplay[displayLanguage];
+  useEffect(() => {
+    setLanguage(readAssistantLanguage(replyKey));
+    setDisplayLanguage(readAssistantLanguage(displayKey));
+  }, [displayKey, replyKey]);
+  const changeLanguage = (value: string, display: boolean) => {
     if (!isAssistantLanguage(value)) return;
-    setLanguage(value);
+    if (display) setDisplayLanguage(value);
+    else setLanguage(value);
     try {
-      window.localStorage.setItem(languageKey, value);
+      window.localStorage.setItem(display ? displayKey : replyKey, value);
     } catch {
       // Keep the selected language for this session.
     }
@@ -200,7 +207,7 @@ export default function AiAssistant({
     }
     setActiveFunction('transfer');
     setTransferFlow({ vehicleId: vehicle.id, step: 'taking' });
-    addAssistantMessage(`${parkedDetails}\nAre you taking it?`);
+    addAssistantMessage(`${parkedDetails}\n${languageText.taking}`);
   };
 
   const showBayAvailability = (query: string) => {
@@ -396,15 +403,15 @@ export default function AiAssistant({
     }
 
     if (transferFlow.step === 'taking') {
-      if (isNo(answer)) {
+      if (isNo(answer) || answer.trim() === languageText.no) {
         setTransferFlow(null);
         setActiveFunction(null);
         addAssistantMessage('Okay. No transfer has been started.');
         return;
       }
-      if (isYes(answer)) {
+      if (isYes(answer) || answer.trim() === languageText.yes) {
         setTransferFlow({ ...transferFlow, step: 'destination', selectedDestinationId: undefined });
-        addAssistantMessage('Where are you planning to park it? Choose an available bay below, or type its label (for example, B-47).');
+        addAssistantMessage(languageText.where, displayLanguage);
         return;
       }
       addAssistantMessage('Please answer Yes or No: are you taking this vehicle?');
@@ -412,20 +419,13 @@ export default function AiAssistant({
     }
 
     if (transferFlow.step === 'destination') {
-      const typedXParking = /\bX(?:\s*PARK(?:ING)?)?\b/i.test(answer);
-      const typedBay = normalize(answer.replace(/\bX(?:\s*PARK(?:ING)?)?\b/gi, ''));
-      const typedDestination = locations.find((location) =>
-        typedBay === normalize(`${location.zone}-${location.bayNumber}`) ||
-        typedBay === normalize(`${location.zone}-${Number(location.bayNumber)}`) ||
-        typedBay === normalizeLocation(location.id),
-      );
-      const selectedXParking = transferFlow.selectedDestinationId?.startsWith('xparking:') ?? false;
-      const selectedDestinationId = transferFlow.selectedDestinationId?.replace(/^(?:bay|xparking):/, '');
-      const destinationId = selectedDestinationId ?? typedDestination?.id;
-      const destinationIsXParking = transferFlow.selectedDestinationId ? selectedXParking : typedXParking;
+      const typed = answer ? parseAssistantBay(answer, locations) : undefined;
+      const selected = transferFlow.selectedDestinationId;
+      const destinationId = typed ? typed.location?.id : selected?.replace(/^(?:bay|xparking):/, '');
+      const destinationIsXParking = typed ? typed.xParking : selected?.startsWith('xparking:') ?? false;
       const destination = (destinationIsXParking ? availableXParkingDestinations : availableDestinations).find((location) => location.id === destinationId);
       if (!destination) {
-        addAssistantMessage('That parking space is not available for this vehicle. Choose one of the available spaces shown below.');
+        addAssistantMessage(languageText.unavailable, displayLanguage);
         return;
       }
       setTransferFlow({ ...transferFlow, step: 'parked', destinationId: destination.id, destinationIsXParking, selectedDestinationId: undefined });
@@ -437,7 +437,7 @@ export default function AiAssistant({
       addAssistantMessage('No transfer has been recorded. Confirm Yes here once the vehicle is physically parked in the selected bay.');
       return;
     }
-    if (!isYes(answer)) {
+    if (!isYes(answer) && answer.trim() !== languageText.yes) {
       addAssistantMessage('Please confirm Yes once it is parked, or choose Not yet. Nothing is recorded before confirmation.');
       return;
     }
@@ -627,13 +627,13 @@ export default function AiAssistant({
               </span>
               <div>
                 <h2 className="font-semibold">VPLM AI Assistant</h2>
-                <p className="text-xs opacity-80">Workspace functions · Gemini AI</p>
+                <p className="text-xs opacity-80" lang={displayLanguage}>{languageText.subtitle}</p>
               </div>
             </div>
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                aria-label="Show function directory"
+                aria-label={languageText.help}
                 onClick={() => startFunction('help')}
                 className="rounded-lg p-2 transition hover:bg-primary-foreground/15"
               >
@@ -641,7 +641,7 @@ export default function AiAssistant({
               </button>
               <button
                 type="button"
-                aria-label="Close AI assistant"
+                aria-label={languageText.close}
                 onClick={() => setOpen(false)}
                 className="rounded-lg p-2 transition hover:bg-primary-foreground/15"
               >
@@ -651,15 +651,19 @@ export default function AiAssistant({
           </header>
 
           <div className="border-b border-border bg-muted/40 px-4 py-2 text-xs leading-relaxed text-muted-foreground">
-            <label className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm font-medium text-foreground" lang={language}>
-              {languageText.label}
-              <select value={language} onChange={event => changeLanguage(event.target.value)}
-                className="min-h-9 max-w-full rounded-lg border border-input bg-background px-2">
-                {Object.entries(assistantLanguages).map(([code, text]) => (
-                  <option key={code} value={code} lang={code}>{text.name}</option>
-                ))}
-              </select>
-            </label>
+            <div className="mb-2 grid grid-cols-2 gap-2" lang={displayLanguage}>
+              {([true, false] as const).map(display => (
+                <label key={String(display)} className="grid min-w-0 gap-1 font-medium text-foreground">
+                  {display ? languageText.display : languageText.reply}
+                  <select value={display ? displayLanguage : language} onChange={event => changeLanguage(event.target.value, display)}
+                    className="min-h-9 w-full rounded-lg border border-input bg-background px-2">
+                    {Object.entries(assistantLanguages).map(([code, name]) => (
+                      <option key={code} value={code} lang={code}>{name}</option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
             Workspace data is used for vehicle and bay lookups. Transfers and requests are saved only after you submit their app forms and confirmations. AI answers may be incorrect.
           </div>
 
@@ -693,21 +697,21 @@ export default function AiAssistant({
 
             {transferFlow?.step === 'taking' && (
               <div className="flex gap-2">
-                <button type="button" disabled={busy} onClick={() => continueTransferFlow('Yes')} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">Yes</button>
-                <button type="button" disabled={busy} onClick={() => continueTransferFlow('No')} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold disabled:opacity-50">No</button>
+                <button type="button" disabled={busy} onClick={() => continueTransferFlow('Yes')} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">{languageText.yes}</button>
+                <button type="button" disabled={busy} onClick={() => continueTransferFlow('No')} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold disabled:opacity-50">{languageText.no}</button>
               </div>
             )}
 
             {transferFlow?.step === 'destination' && (
               <div className="space-y-2 rounded-xl bg-muted p-3">
-                <label className="block text-xs font-medium" htmlFor="assistant-destination">Available destination space</label>
+                <label className="block text-xs font-medium" htmlFor="assistant-destination">{languageText.destination}</label>
                 <select
                   id="assistant-destination"
                   value={transferFlow.selectedDestinationId ?? ''}
                   onChange={(event) => setTransferFlow({ ...transferFlow, selectedDestinationId: event.target.value || undefined })}
                   className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
                 >
-                  <option value="">Select a bay</option>
+                  <option value="">{languageText.selectBay}</option>
                   {availableDestinations.map((location) => (
                     <option key={`bay:${location.id}`} value={`bay:${location.id}`}>
                       {location.zone}-{location.bayNumber}{location.section ? ` · ${location.section}` : ''}
@@ -722,14 +726,14 @@ export default function AiAssistant({
                 {availableDestinations.length === 0 && availableXParkingDestinations.length === 0 && <p className="text-xs text-muted-foreground">No eligible spaces are currently available.</p>}
                 <button
                   type="button"
-                  disabled={busy || (!transferFlow.selectedDestinationId && availableDestinations.length === 0 && availableXParkingDestinations.length === 0)}
-                  onClick={() => continueTransferFlow(transferFlow.selectedDestinationId ?? '')}
+                  disabled={busy || !transferFlow.selectedDestinationId}
+                  onClick={() => continueTransferFlow('')}
                   className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50"
                 >
-                  Confirm destination
+                  {languageText.confirm}
                 </button>
                 <button type="button" disabled={busy} onClick={() => cancelTransfer()}
-                  className="ml-2 rounded-lg border border-border px-4 py-2 text-sm">Cancel transfer</button>
+                  className="ml-2 rounded-lg border border-border px-4 py-2 text-sm">{languageText.cancel}</button>
               </div>
             )}
 
@@ -764,7 +768,7 @@ export default function AiAssistant({
             {busy && (
               <div className="mr-auto flex items-center gap-2 rounded-2xl bg-muted px-3 py-2 text-sm text-muted-foreground">
                 <LoaderCircle size={15} className="animate-spin" />
-                Thinking…
+                {languageText.thinking}
               </div>
             )}
             <div ref={endRef} />
@@ -774,7 +778,7 @@ export default function AiAssistant({
             <label className="sr-only" htmlFor="vplm-ai-message">Message the VPLM AI assistant</label>
             <textarea
               id="vplm-ai-message"
-              lang={language}
+              lang={displayLanguage}
               rows={1}
               maxLength={2000}
               value={input}
@@ -785,12 +789,12 @@ export default function AiAssistant({
                   void sendMessage();
                 }
               }}
-              placeholder={transferFlow?.step === 'destination' ? 'Type a bay, e.g. B-47, or Cancel…' : roadTest ? 'Type your road-test reply…' : languageText.prompt}
+              placeholder={transferFlow?.step === 'destination' ? 'B47 · W01 · A46X' : roadTest ? 'Type your road-test reply…' : languageText.prompt}
               className="max-h-28 min-h-10 flex-1 resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <button
               type="submit"
-              aria-label="Send message"
+              aria-label={languageText.send}
               disabled={!input.trim() || (busy && !isClearCommand(input))}
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
