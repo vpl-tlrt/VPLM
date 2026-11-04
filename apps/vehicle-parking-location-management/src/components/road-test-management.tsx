@@ -219,7 +219,7 @@ export function RoadTestManagement({ vehicles, locations, actor, actorRole, user
     const conflictingTest = tests.find((test: RoadTestRecord) => test.id !== active.id && test.vehicleId === active.vehicleId && test.status === 'In Road Test');
     if (conflictingTest) return toast.error('Another road test is already in progress for this vehicle.');
     const departure = vehicle(active.vehicleId)?.currentLocationId;
-    const started = startRoadTestRecord(active, actor, departure, odometer ? Number(odometer) : undefined);
+    const started = { ...startRoadTestRecord(active, actor, departure, odometer ? Number(odometer) : undefined), startedById: user?.objectId };
     const claimedBy = started.assignedTo;
     setTests((items: RoadTestRecord[]) => items.map((item: RoadTestRecord) => item.id === active.id ? started : item));
     addAudit(started, 'Started', `${active.assignedTo.trim() ? 'Road test' : `Unassigned task claimed by ${claimedBy} and`} started from ${roadTestLocationLabel(departure, locations)}.`, departure); onVehicleLocationChange(active.vehicleId, departure, undefined, true); setActive(undefined); setOdometer(''); toast.success(active.assignedTo.trim() ? 'Vehicle marked out for road test.' : `Road test claimed by ${claimedBy} and started.`); onNotificationSound('general');

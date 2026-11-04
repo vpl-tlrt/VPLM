@@ -111,9 +111,12 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
     && finalOccupants.length === 1 && finalOccupants[0].id === opened.centre_bay_vehicle_id;
   const canMoveToCentre = Boolean(plannedCentreMove && !vehicles.some(vehicle => vehicle.xParking === 'Yes' && vehicle.status !== 'Delivered' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(finalBay)) && centreBay && !['Reserved', 'Maintenance'].includes(centreBay.status)
     && vehicles.filter(vehicle => vehicle.status !== 'Delivered' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(centreBay.id)).length < centreBay.capacity);
+  const pickupVehicle = vehicles.find(vehicle => vehicle.id === opened?.vehicle_id && vehicle.status !== 'Delivered');
+  const alreadyParked = Boolean(finalLocation && pickupVehicle?.xParking !== 'Yes'
+    && parkingRecordKey(pickupVehicle?.currentLocationId) === parkingRecordKey(finalLocation.id));
   const bayBlocked = Boolean(finalLocation && (finalLocation.status === 'Reserved' || finalLocation.status === 'Maintenance'
-    || (finalLocation.lane === 'Container' ? finalOccupants.length >= 15
-      : (!canMoveToCentre && (finalOccupants.length > 0 || finalLocation.status === 'Occupied')))));
+    || (finalLocation.lane === 'Container' ? finalOccupants.length >= finalLocation.capacity
+      : (!canMoveToCentre && (finalOccupants.length > 0 || (finalLocation.status === 'Occupied' && !alreadyParked))))));
   const driverUsers = users.filter(user => user.role === 'Drivers' && user.name.trim());
   const dateMatches = (value: string | null) => {
     if (!value) return false;
@@ -176,7 +179,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
     if (status === 'Completed') {
       if (!finalBay) return toast.error('Select where the vehicle was actually parked.');
       if (bayBlocked) return toast.error('Vehicle Existing not Moved, or parking location is unavailable.');
-      if (vehicles.find(vehicle => vehicle.id === opened.vehicle_id)?.currentLocationId !== opened.origin_location_id) return toast.error('Vehicle location has changed. Refresh before completing.');
+      if (!alreadyParked && (!pickupVehicle || parkingRecordKey(pickupVehicle.currentLocationId) !== parkingRecordKey(opened.origin_location_id))) return toast.error('Vehicle location has changed. Refresh before completing.');
       // Validate final destination in the host before changing request state.
       if (!finalLocations.some(location => location.id === finalBay)) return toast.error('Select a parking location matching the requested destination.');
     }
@@ -191,7 +194,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
     const { data, error } = await supabase.from('pickup_requests').update(update).eq('id', opened.id).eq('status', expected).select('id');
     setBusy(false);
     if (error || !data?.length) { toast.error(error?.message ?? 'Request changed on another device. Refresh and retry.'); void refresh(); return; }
-    if (status === 'Completed' && !onFinishParking(opened.vehicle_id, opened.origin_location_id, finalBay, canMoveToCentre ? opened.centre_bay_vehicle_id ?? undefined : undefined)) {
+    if (status === 'Completed' && !alreadyParked && !onFinishParking(opened.vehicle_id, opened.origin_location_id, finalBay, canMoveToCentre ? opened.centre_bay_vehicle_id ?? undefined : undefined)) {
       toast.error('Pickup record completed, but vehicle transfer failed. Contact a supervisor to reconcile the location.');
       setOpened(null); void refresh(); return;
     }
@@ -216,6 +219,13 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
   const canComplete = (request: Pickup) => isAdministrator || (request.accepted_by_id
     ? request.accepted_by_id === userId
     : request.accepted_by === actor);
+  const completionBlock = !opened || opened.status !== 'In Transit' ? ''
+    : !canComplete(opened) ? 'The driver who accepted this pickup or an Administrator can finish parking.'
+    : !finalBay ? 'Select an available bay to finish parking.'
+    : bayBlocked ? 'Clear the selected bay or choose an available destination.'
+    : !pickupVehicle || (!alreadyParked && parkingRecordKey(pickupVehicle.currentLocationId) !== parkingRecordKey(opened.origin_location_id))
+      ? 'The vehicle location has changed. Check its current location before finishing.'
+      : '';
   const counters = [
     { title: 'Reception', count: filteredRequests.filter(item => item.status === 'Requested' && originType(locationById(item.origin_location_id)) === 'Reception').length },
     { title: 'Workshop', count: filteredRequests.filter(item => item.status === 'Requested' && originType(locationById(item.origin_location_id)) === 'Workshop').length },
@@ -279,8 +289,8 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
       </tbody></table></div>
     </CardContent></Card>
     <Dialog open={Boolean(opened)} onOpenChange={isOpen => { if (!isOpen) { setOpened(null); setFinalBay(''); } }}>
-      <DialogContent><DialogHeader><DialogTitle>{opened?.plate_number} · {opened?.status}</DialogTitle></DialogHeader>
-        {opened && <div className="space-y-2 text-sm">
+      <DialogContent className="max-h-[90dvh] grid-rows-[auto_minmax(0,1fr)_auto]"><DialogHeader><DialogTitle>{opened?.plate_number} · {opened?.status}</DialogTitle></DialogHeader>
+        {opened && <div className="min-h-0 space-y-2 overflow-y-auto pr-1 text-sm">
           <p>From: {locationById(opened.origin_location_id) ? label(locationById(opened.origin_location_id)!) : opened.origin_location_id}</p>
           <p>Requested for: {opened.destination_type}{opened.requested_bay_id ? ` · ${label(locationById(opened.requested_bay_id) ?? { zone: '', bayNumber: opened.requested_bay_id } as ParkingLocation)}` : ''}</p>
           <p>Requested by: {opened.requested_by}</p>{opened.accepted_by && <p>Accepted by: {opened.accepted_by}</p>}
@@ -289,7 +299,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
             <Select value={otherBay ? 'other' : finalBay} onValueChange={value => { setOtherBay(value === 'other'); setBayNumber(''); setFinalBay(value === 'other' ? '' : value); }}><SelectTrigger><SelectValue placeholder="Where did you park the vehicle?"/></SelectTrigger><SelectContent>{finalLocations.map(location => <SelectItem key={location.id} value={location.id}>{label(location)}</SelectItem>)}{opened.destination_type === 'Workshop Bay' && <SelectItem value="other">Other · Enter Bay Number</SelectItem>}</SelectContent></Select>
             {otherBay && <div className="space-y-2">
               <Input aria-label="Enter Bay Number" placeholder="Enter Bay Number" inputMode="numeric" value={bayNumber} onChange={event => {
-                const value = event.target.value; setBayNumber(value);
+                const value = event.target.value.replace(/\D/g, ''); setBayNumber(value);
                 const match = /^\d+$/.test(value.trim()) ? finalLocations.find(location => location.zone === 'Workshop' && Number(location.bayNumber) === Number(value)) : undefined;
                 setFinalBay(match?.id ?? '');
               }} />
@@ -313,7 +323,11 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
         <DialogFooter>
           {opened?.status === 'Requested' && canCancel(opened) && <Button variant="destructive" disabled={busy} onClick={() => void action('Cancelled')}>Cancel Request</Button>}
           {opened?.status === 'Requested' && canAccept(opened) && <Button disabled={busy} onClick={() => void action('In Transit')}>Accept</Button>}
-          {opened?.status === 'In Transit' && canComplete(opened) && <Button disabled={busy || !finalBay || bayBlocked} onClick={() => void action('Completed')}>Finish · Complete Parking</Button>}
+          {opened?.status === 'In Transit' && <div className="grid w-full gap-2">
+            {completionBlock && <p id="pickup-completion-status" className="text-sm text-muted-foreground">{completionBlock}</p>}
+            <Button disabled={busy || !supabase || Boolean(completionBlock)} aria-describedby={completionBlock ? 'pickup-completion-status' : undefined}
+              onClick={() => void action('Completed')}>Finish and Complete Parking</Button>
+          </div>}
         </DialogFooter>
       </DialogContent>
     </Dialog>

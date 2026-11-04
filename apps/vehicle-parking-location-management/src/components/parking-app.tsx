@@ -511,12 +511,6 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setScreen('assignment');
     return true;
   };
-  const openAssistantInitialRoadTest = (vehicleId: string): boolean => {
-    if (role !== 'TechnicalLeader' || !canAccessRoadTests) return false;
-    setRoadTestVehicleId(vehicleId);
-    setScreen('road-tests');
-    return true;
-  };
   const handleRoadTestLocationChange = (vehicleId: string, fromId: string | undefined, toId: string | undefined, out: boolean) => {
     const vehicle = vehicles.find((item: Vehicle) => item.id === vehicleId);
     const updatedVehicle = vehicle ? { ...vehicle, currentLocationId: toId, operationalStatus: out ? 'Checked Out' as const : 'Parked' as const, status: out ? 'Released' as const : 'Assigned' as const } : undefined;
@@ -676,7 +670,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 md:hidden" aria-label="Primary navigation">
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
-      {!localGuest && <AiAssistant vehicles={activeVehicles} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} canRequestInitialRoadTest={role === 'TechnicalLeader' && canAccessRoadTests} locationLabel={locationLabel} onAssign={openAssistantAssignment} onInitialRoadTest={openAssistantInitialRoadTest} onTransfer={transferVehicleById} />}
+      {!localGuest && <AiAssistant vehicles={vehicles} movements={movements} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} locationLabel={locationLabel} onAssign={openAssistantAssignment} onTransfer={transferVehicleById} />}
     </div>
   );
   return appShell;
