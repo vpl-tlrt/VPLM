@@ -711,7 +711,8 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const [garageZoneFilter, setGarageZoneFilter] = useState('all');
   const [garageStatusFilter, setGarageStatusFilter] = useState('all');
   const [bayManagement, setBayManagement] = useState(() => loadBayManagementState());
-  const [locatedVehicleId, setLocatedVehicleId] = useState<string>();
+  const [locatedVehicle, setLocatedVehicle] = useState<{ id: string }>();
+  const [bayHighlight, setBayHighlight] = useState<{ vehicleId: string; locationId: string; xParking: boolean }>();
 
   const roadTests = loadRoadTests();
   const currentRoadTests = roadTests.filter((test: RoadTestRecord) => test.status !== 'Completed');
@@ -726,9 +727,12 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     if (!focusedVehicleId) return;
     const focusedVehicle = vehicles.find((vehicle: Vehicle) => vehicle.id === focusedVehicleId);
     if (focusedVehicle) {
-      setLocatedVehicleId(focusedVehicle.id);
+      setLocatedVehicle({ id: focusedVehicle.id });
       setOverviewVehicleId(focusedVehicle.id);
       const currentLocation = locations.find((location: ParkingLocation) => parkingRecordKey(location.id) === parkingRecordKey(focusedVehicle.currentLocationId));
+      setBayHighlight(currentLocation ? {
+        vehicleId: focusedVehicle.id, locationId: currentLocation.id, xParking: focusedVehicle.xParking === 'Yes',
+      } : undefined);
       if (currentLocation) {
         setGarageZoneFilter(currentLocation.zone);
         setGarageStatusFilter('all');
@@ -743,10 +747,18 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     onFocusedVehicleHandled();
   }, [focusedVehicleId, locations, onFocusedVehicleHandled, vehicles]);
   useEffect(() => {
-    if (!locatedVehicleId) return;
-    const timer = window.setTimeout(() => document.getElementById(`garage-vehicle-${locatedVehicleId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }), 120);
+    if (!locatedVehicle) return;
+    const timer = window.setTimeout(() => document.getElementById(`garage-vehicle-${locatedVehicle.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }), 120);
     return () => window.clearTimeout(timer);
-  }, [collapsedZones, garageZoneFilter, locatedVehicleId]);
+  }, [collapsedZones, garageZoneFilter, locatedVehicle]);
+
+  useEffect(() => {
+    if (!bayHighlight) return;
+    const timer = window.setTimeout(() => setBayHighlight(undefined), 30_000);
+    return () => window.clearTimeout(timer);
+  }, [bayHighlight]);
+  const isHighlightedBay = (locationId: string, xParking = false) =>
+    bayHighlight?.locationId === locationId && bayHighlight.xParking === xParking;
 
   useEffect(() => saveBayManagementState(bayManagement), [bayManagement]);
   const toggleZone = (zoneName: string) => {
@@ -953,7 +965,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                       {bays.map((bay: ParkingLocation) => {
                         const xVehicle = showVehiclesOnMap ? activeVehicles.find((item: Vehicle) => item.xParking === 'Yes' && parkingRecordKey(item.currentLocationId) === parkingRecordKey(bay.id)) : undefined;
                         const xVehicleRoadTest = xVehicle ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === xVehicle.id) : undefined;
-                        return <button key={`x-parking-${bay.id}`} type="button" className="x-parking-space" onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()} onDrop={() => { if (draggedVehicleId && !xVehicle) transferVehicle(draggedVehicleId, bay.id, true); setDraggedVehicleId(undefined); }} onClick={() => xVehicle && setOverviewVehicleId(xVehicle.id)} aria-label={`X Parking space in front of ${bay.zone}-${bay.bayNumber}${xVehicle ? `, vehicle ${xVehicle.plateNumber}` : ', vacant'}`}>
+                        return <button key={`x-parking-${bay.id}`} id={xVehicle ? `garage-vehicle-${xVehicle.id}` : undefined} type="button" className={`x-parking-space${isHighlightedBay(bay.id, true) ? ' garage-located-bay' : ''}`} onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()} onDrop={() => { if (draggedVehicleId && !xVehicle) transferVehicle(draggedVehicleId, bay.id, true); setDraggedVehicleId(undefined); }} onClick={() => xVehicle && setOverviewVehicleId(xVehicle.id)} aria-label={`X Parking space in front of ${bay.zone}-${bay.bayNumber}${xVehicle ? `, vehicle ${xVehicle.plateNumber}` : ', vacant'}`}>
                           {xVehicle && <TopViewCar vehicle={xVehicle} roadTest={xVehicleRoadTest} xParked />}
                         </button>;
                       })}
@@ -965,7 +977,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                       const displayVehicle = vehicle ?? xParkingVehicle;
                       const vehicleRoadTest = displayVehicle ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === displayVehicle.id) : undefined;
                       const displayStatus: ParkingLocation['status'] = vehicle ? 'Occupied' : bayVehicles.length === 0 && bay.status === 'Occupied' ? 'Available' : bay.status;
-                      return <motion.button id={displayVehicle ? `garage-vehicle-${displayVehicle.id}` : undefined} key={bay.id} type="button" draggable={Boolean(displayVehicle && canTransferVehicle)} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: Math.min(index, 12) * 0.025, ease: 'easeOut' as const }} onDragStart={() => displayVehicle && setDraggedVehicleId(displayVehicle.id)} onDragEnd={() => setDraggedVehicleId(undefined)} onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()} onDrop={() => { if (draggedVehicleId && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(draggedVehicleId, bay.id); setDraggedVehicleId(undefined); }} onClick={() => { if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }} className={`parking-space ${bayStyle(displayStatus)}`} aria-label={`${isLiveGarageContainer(bay) ? 'Container' : 'Bay ' + bay.bayNumber}, ${zoneDisplayName(bay.zone)}, ${displayStatus}${vehicle ? `, vehicle ${vehicle.plateNumber}` : ''}${xParkingVehicle ? `, X-Parked vehicle ${xParkingVehicle.plateNumber}` : ''}`}>
+                      return <motion.button id={vehicle ? `garage-vehicle-${vehicle.id}` : undefined} key={bay.id} type="button" draggable={Boolean(displayVehicle && canTransferVehicle)} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: Math.min(index, 12) * 0.025, ease: 'easeOut' as const }} onDragStart={() => displayVehicle && setDraggedVehicleId(displayVehicle.id)} onDragEnd={() => setDraggedVehicleId(undefined)} onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()} onDrop={() => { if (draggedVehicleId && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(draggedVehicleId, bay.id); setDraggedVehicleId(undefined); }} onClick={() => { if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }} className={`parking-space ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`} aria-label={`${isLiveGarageContainer(bay) ? 'Container' : 'Bay ' + bay.bayNumber}, ${zoneDisplayName(bay.zone)}, ${displayStatus}${vehicle ? `, vehicle ${vehicle.plateNumber}` : ''}${xParkingVehicle ? `, X-Parked vehicle ${xParkingVehicle.plateNumber}` : ''}`}>
                         <span className="absolute bottom-0.5 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap text-xs font-black">{isLiveGarageContainer(bay) ? bay.zone : `${bay.zone === 'Reception' ? 'R ' : bay.zone === 'Workshop' ? 'W ' : bay.zone}-${bay.bayNumber}`}</span>
                         {vehicle && <TopViewCar vehicle={vehicle} roadTest={vehicleRoadTest} onSelect={() => { setSelectedBayId(undefined); setOverviewVehicleId(vehicle.id); }} />}
                         {!displayVehicle && bay.status !== 'Available' && bay.status !== 'Occupied' && <Badge className="bay-status-label" variant={bay.status === 'Reserved' ? 'secondary' : 'outline'}>{bay.status}</Badge>}
@@ -1006,7 +1018,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
           </CardContent>
         </Card>
       </div>
-      <Card><CardHeader><div className="flex items-center justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><CarFront /> Unassigned Bay</CardTitle><CardDescription>Vehicles assigned without a parking bay number.</CardDescription></div><Badge variant="outline">{unassignedVehicles.length}</Badge></div></CardHeader><CardContent>{unassignedVehicles.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{unassignedVehicles.map((vehicle: Vehicle) => <button id={`garage-vehicle-${vehicle.id}`} key={vehicle.id} type="button" onClick={() => onAssignUnassignedVehicle(vehicle)} className={`w-full rounded-xl border bg-background p-4 text-left ${locatedVehicleId === vehicle.id ? 'ring-4 ring-primary ring-offset-2' : ''}`}><div className="flex items-start justify-between gap-2"><div><p className="font-bold">{vehicle.plateNumber}</p><p className="text-sm text-muted-foreground">{vehicle.brand} {vehicle.model} · {vehicle.color}</p></div><Badge variant="secondary">Unassigned</Badge></div><div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Info label="Customer" value={vehicle.customerName} /><Info label="Assigned by" value={vehicle.assignedBy} /><Info label="Assigned on" value={vehicle.assignedDate ? format(new Date(vehicle.assignedDate), 'dd MMM yyyy, HH:mm') : undefined} /></div></button>)}</div> : <p className="py-2 text-sm text-muted-foreground">No vehicles are in the Unassigned Bay tray.</p>}</CardContent></Card>
+      <Card><CardHeader><div className="flex items-center justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><CarFront /> Unassigned Bay</CardTitle><CardDescription>Vehicles assigned without a parking bay number.</CardDescription></div><Badge variant="outline">{unassignedVehicles.length}</Badge></div></CardHeader><CardContent>{unassignedVehicles.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{unassignedVehicles.map((vehicle: Vehicle) => <button id={`garage-vehicle-${vehicle.id}`} key={vehicle.id} type="button" onClick={() => onAssignUnassignedVehicle(vehicle)} className={`w-full rounded-xl border bg-background p-4 text-left ${locatedVehicle?.id === vehicle.id ? 'ring-4 ring-primary ring-offset-2' : ''}`}><div className="flex items-start justify-between gap-2"><div><p className="font-bold">{vehicle.plateNumber}</p><p className="text-sm text-muted-foreground">{vehicle.brand} {vehicle.model} · {vehicle.color}</p></div><Badge variant="secondary">Unassigned</Badge></div><div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Info label="Customer" value={vehicle.customerName} /><Info label="Assigned by" value={vehicle.assignedBy} /><Info label="Assigned on" value={vehicle.assignedDate ? format(new Date(vehicle.assignedDate), 'dd MMM yyyy, HH:mm') : undefined} /></div></button>)}</div> : <p className="py-2 text-sm text-muted-foreground">No vehicles are in the Unassigned Bay tray.</p>}</CardContent></Card>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(['BP1', 'BP2', 'BP3', 'Washing Area', 'Toyota Reception', 'Lexus Reception', 'Workshop Centre Bay'] as const).map((containerName) => {
           const container = locations.find((location: ParkingLocation) => location.zone === containerName && isLiveGarageContainer(location));
@@ -1025,7 +1037,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                 id={`garage-vehicle-${occupant.id}`}
                 type="button"
                 onClick={() => { setSelectedBayId(undefined); setOverviewVehicleId(occupant.id); }}
-                className={`w-full rounded-xl border bg-background p-4 text-left transition-colors hover:bg-muted ${locatedVehicleId === occupant.id ? 'ring-4 ring-primary ring-offset-2' : ''}`}
+                className={`w-full rounded-xl border bg-background p-4 text-left transition-colors hover:bg-muted ${bayHighlight?.vehicleId === occupant.id ? 'garage-located-bay' : ''}`}
               >
                 <p className="font-bold">{occupant.plateNumber}</p>
                 <p className="mt-1 text-sm text-muted-foreground">{occupant.brand} {occupant.model} · {occupant.color}</p>

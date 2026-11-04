@@ -1126,3 +1126,18 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   @media (max-width: 639px) { .road-test-pocket.is-expanded .road-test-pocket-stack { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 }
+
+.garage-located-bay {
+  outline: 3px solid var(--primary);
+  outline-offset: -3px;
+  animation: garage-located-bay-pulse 1s ease-in-out infinite;
+}
+
+@keyframes garage-located-bay-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 3px var(--primary); }
+  50% { box-shadow: inset 0 0 0 6px color-mix(in oklch, var(--primary) 45%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .garage-located-bay { animation: none; }
+}

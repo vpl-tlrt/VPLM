@@ -66,6 +66,11 @@ export function RoadTestManagement({ vehicles, locations, actor, actorRole, user
   const [selectedPeople, setSelectedPeople] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState<Date>();
   const [dateTo, setDateTo] = useState<Date>();
+  const [completedFrom, setCompletedFrom] = useState<Date>();
+  const [completedTo, setCompletedTo] = useState<Date>();
+  const [leaderFrom, setLeaderFrom] = useState<Date>();
+  const [leaderTo, setLeaderTo] = useState<Date>();
+  const canSeeLeaderReport = ['Administrator', 'Supervisor', 'Operator'].includes(actorRole);
   const [visibleTaskCount, setVisibleTaskCount] = useState(24);
   const [now, setNow] = useState(() => Date.now());
   const [myStatus, setMyStatus] = useState('all');
@@ -144,14 +149,18 @@ export function RoadTestManagement({ vehicles, locations, actor, actorRole, user
   };
   const filtered = visibleTests.filter((test: RoadTestRecord) => (status === 'all' || test.status === status) && (testTypeFilter === 'all' || (test.testType ?? 'Initial Road Test') === testTypeFilter) && matchesFilters(test));
   const activeTests = filtered.filter((test: RoadTestRecord) => test.status === 'Assigned' || test.status === 'In Road Test');
-  const completedTests = filtered.filter((test: RoadTestRecord) => test.status === 'Completed' || test.status === 'Cancelled');
+  const closedTests = filtered.filter(test => test.status === 'Completed' || test.status === 'Cancelled');
+  const completedTests = closedTests.filter(test => {
+    const closedAt = test.status === 'Cancelled' ? test.cancellationTimestamp : test.finishTimestamp;
+    return inDateRange(closedAt ?? test.assignmentTimestamp, completedFrom, completedTo);
+  });
   const assignees = Array.from(new Set(visibleTests.map((test: RoadTestRecord) => test.assignedTo).filter((name: string) => Boolean(name.trim())))).sort((a: string, b: string) => a.localeCompare(b));
   const currentUserNames = [user?.fullName, user?.userPrincipalName, actor].filter((name: string | undefined): name is string => Boolean(name?.trim())).map((name: string) => name.trim().toLowerCase());
   const myTests = visibleTests.filter((test: RoadTestRecord) => currentUserNames.includes(test.assignedTo.trim().toLowerCase()) && (myStatus === 'all' || test.status === myStatus));
   const completed = visibleTests.filter((test: RoadTestRecord) => test.status === 'Completed');
   const average = completed.length ? Math.round(completed.reduce((sum: number, test: RoadTestRecord) => sum + (test.durationMinutes ?? 0), 0) / completed.length) : 0;
   const assignmentVehicles = vehicles.filter((item: Vehicle) => `${item.plateNumber} ${item.vin} ${item.model}`.toLowerCase().includes(vehicleQuery.toLowerCase()));
-  const trendSource = completedTests.length ? completedTests : completed.filter(matchesFilters);
+  const trendSource = closedTests.length ? closedTests : completed.filter(matchesFilters);
   const assignableUsers = useMemo(() => {
     const users = applicationUsers
       .filter((candidate) => candidate.name.trim())
@@ -163,20 +172,34 @@ export function RoadTestManagement({ vehicles, locations, actor, actorRole, user
     }
     return users;
   }, [actor, actorRole, applicationUsers, user?.objectId, user?.userPrincipalName]);
-  const technicalLeaderCounts = assignableUsers.map((candidate) => {
+  const technicalLeaderCounts = (canSeeLeaderReport ? assignableUsers : []).map((candidate) => {
     const assignedTo = new Set([candidate.name, candidate.loginId, candidate.id].map((value) => value.trim().toLowerCase()).filter(Boolean));
     const finishedTests = visibleTests.filter((test) => {
       if (test.status !== 'Completed' || !test.finishTimestamp || !assignedTo.has(test.assignedTo.trim().toLowerCase())) return false;
-      const finishedAt = new Date(test.finishTimestamp).getTime();
-      return (!dateFrom || finishedAt >= startOfDay(dateFrom).getTime())
-        && (!dateTo || finishedAt <= endOfDay(dateTo).getTime())
+      return Number.isFinite(Date.parse(test.finishTimestamp)) && inDateRange(test.finishTimestamp, leaderFrom, leaderTo)
         && (testTypeFilter === 'all' || (test.testType ?? 'Initial Road Test') === testTypeFilter);
     });
-    return { user: candidate, testCount: finishedTests.length, vehicleCount: new Set(finishedTests.map((test) => test.vehicleId)).size };
+    return { user: candidate, finishedTests, testCount: finishedTests.length, vehicleCount: new Set(finishedTests.map((test) => test.vehicleId)).size };
   });
 
   const trendDates = dateFrom && dateTo ? eachDayOfInterval({ start: dateFrom, end: dateTo }) : Array.from({ length: 7 }, (_: unknown, index: number) => { const date = new Date(); date.setDate(date.getDate() - (6 - index)); return date; });
   const trendData = trendDates.map((date: Date) => ({ date: format(date, 'dd MMM'), completed: trendSource.filter((test: RoadTestRecord) => test.finishTimestamp && format(new Date(test.finishTimestamp), 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd')).length }));
+  const leaderTrendEnd = leaderTo ?? new Date();
+  const leaderTrendStart = leaderFrom ?? new Date(leaderTrendEnd.getFullYear(), leaderTrendEnd.getMonth(), leaderTrendEnd.getDate() - 6);
+  const vehiclesByDay = new Map<string, Set<string>>();
+  for (const { finishedTests } of technicalLeaderCounts) {
+    for (const test of finishedTests) {
+      const day = format(new Date(test.finishTimestamp!), 'yyyy-MM-dd');
+      const vehicleIds = vehiclesByDay.get(day) ?? new Set<string>();
+      vehicleIds.add(test.vehicleId);
+      vehiclesByDay.set(day, vehicleIds);
+    }
+  }
+  const leaderTrend = canSeeLeaderReport && startOfDay(leaderTrendStart) <= endOfDay(leaderTrendEnd)
+    ? eachDayOfInterval({ start: leaderTrendStart, end: leaderTrendEnd }).map(day => ({
+      date: format(day, 'dd MMM'), completed: vehiclesByDay.get(format(day, 'yyyy-MM-dd'))?.size ?? 0,
+    }))
+    : [];
   const create = () => {
     if (!canCreateAssignment) return toast.error('You do not have permission to create road test assignments.');
     if (!form.vehicleId) return toast.error('Vehicle is required.');
@@ -273,11 +296,26 @@ export function RoadTestManagement({ vehicles, locations, actor, actorRole, user
     <Tabs value={tab} onValueChange={setTab}><TabsList><TabsTrigger value="tests">Tests</TabsTrigger><TabsTrigger value="my-tasks">My Tasks</TabsTrigger>{canCreateAssignment && <TabsTrigger value="assign">New assignment</TabsTrigger>}<TabsTrigger value="audit">Audit & alerts</TabsTrigger></TabsList>
       <TabsContent value="tests" className="space-y-4">
         <Card><CardContent className="space-y-3 p-4"><div className="flex flex-wrap gap-3"><div className="relative min-w-64 flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4"/><Input className="pl-9" placeholder="Search plate, VIN, job card, user" value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} /></div><Select value={status} onValueChange={setStatus}><SelectTrigger className="w-44"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem>{['Assigned','In Road Test','Completed','Cancelled'].filter((item: string) => item).map((item: string) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select><Select value={testTypeFilter} onValueChange={setTestTypeFilter}><SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All road test types</SelectItem>{(['Initial Road Test', 'Final Road Test', 'Test Drive'] as RoadTestType[]).filter((type: RoadTestType) => Boolean(type)).map((type: RoadTestType) => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent></Select>{canViewFullHistory ? <><DateFilter label="From date" date={dateFrom} onChange={setDateFrom} /><DateFilter label="To date" date={dateTo} onChange={setDateTo} /></> : <p className="self-center text-sm text-muted-foreground">Today’s tests only; open tasks remain visible.</p>}</div><div className="flex flex-wrap items-center gap-2"><Users className="h-4 w-4"/><span className="text-sm font-semibold">Assigned person:</span>{assignees.map((person: string) => { const selected = selectedPeople.includes(person); return <Button key={person} size="sm" variant={selected ? 'default' : 'outline'} onClick={() => setSelectedPeople((items: string[]) => selected ? items.filter((item: string) => item !== person) : [...items, person])}>{person}</Button>; })}{selectedPeople.length > 0 && <Button size="sm" variant="ghost" onClick={() => setSelectedPeople([])}>Clear</Button>}</div></CardContent></Card>
-        <Card><CardHeader><CardTitle>Completed vehicles by Technical Leader</CardTitle><CardDescription>{dateFrom || dateTo ? `${dateFrom ? format(dateFrom, 'dd MMM yyyy') : 'Any date'} – ${dateTo ? format(dateTo, 'dd MMM yyyy') : 'Any date'}` : 'All dates'}{testTypeFilter !== 'all' ? ` · ${testTypeFilter}` : ''}</CardDescription></CardHeader><CardContent>{technicalLeaderCounts.length > 0 ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{technicalLeaderCounts.map(({ user: leader, testCount, vehicleCount }) => <div key={leader.id} className="rounded-lg border p-3"><p className="font-semibold">{leader.name}</p><p className="mt-1 text-2xl font-black">{vehicleCount} <span className="text-sm font-medium text-muted-foreground">{vehicleCount === 1 ? 'vehicle' : 'vehicles'}</span></p><p className="text-sm text-muted-foreground">{testCount} completed {testCount === 1 ? 'test' : 'tests'}</p></div>)}</div> : <p className="text-sm text-muted-foreground">No Technical Leaders are available to report.</p>}</CardContent></Card>
+        {canSeeLeaderReport && <Card><CardHeader><CardTitle>Completed vehicles by Technical Leader</CardTitle><CardDescription>{leaderFrom || leaderTo ? `${leaderFrom ? format(leaderFrom, 'dd MMM yyyy') : 'Any date'} – ${leaderTo ? format(leaderTo, 'dd MMM yyyy') : 'Any date'}` : 'All dates'}{testTypeFilter !== 'all' ? ` · ${testTypeFilter}` : ''}</CardDescription></CardHeader><CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <DateFilter label="Report from date" date={leaderFrom} onChange={setLeaderFrom} />
+            <DateFilter label="Report to date" date={leaderTo} onChange={setLeaderTo} />
+            {(leaderFrom || leaderTo) && <Button variant="ghost" onClick={() => { setLeaderFrom(undefined); setLeaderTo(undefined); }}>Clear dates</Button>}
+          </div>
+          {technicalLeaderCounts.length > 0 ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{technicalLeaderCounts.map(({ user: leader, testCount, vehicleCount }) => <div key={leader.id} className="rounded-lg border p-3"><p className="font-semibold">{leader.name}</p><p className="mt-1 text-2xl font-black">{vehicleCount} <span className="text-sm font-medium text-muted-foreground">{vehicleCount === 1 ? 'vehicle' : 'vehicles'}</span></p><p className="text-sm text-muted-foreground">{testCount} completed {testCount === 1 ? 'test' : 'tests'}</p></div>)}</div> : <p className="text-sm text-muted-foreground">No Technical Leaders are available to report.</p>}<div>
+            <h3 className="font-semibold">Completed vehicle trend</h3>
+            <p className="text-sm text-muted-foreground">Distinct vehicles per day across Technical Leaders.{!leaderFrom && ' Showing the seven days ending on the report end date.'}</p>
+            {leaderTrend.length ? <CompletionTrend data={leaderTrend} id="leaderVehicleTrend" label="Vehicles" /> : <p className="text-sm text-muted-foreground">Select a valid date range.</p>}
+          </div>
+        </CardContent></Card>}
         <Tabs value={taskView} onValueChange={setTaskView}><TabsList><TabsTrigger value="active">Active ({activeTests.length})</TabsTrigger><TabsTrigger value="completed">Completed ({completedTests.length})</TabsTrigger><TabsTrigger value="trends">Trends</TabsTrigger></TabsList>
           <TabsContent value="active"><RoadTestTiles tests={activeTests} vehicles={vehicles} locations={locations} users={applicationUsers} now={now} visibleCount={visibleTaskCount} onShowMore={() => setVisibleTaskCount((count: number) => count + 24)} onLocateVehicle={onLocateVehicle} onHistory={(test: RoadTestRecord) => { setActive(test); setMode('view'); }} onEdit={openEdit} onStart={(test: RoadTestRecord) => { setActive(test); setMode('start'); }} onFinish={(test: RoadTestRecord) => { setActive(test); setMode('finish'); }} onCancel={(test: RoadTestRecord) => { setActive(test); setMode('cancel'); }} /></TabsContent>
-          <TabsContent value="completed"><RoadTestTiles tests={completedTests} vehicles={vehicles} locations={locations} users={applicationUsers} now={now} visibleCount={visibleTaskCount} onShowMore={() => setVisibleTaskCount((count: number) => count + 24)} onLocateVehicle={onLocateVehicle} onHistory={(test: RoadTestRecord) => { setActive(test); setMode('view'); }} onEdit={openEdit} onStart={(test: RoadTestRecord) => { setActive(test); setMode('start'); }} onFinish={(test: RoadTestRecord) => { setActive(test); setMode('finish'); }} onCancel={(test: RoadTestRecord) => { setActive(test); setMode('cancel'); }} /></TabsContent>
-          <TabsContent value="trends"><Card><CardHeader><CardTitle className="flex items-center gap-2"><TrendingUp />Road test completion trend</CardTitle><CardDescription>Completed tests for the selected people and date range.</CardDescription></CardHeader><CardContent><ChartContainer config={chartConfig} className="h-[340px] w-full"><AreaChart accessibilityLayer data={trendData} margin={{ left: 8, right: 8 }}><defs><linearGradient id="roadTestTrend" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.8}/><stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0.1}/></linearGradient></defs><CartesianGrid vertical={false}/><XAxis dataKey="date" tickLine={false} axisLine={false}/><YAxis allowDecimals={false} tickLine={false} axisLine={false}/><ChartTooltip content={<ChartTooltipContent />} /><Area dataKey="completed" type="monotone" fill="url(#roadTestTrend)" stroke="var(--chart-1)" strokeWidth={3}/></AreaChart></ChartContainer></CardContent></Card></TabsContent>
+          <TabsContent value="completed" className="space-y-3"><div className="flex flex-wrap gap-2">
+            <DateFilter label="Completed from date" date={completedFrom} onChange={setCompletedFrom} />
+            <DateFilter label="Completed to date" date={completedTo} onChange={setCompletedTo} />
+            {(completedFrom || completedTo) && <Button variant="ghost" onClick={() => { setCompletedFrom(undefined); setCompletedTo(undefined); }}>Clear dates</Button>}
+          </div><RoadTestTiles tests={completedTests} vehicles={vehicles} locations={locations} users={applicationUsers} now={now} visibleCount={visibleTaskCount} onShowMore={() => setVisibleTaskCount((count: number) => count + 24)} onLocateVehicle={onLocateVehicle} onHistory={(test: RoadTestRecord) => { setActive(test); setMode('view'); }} onEdit={openEdit} onStart={(test: RoadTestRecord) => { setActive(test); setMode('start'); }} onFinish={(test: RoadTestRecord) => { setActive(test); setMode('finish'); }} onCancel={(test: RoadTestRecord) => { setActive(test); setMode('cancel'); }} /></TabsContent>
+          <TabsContent value="trends"><Card><CardHeader><CardTitle className="flex items-center gap-2"><TrendingUp />Road test completion trend</CardTitle><CardDescription>Completed tests for the selected people and date range.</CardDescription></CardHeader><CardContent><CompletionTrend data={trendData} id="roadTestTrend" label="Completed tests" /></CardContent></Card></TabsContent>
 
         </Tabs>
       </TabsContent>
@@ -347,6 +385,16 @@ function RoadTestKpiPocket({ label, tests, vehicles, expanded, onToggle, onOpen 
       <div className="road-test-pocket-lip" aria-hidden="true" />
     </div>
   </section>;
+}
+
+function inDateRange(timestamp: string | undefined, from?: Date, to?: Date) {
+  if (!from && !to) return true;
+  const time = timestamp ? new Date(timestamp).getTime() : NaN;
+  return Number.isFinite(time) && (!from || time >= startOfDay(from).getTime()) && (!to || time <= endOfDay(to).getTime());
+}
+
+function CompletionTrend({ data, id, label }: { data: { date: string; completed: number }[]; id: string; label: string }) {
+  return <ChartContainer config={{ completed: { ...chartConfig.completed, label } }} className="h-[340px] w-full"><AreaChart accessibilityLayer data={data} margin={{ left: 8, right: 8 }}><defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.8}/><stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0.1}/></linearGradient></defs><CartesianGrid vertical={false}/><XAxis dataKey="date" tickLine={false} axisLine={false}/><YAxis allowDecimals={false} tickLine={false} axisLine={false}/><ChartTooltip content={<ChartTooltipContent />} /><Area dataKey="completed" type="monotone" fill={`url(#${id})`} stroke="var(--chart-1)" strokeWidth={3}/></AreaChart></ChartContainer>;
 }
 
 function DateFilter({ label, date, onChange }: { label: string; date: Date | undefined; onChange: (date: Date | undefined) => void }) {

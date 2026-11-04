@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { parkingLocationLabel, parkingRecordKey, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import { submitPickupRequest, type PickupDestination, type PickupDriver } from '@/lib/pickup-request-data';
+import { findPickupDrivers } from '@/lib/pickup-driver-matching';
 import { supabase } from '@/lib/supabase';
 
 type Props = {
@@ -27,6 +28,7 @@ export function AssistantPickup({ vehicles, locations, initialPlate, actor, user
   const [bayNumber, setBayNumber] = useState('');
   const [approvedOccupant, setApprovedOccupant] = useState('');
   const [driverName, setDriverName] = useState('');
+  const [chosenDriverId, setChosenDriverId] = useState('');
   const [drivers, setDrivers] = useState<PickupDriver[]>();
   const [directoryError, setDirectoryError] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -57,6 +59,10 @@ export function AssistantPickup({ vehicles, locations, initialPlate, actor, user
   const clearBay = bay?.status === 'Available' && !occupants.length;
   const canSubmit = !unavailable && (clearBay || Boolean(occupant && approvedOccupant === occupant.id && centreAvailable));
 
+  const hasDriverName = Boolean(driverName.trim());
+  const matchingDrivers = findPickupDrivers(driverName, drivers ?? []);
+  const selectedDriver = matchingDrivers.length === 1 ? matchingDrivers[0] : matchingDrivers.find(driver => driver.id === chosenDriverId);
+
   const selectVehicle = () => {
     const key = normalizePlate(plate);
     const matches = vehicles.filter(item => key && item.currentLocationId && normalizePlate(item.plateNumber) === key);
@@ -70,19 +76,13 @@ export function AssistantPickup({ vehicles, locations, initialPlate, actor, user
 
   const submit = async () => {
     if (!vehicle || !destination || !bay || !canSubmit || busy) return;
-    const name = driverName.trim().toLowerCase();
-    const matchingDrivers = drivers?.filter(driver => driver.name.trim().toLowerCase() === name);
-    if (name && matchingDrivers?.length !== 1) {
-      setError(matchingDrivers?.length ? 'More than one registered driver has that name. Choose a driver in Pickup Requests.'
-        : 'Enter the name of a registered driver or leave it blank for Unassigned.');
-      return;
-    }
+    if (hasDriverName && !selectedDriver) return;
     setBusy(true);
     setError('');
     try {
-      const error = await submitPickupRequest(vehicle, destination, bay.id, actor, userId, matchingDrivers?.[0], occupant?.id);
+      const error = await submitPickupRequest(vehicle, destination, bay.id, actor, userId, selectedDriver, occupant?.id);
       if (error) { setError(error); return; }
-      onClose(`Pickup requested for ${vehicle.plateNumber} to ${parkingLocationLabel(bay)}. Assigned to ${matchingDrivers?.[0]?.name ?? 'Unassigned'}.${occupant ? ' The driver must confirm both moves when completing parking.' : ''}`);
+      onClose(`Pickup requested for ${vehicle.plateNumber} to ${parkingLocationLabel(bay)}. Assigned to ${selectedDriver?.name ?? 'Unassigned'}.${occupant ? ' The driver must confirm both moves when completing parking.' : ''}`);
     } catch {
       setError('Could not submit the pickup request. Check the connection and try again.');
     } finally {
@@ -123,10 +123,29 @@ export function AssistantPickup({ vehicles, locations, initialPlate, actor, user
       {!supabase && <p>Cloud connection is unavailable.</p>}
       {canSubmit && <>
         <label className="grid gap-1">Assign to driver name (optional)
-          <Input value={driverName} disabled={busy} onChange={event => setDriverName(event.target.value)} placeholder="Leave blank for Unassigned" />
+          <Input value={driverName} disabled={busy} maxLength={120} onChange={event => {
+            setDriverName(event.target.value);
+            setChosenDriverId('');
+            setError('');
+          }} placeholder="Leave blank for Unassigned" />
         </label>
         {directoryError && <p>Driver list unavailable. You can submit this pickup as Unassigned.</p>}
-        <Button size="sm" disabled={busy || !userId || !supabase || Boolean(driverName.trim() && !drivers)} onClick={() => void submit()}>
+        {matchingDrivers.length > 1 && <label className="grid gap-1">Choose the registered driver
+          <select className="min-h-9 rounded-lg border border-input bg-background px-2" value={chosenDriverId}
+            disabled={busy} onChange={event => setChosenDriverId(event.target.value)}>
+            <option value="">Select a driver</option>
+            {matchingDrivers.map(driver => <option key={driver.id} value={driver.id}>{driver.name}
+              {matchingDrivers.some(other => other.id !== driver.id && other.name.trim().toLowerCase() === driver.name.trim().toLowerCase())
+                ? ` · Ref ${driver.id.slice(-6)}` : ''}
+            </option>)}
+          </select>
+        </label>}
+        <div aria-live="polite">
+          {selectedDriver && <p>Assigning to {selectedDriver.name}.</p>}
+          {hasDriverName && drivers && !matchingDrivers.length && <p>No registered driver found. Try another spelling or clear the name for Unassigned.</p>}
+          {hasDriverName && !drivers && !directoryError && <p>Loading registered drivers…</p>}
+        </div>
+        <Button size="sm" disabled={busy || !userId || !supabase || (hasDriverName && !selectedDriver)} onClick={() => void submit()}>
           {busy ? 'Submitting…' : 'Submit request'}
         </Button>
       </>}
