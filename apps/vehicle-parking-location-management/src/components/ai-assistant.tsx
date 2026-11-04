@@ -4,6 +4,10 @@ import { mapParkingLocationId, supportsXParkingLocation, type ParkingLocation, t
 import { supabase } from '@/lib/supabase';
 import { VplmCodexPet } from '@/components/vplm-codex-pet';
 
+import { AssistantRoadTest } from '@/components/assistant-road-test';
+import { AssistantPickup } from '@/components/assistant-pickup';
+import type { RoadTestType } from '@/lib/road-test-data';
+
 type ChatMessage = {
   role: 'assistant' | 'user';
   content: string;
@@ -23,13 +27,16 @@ type AiAssistantProps = {
   vehicles: Vehicle[];
   locations: ParkingLocation[];
   role: string;
+  actor: string;
+  userId: string;
+  canAccessRoadTests: boolean;
+  onRoadTestLocationChange: React.ComponentProps<typeof AssistantRoadTest>['onLocationChange'];
   canAssign: boolean;
   canTransfer: boolean;
   canRequestInitialRoadTest: boolean;
   locationLabel: (locationId?: string) => string;
   onAssign: (plateNumber: string, vehicle?: Vehicle) => boolean;
   onInitialRoadTest: (vehicleId: string) => boolean;
-  onPickupRequest: () => void;
   onTransfer: (vehicleId: string, destinationId: string, notes: string, toXParking?: boolean) => boolean;
 };
 
@@ -37,8 +44,8 @@ const directory: { id: AssistantFunction | 'help'; key: string; label: string; d
   { id: 'find', key: 'FIND', label: 'Find vehicle', description: 'Look up registration, model, colour, and current bay.', example: 'Find 938848', icon: Search },
   { id: 'assign', key: 'ASSIGN', label: 'Add / Assign', description: 'Open the validated vehicle intake and bay assignment form.', example: 'Assign 938848', icon: CircleParking },
   { id: 'transfer', key: 'TRANSFER', label: 'Transfer', description: 'Guide a confirmed vehicle move to an available bay.', example: 'Transfer 938848', icon: MoveRight },
-  { id: 'road-test', key: 'IRT', label: 'Initial Road Test', description: 'Technical Leaders can start an IRT request for a registered vehicle.', example: 'IRT 938848', icon: Route },
-  { id: 'pickup-request', key: 'PICKUP', label: 'Vehicle pickup request', description: 'Submit a request for staff approval to pick up a parked vehicle.', example: 'Request vehicle pickup', icon: CarFront },
+  { id: 'road-test', key: 'IRT', label: 'Road tests', description: 'Use IRT or FRT to view pending tasks. Technical Leaders can still enter IRT followed by a vehicle number to open a new request.', example: 'IRT 938848', icon: Route },
+  { id: 'pickup-request', key: 'PICKUP', label: 'Vehicle pickup request', description: 'Request a parked vehicle pickup for Reception or Workshop.', example: 'PICKUP 938848', icon: CarFront },
   { id: 'availability', key: 'BAY', label: 'Bay availability', description: 'Check available spaces by zone or bay number.', example: 'BAY B', icon: MapPin },
   { id: 'help', key: 'HELP', label: 'Function directory', description: 'Show shortcuts, supported tasks, and example prompts.', example: 'HELP', icon: BookOpen },
 ];
@@ -56,13 +63,16 @@ export default function AiAssistant({
   vehicles,
   locations,
   role,
+  actor,
+  userId,
+  canAccessRoadTests,
+  onRoadTestLocationChange,
   canAssign,
   canTransfer,
   canRequestInitialRoadTest,
   locationLabel,
   onAssign,
   onInitialRoadTest,
-  onPickupRequest,
   onTransfer,
 }: AiAssistantProps) {
   const [open, setOpen] = useState(false);
@@ -70,6 +80,8 @@ export default function AiAssistant({
   const [busy, setBusy] = useState(false);
   const [activeFunction, setActiveFunction] = useState<AssistantFunction | null>(null);
   const [transferFlow, setTransferFlow] = useState<TransferFlow | null>(null);
+  const [roadTestType, setRoadTestType] = useState<RoadTestType>();
+  const [pickupPlate, setPickupPlate] = useState<string>();
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
@@ -80,7 +92,7 @@ export default function AiAssistant({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages, open, busy, transferFlow, activeFunction]);
+  }, [messages, open, busy, transferFlow, activeFunction, roadTestType, pickupPlate]);
 
   const addAssistantMessage = (content: string) => {
     setMessages((current) => [...current, { role: 'assistant', content }]);
@@ -180,8 +192,9 @@ export default function AiAssistant({
   const runFunction = (action: AssistantFunction, query: string) => {
     if (action === 'pickup-request') {
       setActiveFunction(null);
-      onPickupRequest();
-      addAssistantMessage('The Vehicle Pickup Requests section is open. Select a parked vehicle and submit the request for staff approval.');
+      const plate = findVehicle(query).vehicle?.plateNumber
+        ?? query.replace(/^(?:\/?pickup(?: request)?|pick up|request vehicle pickup|request pickup)\b\s*/i, '').trim();
+      setPickupPlate(plate);
       return;
     }
 
@@ -275,6 +288,8 @@ export default function AiAssistant({
   const startFunction = (action: AssistantFunction | 'help') => {
     setTransferFlow(null);
     setActiveFunction(null);
+    setRoadTestType(undefined);
+    setPickupPlate(undefined);
     if (action === 'help') {
       addAssistantMessage(`VPLM function directory and shortcuts:\n${shortcutHelp}\n\nYou can click a function or type its shortcut. “Help” and “Directory” show this list.`);
       return;
@@ -286,14 +301,17 @@ export default function AiAssistant({
       return;
     }
     if (action === 'pickup-request') {
-      onPickupRequest();
-      addAssistantMessage('The Vehicle Pickup Requests section is open. Select a parked vehicle and submit the request for staff approval.');
+      setPickupPlate('');
+      return;
+    }
+    if (action === 'road-test') {
+      if (canAccessRoadTests) setRoadTestType('Initial Road Test');
+      else addAssistantMessage('Your role does not have access to Road Tests.');
       return;
     }
     setActiveFunction(action);
     if (action === 'find') addAssistantMessage('Find vehicle selected. Enter a registration number to see its vehicle details and current bay.');
     if (action === 'assign') addAssistantMessage('Add / Assign selected. Enter the vehicle registration; I’ll open the validated form so you can complete details and choose a bay.');
-    if (action === 'road-test') addAssistantMessage('Initial Road Test Request selected. A Technical Leader can enter a registered vehicle number to open the IRT request form.');
     if (action === 'availability') {
       setActiveFunction(null);
       showBayAvailability('');
@@ -425,6 +443,31 @@ export default function AiAssistant({
     setInput('');
     setBusy(true);
 
+    if (/^\/?(?:irt|frt)$/i.test(message)) {
+      setTransferFlow(null);
+      setActiveFunction(null);
+      setPickupPlate(undefined);
+      if (canAccessRoadTests) setRoadTestType(message.toLowerCase().endsWith('frt') ? 'Final Road Test' : 'Initial Road Test');
+      else addAssistantMessage('Your role does not have access to Road Tests.');
+      setBusy(false);
+      return;
+    }
+
+    if (pickupPlate !== undefined || roadTestType) {
+      if (pickupPlate !== undefined) setPickupPlate(message);
+      else addAssistantMessage('Choose an option in the road test panel.');
+      setBusy(false);
+      return;
+    }
+
+    if (getCommand(message) === 'pickup-request') {
+      setActiveFunction(null);
+      setTransferFlow(null);
+      runFunction('pickup-request', message);
+      setBusy(false);
+      return;
+    }
+
     if (transferFlow) {
       continueTransferFlow(message);
       setBusy(false);
@@ -465,7 +508,7 @@ export default function AiAssistant({
         }
       } else {
         const isShortcutOnly = directory.some((item) => item.key.toLowerCase() === message.trim().toLowerCase());
-        if (isShortcutOnly || message.trim().startsWith('/')) {
+        if (isShortcutOnly || (command !== 'pickup-request' && message.trim().startsWith('/'))) {
           startFunction(command);
         } else {
           runFunction(command, message);
@@ -570,6 +613,17 @@ export default function AiAssistant({
                 {message.content}
               </div>
             ))}
+
+            {roadTestType && canAccessRoadTests && <AssistantRoadTest key={roadTestType} type={roadTestType} vehicles={vehicles} locations={locations}
+              actor={actor} onLocationChange={onRoadTestLocationChange} onClose={message => {
+                setRoadTestType(undefined);
+                if (message) addAssistantMessage(message);
+              }} />}
+            {pickupPlate !== undefined && <AssistantPickup key={pickupPlate} vehicles={vehicles} locations={locations}
+              initialPlate={pickupPlate} actor={actor} userId={userId} onClose={message => {
+                setPickupPlate(undefined);
+                if (message) addAssistantMessage(message);
+              }} />}
 
             {transferFlow?.step === 'taking' && (
               <div className="flex gap-2">

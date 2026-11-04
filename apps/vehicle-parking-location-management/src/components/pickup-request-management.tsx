@@ -3,14 +3,14 @@ import { format, isToday } from 'date-fns';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import type { ParkingLocation, Vehicle } from '@/lib/parking-data';
+import { parkingRecordKey, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 
-type Destination = 'Workshop Bay' | 'Park Accommodation' | 'Reception for Delivery';
+import { submitPickupRequest, type PickupDestination as Destination } from '@/lib/pickup-request-data';
 type Status = 'Requested' | 'In Transit' | 'Completed' | 'Cancelled';
 type Pickup = {
   id: string; vehicle_id: string; plate_number: string; origin_location_id: string;
@@ -19,13 +19,14 @@ type Pickup = {
   completed_by: string | null; completed_at: string | null; final_location_id: string | null;
   cancelled_by: string | null; cancelled_at: string | null;
   requested_by_id: string | null; assigned_to_id: string | null; assigned_to: string | null;
+  centre_bay_vehicle_id?: string | null;
   accepted_by_id: string | null; completed_by_id: string | null; cancelled_by_id: string | null;
 };
 type WorkspaceUser = { id: string; name: string; loginId: string; role: string };
 type Props = {
   vehicles: Vehicle[]; locations: ParkingLocation[]; actor: string; userId: string;
   isAdministrator: boolean; canViewFullHistory: boolean; onClose: () => void;
-  onFinishParking: (vehicleId: string, from: string, to: string) => boolean;
+  onFinishParking: (vehicleId: string, from: string, to: string, centreBayVehicleId?: string) => boolean;
 };
 const active = (status: Status) => status === 'Requested' || status === 'In Transit';
 const label = (location: ParkingLocation) => `${location.zone} · ${location.bayNumber}`;
@@ -103,12 +104,16 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
   const centreBay = locations.find(location => location.zone === 'Workshop Centre Bay');
   const finalLocation = locationById(finalBay);
   const parkedVehicles = (locationId: string) => vehicles.filter(vehicle => vehicle.id !== opened?.vehicle_id
-    && vehicle.status !== 'Delivered' && vehicle.currentLocationId === locationId && vehicle.xParking !== 'Yes');
+    && vehicle.status !== 'Delivered' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId) && vehicle.xParking !== 'Yes');
   const finalOccupants = finalLocation ? parkedVehicles(finalLocation.id) : [];
   const isCentreBay = finalLocation?.zone === 'Workshop Centre Bay';
+  const plannedCentreMove = opened?.centre_bay_vehicle_id && finalBay === opened.requested_bay_id
+    && finalOccupants.length === 1 && finalOccupants[0].id === opened.centre_bay_vehicle_id;
+  const canMoveToCentre = Boolean(plannedCentreMove && !vehicles.some(vehicle => vehicle.xParking === 'Yes' && vehicle.status !== 'Delivered' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(finalBay)) && centreBay && !['Reserved', 'Maintenance'].includes(centreBay.status)
+    && vehicles.filter(vehicle => vehicle.status !== 'Delivered' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(centreBay.id)).length < centreBay.capacity);
   const bayBlocked = Boolean(finalLocation && (finalLocation.status === 'Reserved' || finalLocation.status === 'Maintenance'
     || (finalLocation.lane === 'Container' ? finalOccupants.length >= 15
-      : finalOccupants.length > 0 || finalLocation.status === 'Occupied')));
+      : (!canMoveToCentre && (finalOccupants.length > 0 || finalLocation.status === 'Occupied')))));
   const driverUsers = users.filter(user => user.role === 'Drivers' && user.name.trim());
   const dateMatches = (value: string | null) => {
     if (!value) return false;
@@ -186,7 +191,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
     const { data, error } = await supabase.from('pickup_requests').update(update).eq('id', opened.id).eq('status', expected).select('id');
     setBusy(false);
     if (error || !data?.length) { toast.error(error?.message ?? 'Request changed on another device. Refresh and retry.'); void refresh(); return; }
-    if (status === 'Completed' && !onFinishParking(opened.vehicle_id, opened.origin_location_id, finalBay)) {
+    if (status === 'Completed' && !onFinishParking(opened.vehicle_id, opened.origin_location_id, finalBay, canMoveToCentre ? opened.centre_bay_vehicle_id ?? undefined : undefined)) {
       toast.error('Pickup record completed, but vehicle transfer failed. Contact a supervisor to reconcile the location.');
       setOpened(null); void refresh(); return;
     }
@@ -199,17 +204,10 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
     if (!selectedVehicle.currentLocationId) return toast.error('Vehicle has no recorded parking location.');
     if (requests.some(item => item.vehicle_id === selectedVehicle.id && active(item.status))) return toast.error('An active pickup already exists for this vehicle.');
     setBusy(true);
-    const { error } = await supabase.from('pickup_requests').insert({
-      vehicle_id: selectedVehicle.id, plate_number: selectedVehicle.plateNumber,
-      origin_location_id: selectedVehicle.currentLocationId,
-      destination_type: destination, requested_bay_id: destination === 'Workshop Bay' ? workshopBay : null,
-      requested_by: actor,
-      requested_by_id: userId,
-      assigned_to_id: assignedDriverId === 'unassigned' ? null : assignedDriverId,
-      assigned_to: driverUsers.find(user => user.id === assignedDriverId)?.name ?? null,
-    });
+    const error = await submitPickupRequest(selectedVehicle, destination, destination === 'Workshop Bay' ? workshopBay : null,
+      actor, userId, driverUsers.find(user => user.id === assignedDriverId));
     setBusy(false);
-    if (error) return toast.error(error.message);
+    if (error) return toast.error(error);
     toast.success('Pickup requested.'); setSelectedVehicle(null); setQuery(''); setWorkshopBay(''); setAssignedDriverId('unassigned'); void refresh();
   };
   const selected = filteredRequests.filter(item => item.status === view);
@@ -267,7 +265,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
       <Button key={status} variant={view === status ? 'default' : 'outline'} onClick={() => setView(status)}>{status} ({filteredRequests.filter(item => item.status === status).length})</Button>
     )}</div>
     {loading ? <p>Loading pickup requests…</p> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{selected.map(request =>
-      <button key={request.id} type="button" onClick={() => { setOpened(request); setFinalBay(request.destination_type === 'Workshop Bay' ? request.requested_bay_id ?? '' : ''); setOtherBay(false); setBayNumber(''); }} className="rounded-xl border bg-card p-4 text-left shadow-md transition hover:border-primary hover:shadow-lg">
+      <button key={request.id} type="button" onClick={() => { setOpened(request); setFinalBay(request.requested_bay_id ?? ''); setOtherBay(false); setBayNumber(''); }} className="rounded-xl border bg-card p-4 text-left shadow-md transition hover:border-primary hover:shadow-lg">
         <span className="text-xs text-muted-foreground">{originType(locationById(request.origin_location_id))} pickup</span>
         <p className="text-xl font-black">{request.plate_number}</p><p className="text-sm">{request.destination_type}</p>
         <p className="text-xs text-muted-foreground">Requested by {request.requested_by}</p>
@@ -297,6 +295,9 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
               }} />
               {finalLocation ? <p>Selected parking: {label(finalLocation)}</p> : bayNumber && <p role="alert" className="text-destructive">Workshop bay not found.</p>}
             </div>}
+            {canMoveToCentre && <p role="alert" className="rounded-lg border border-amber-500 p-3">
+              Confirm that {finalOccupants[0].plateNumber} was moved to Workshop Centre Bay temporarily and that {opened.plate_number} was parked in the selected bay.
+            </p>}
             {bayBlocked && <div role="alert" className="space-y-2 rounded-lg border border-amber-500 bg-amber-50 p-3 text-amber-950">
               <p className="font-semibold">{finalOccupants.length || finalLocation?.status === 'Occupied' ? 'Vehicle Existing not Moved' : 'Parking location unavailable'}</p>
               {finalOccupants.length > 0 && <p>{finalOccupants.map(vehicle => vehicle.plateNumber).join(', ')}</p>}

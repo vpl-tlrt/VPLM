@@ -101,3 +101,20 @@ export const roadTestLocationLabel = (id: string | undefined, locations: Parking
   return location ? `${location.zone}-${location.bayNumber}` : 'Not parked';
 };
 export const roadTestVehicleLabel = (id: string, vehicles: Vehicle[]) => vehicles.find((item: Vehicle) => item.id === id)?.plateNumber ?? id;
+
+export function startRoadTestRecord(test: RoadTestRecord, actor: string, departureLocationId?: string, odometerStart?: number): RoadTestRecord {
+  return {
+    ...test, assignedTo: test.assignedTo.trim() || actor, status: 'In Road Test',
+    startTimestamp: new Date().toISOString(), startedBy: actor, departureLocationId, odometerStart,
+  };
+}
+
+export function finishRoadTestRecord(test: RoadTestRecord, actor: string, finalLocationId: string, result: RoadTestResult,
+  details?: Pick<RoadTestRecord, 'odometerEnd' | 'finishNotes' | 'findings' | 'recommendation' | 'furtherActionRequired'>): RoadTestRecord {
+  const now = new Date();
+  return {
+    ...test, ...details, status: 'Completed', finishedBy: actor, finishTimestamp: now.toISOString(),
+    durationMinutes: test.startTimestamp ? Math.max(1, Math.round((now.getTime() - new Date(test.startTimestamp).getTime()) / 60000)) : 0,
+    finalLocationId, result, approved: true, approvedBy: actor, approvalTimestamp: now.toISOString(), immutable: true,
+  };
+}

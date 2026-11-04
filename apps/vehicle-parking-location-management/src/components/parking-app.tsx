@@ -27,7 +27,7 @@ import {
   isLiveGarageContainer,
   reconcileParkingLayout,
   supportsXParkingLocation,
-  type Movement, type ParkingLocation, type Reservation, type Vehicle,
+  parkingRecordKey, type Movement, type ParkingLocation, type Reservation, type Vehicle,
 } from '@/lib/parking-data';
 import { loadOfflineState, pruneExpiredAuditEventPhotos, pruneExpiredMovementPhotos, pruneExpiredVehiclePhotos, saveOfflineState, type OfflineAuditEvent } from '@/lib/offline-store';
 import { notifyWorkspaceDataChanged } from '@/lib/workspace-sync-events';
@@ -68,13 +68,14 @@ const navigation = [
 ] as const;
 
 type Screen = (typeof navigation)[number]['id'];
-type Role = 'Administrator' | 'Supervisor' | 'TechnicalLeader' | 'Operator' | 'Drivers' | 'Guest Users' | 'Others';
+type Role = 'Administrator' | 'Supervisor' | 'TechnicalLeader' | 'Operator' | 'Drivers' | 'Technician' | 'Guest Users' | 'Others';
 type XParkingOccupant = { plateNumber: string; model: string };
-const appRoles: Role[] = ['Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Guest Users', 'Others'];
-const roleRank: Record<Role, number> = { Operator: 1, Drivers: 1, 'Guest Users': 1, Others: 1, TechnicalLeader: 2, Supervisor: 3, Administrator: 4 };
+const appRoles: Role[] = ['Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Technician', 'Guest Users', 'Others'];
+const roleRank: Record<Role, number> = { Operator: 1, Drivers: 1, Technician: 1, 'Guest Users': 1, Others: 1, TechnicalLeader: 2, Supervisor: 3, Administrator: 4 };
 const roleLabel = (role: Role) => role === 'TechnicalLeader' ? 'Technical Leader' : role;
 const normalizeBulkRole = (value: string): Role | undefined => appRoles.find((role) => role.toLowerCase().replace(/[^a-z0-9]/g, '') === value.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
-const rolesWithoutRoadTests: Role[] = ['Drivers', 'Guest Users', 'Others'];
+const technicianScreens: Screen[] = ['dashboard', 'assignment', 'search', 'pickup-requests'];
+const rolesWithoutRoadTests: Role[] = ['Drivers', 'Technician', 'Guest Users', 'Others'];
 type ManagedUser = { id: string; name: string; email: string; loginId: string; mobileNumber: string; role: Role | null };
 type UserAdminResponse = { users?: ManagedUser[]; existing?: boolean; loginId?: string; temporaryPassword?: string | null };
 
@@ -115,7 +116,6 @@ const statusVariant = (status: string): 'default' | 'secondary' | 'destructive' 
   return 'outline';
 };
 
-const parkingRecordKey = (value?: string): string => (mapParkingLocationId(value) ?? value ?? '').trim().replace(/[{}]/g, '').toLowerCase();
 type VehicleShare = { id: string; plateNumber: string; location: string; status: string };
 
 const zoneDisplayName = (zone: string): string => {
@@ -207,7 +207,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const canRecoverDeliveredVehicle = role === 'Administrator' || role === 'Supervisor' || role === 'TechnicalLeader';
   const isAdministrator = role === 'Administrator' && (access.data?.can('ApplicationSettings', 'ManageSetting') ?? false);
   const canAccessRoadTests = Boolean(access.data && !rolesWithoutRoadTests.includes(role));
-  const visibleNavigation = access.data ? navigation.filter((item) => item.id !== 'layout' && (!localGuest || item.id !== 'pickup-requests') && (item.id !== 'road-tests' || canAccessRoadTests) && (item.id !== 'backup-playback' || isAdministrator) && roleRank[role] >= roleRank[item.minimumRole as Role]) : navigation.filter((item) => item.id === 'profile');
+  const visibleNavigation = access.data ? navigation.filter((item) => (role !== 'Technician' || technicianScreens.includes(item.id)) && item.id !== 'layout' && (!localGuest || item.id !== 'pickup-requests') && (item.id !== 'road-tests' || canAccessRoadTests) && (item.id !== 'backup-playback' || isAdministrator) && roleRank[role] >= roleRank[item.minimumRole as Role]) : navigation.filter((item) => item.id === 'profile');
   const mobileNavigation = [...visibleNavigation].sort((a, b) => mobileNavigationOrder.indexOf(a.id) - mobileNavigationOrder.indexOf(b.id));
   const moveMobileNavigationItem = (id: Screen, direction: -1 | 1) => {
     setMobileNavigationOrder((current: Screen[]) => {
@@ -428,8 +428,9 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     if (navigator.onLine) void sync(false);
   };
 
-  const transferVehicleById = (vehicleId: string, destinationId: string, movementNotes = notes, toXParking = false): boolean => {
-    if (!canTransferVehicle) { toast.error('You do not have permission to transfer vehicles.'); return false; }
+  const transferVehicleById = (vehicleId: string, destinationId: string, movementNotes = notes, toXParking = false,
+    pickup?: { movedOccupantId?: string; deferSync?: boolean }): boolean => {
+    if (!canTransferVehicle && !(pickup && role === 'Technician')) { toast.error('You do not have permission to transfer vehicles.'); return false; }
     const vehicle = activeVehicles.find((item: Vehicle) => item.id === vehicleId);
     if (!vehicle?.currentLocationId || !destinationId) { toast.error('Select a parked vehicle and an available destination.'); return false; }
     const target = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(destinationId));
@@ -442,7 +443,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       }
     } else if (!containerCanAccept(target) && (
       target.status === 'Reserved' || target.status === 'Maintenance' ||
-      activeVehicles.some((item: Vehicle) => item.id !== vehicle.id && item.xParking !== 'Yes' && parkingRecordKey(item.currentLocationId) === parkingRecordKey(target.id))
+      activeVehicles.some((item: Vehicle) => item.id !== vehicle.id && item.id !== pickup?.movedOccupantId && item.xParking !== 'Yes' && parkingRecordKey(item.currentLocationId) === parkingRecordKey(target.id))
     )) {
       toast.error('Destination is occupied or reserved.');
       return false;
@@ -470,10 +471,30 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     logAudit('Transfer', 'Vehicle', `${vehicle.plateNumber}: ${locationLabel(previous)} → ${target.zone}-${target.bayNumber}`, updatedVehicle, previous, target.id);
     toast.success('Vehicle transferred.');
     playSound('general');
-    if (navigator.onLine) void sync(false);
+    if (navigator.onLine && !pickup?.deferSync) void sync(false);
     setNewLocationId('');
     setNotes('');
     return true;
+  };
+  const finishPickupParking = (vehicleId: string, from: string, to: string, centreBayVehicleId?: string) => {
+    const vehicle = activeVehicles.find(item => item.id === vehicleId);
+    if (!vehicle || vehicle.currentLocationId !== from) {
+      toast.error('Vehicle location has changed. Refresh before completing.');
+      return false;
+    }
+    if (centreBayVehicleId) {
+      const centre = locations.find(item => item.zone === 'Workshop Centre Bay');
+      const occupant = activeVehicles.find(item => item.id === centreBayVehicleId);
+      const target = locations.find(item => item.id === to && item.zone === 'Workshop');
+      if (!target || ['Reserved', 'Maintenance'].includes(target.status) || !centre || !containerCanAccept(centre)
+        || !occupant || occupant.xParking === 'Yes' || parkingRecordKey(occupant.currentLocationId) !== parkingRecordKey(to)
+        || activeVehicles.some(item => item.id !== occupant.id && item.id !== vehicleId && parkingRecordKey(item.currentLocationId) === parkingRecordKey(to))) {
+        toast.error('Workshop or Centre Bay occupancy changed. Refresh before completing.');
+        return false;
+      }
+      if (!transferVehicleById(occupant.id, centre.id, 'Temporary Centre Bay parking for pickup', false, { deferSync: true })) return false;
+    }
+    return transferVehicleById(vehicleId, to, 'Pickup Request completed', false, { movedOccupantId: centreBayVehicleId });
   };
   const handleTransfer = (toXParking = false) => {
     if (!selectedVehicle) return toast.error('Select a parked vehicle and an available destination.');
@@ -636,7 +657,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           <div className="relative mt-3 overflow-hidden rounded-2xl bg-background lg:hidden"><span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-base font-bold tabular-nums text-muted-foreground" aria-hidden="true">{format(currentTime, 'HH:mm:ss')}</span><Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-24" aria-label="Global vehicle search" /></div>
         </header>
         <motion.div key={screen} initial={{ opacity: 0, y: 12, scale: 0.995 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] as const }} className="mx-auto max-w-[1600px] p-4 md:p-6 xl:p-8">
-          {screen === 'pickup-requests' && <PickupRequestManagement vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} onFinishParking={(vehicleId, from, to) => { const vehicle = vehicles.find(item => item.id === vehicleId); if (!vehicle || vehicle.currentLocationId !== from) { toast.error('Vehicle location has changed. Refresh before completing.'); return false; } return transferVehicleById(vehicleId, to, 'Pickup Request completed'); }} />}
+          {screen === 'pickup-requests' && <PickupRequestManagement vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} onFinishParking={finishPickupParking} />}
           {screen === 'road-tests' && canAccessRoadTests && <RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} actorRole={role} canCreateAssignment canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} isAdministrator={isAdministrator} initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} /> }
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
           {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage} canEditVehicle={canEditVehicle} canTransferVehicle={canTransferVehicle} canAssignVehicle={canAssignVehicle} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} onContactVehicle={() => toast.info('Team sharing requires a configured cloud service.')} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} onAssignSelectedBay={(selectedBayId: string, vehicleForm: VehicleFormData) => { setBayId(selectedBayId); setZone(locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(selectedBayId))?.zone ?? zone); setAssignmentVehicle(vehicleForm); }} assignSelectedBay={(selectedBayId?: string) => handleAssign(selectedBayId)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
@@ -655,7 +676,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 md:hidden" aria-label="Primary navigation">
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
-      {!localGuest && <AiAssistant vehicles={activeVehicles} locations={locations} role={role} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} canRequestInitialRoadTest={role === 'TechnicalLeader' && canAccessRoadTests} locationLabel={locationLabel} onAssign={openAssistantAssignment} onInitialRoadTest={openAssistantInitialRoadTest} onPickupRequest={() => setScreen('pickup-requests')} onTransfer={transferVehicleById} />}
+      {!localGuest && <AiAssistant vehicles={activeVehicles} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} canRequestInitialRoadTest={role === 'TechnicalLeader' && canAccessRoadTests} locationLabel={locationLabel} onAssign={openAssistantAssignment} onInitialRoadTest={openAssistantInitialRoadTest} onTransfer={transferVehicleById} />}
     </div>
   );
   return appShell;
@@ -1236,7 +1257,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
         if (!name || name.length > 120) errors.push('Invalid full name');
         if (!/^\+[1-9]\d{7,14}$/.test(mobileNumber)) errors.push('Invalid mobile number (use + followed by country code and digits)');
         if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Invalid email');
-        if (!appRoles.includes(role)) errors.push('Invalid role (use Technical Leader, Administrator, Supervisor, Operator, Drivers, Guest Users or Others)');
+        if (!appRoles.includes(role)) errors.push('Invalid role (use Technical Leader, Administrator, Supervisor, Operator, Drivers, Technician, Guest Users or Others)');
         if (userId && ids.has(userId)) errors.push('Duplicate account ID in file');
         if (loginId && logins.has(loginId.toLowerCase())) errors.push('Duplicate User ID in file');
         if (mobileNumber && mobiles.has(mobileNumber)) errors.push('Duplicate mobile number in file');

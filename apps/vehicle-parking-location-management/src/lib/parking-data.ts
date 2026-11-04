@@ -125,3 +125,5 @@ export const initialVehicles: Vehicle[] = [];
 export const initialMovements: Movement[] = [];
 
 export const initialReservations: Reservation[] = [];
+
+export const parkingRecordKey = (value?: string): string => (mapParkingLocationId(value) ?? value ?? '').trim().replace(/[{}]/g, '').toLowerCase();
