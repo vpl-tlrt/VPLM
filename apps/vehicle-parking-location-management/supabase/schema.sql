@@ -1,6 +1,6 @@
 create table if not exists public.workspace_members (
   user_id uuid primary key references auth.users (id) on delete cascade,
-  role text not null check (role in ('Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Guest Users', 'Others')),
+  role text not null check (role in ('Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Technician', 'Guest Users', 'Others')),
   login_id text,
   user_name text,
   mobile_number text,
@@ -16,7 +16,7 @@ alter table public.workspace_members
   drop constraint if exists workspace_members_role_check;
 alter table public.workspace_members
   add constraint workspace_members_role_check
-  check (role in ('Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Guest Users', 'Others'));
+  check (role in ('Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Technician', 'Guest Users', 'Others'));
 
 create unique index if not exists workspace_members_login_id_unique
   on public.workspace_members (lower(login_id))
@@ -279,3 +279,5 @@ drop trigger if exists enforce_pickup_request_changes on public.pickup_requests;
 create trigger enforce_pickup_request_changes
   before insert or update on public.pickup_requests
   for each row execute function public.enforce_pickup_request_changes();
+
+alter table public.pickup_requests add column if not exists centre_bay_vehicle_id text;

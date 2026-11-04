@@ -5,7 +5,8 @@ import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, Ban, CalendarIcon, CheckCircle2, ClipboardPlus, Download, Flag, History, LocateFixed, Pencil, Play, Search, TrendingUp, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ParkingLocation, Vehicle } from '@/lib/parking-data';
-import { loadRoadTestAudit, loadRoadTestNotifications, loadRoadTests, roadTestLocationLabel, saveRoadTestData, type RoadTestAuditEntry, type RoadTestNotification, type RoadTestPriority, type RoadTestRecord, type RoadTestResult, type RoadTestType } from '@/lib/road-test-data';
+import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
+import { finishRoadTestRecord, startRoadTestRecord, loadRoadTestAudit, loadRoadTestNotifications, loadRoadTests, roadTestLocationLabel, saveRoadTestData, type RoadTestAuditEntry, type RoadTestNotification, type RoadTestPriority, type RoadTestRecord, type RoadTestResult, type RoadTestType } from '@/lib/road-test-data';
 import { useUser } from '@/hooks/use-user';
 import { supabase } from '@/lib/supabase';
 import { Badge } from '@/components/ui/badge';
@@ -38,6 +39,7 @@ const elapsedLabel = (test: RoadTestRecord, now: number) => {
 type AssigneeUser = { id: string; name: string; loginId: string; role?: string };
 type Props = { vehicles: Vehicle[]; locations: ParkingLocation[]; actor: string; actorRole: string; users?: AssigneeUser[]; canCreateAssignment: boolean; canViewFullHistory: boolean; isAdministrator: boolean; initialVehicleId?: string; initialTestType?: RoadTestType; onInitialVehicleHandled: () => void; onVehicleLocationChange: (vehicleId: string, fromId: string | undefined, toId: string | undefined, out: boolean) => void; onLocateVehicle: (vehicleId: string) => void; onNotificationSound: (kind: 'assignment' | 'success' | 'urgent' | 'general') => void };
 type Form = { vehicleId: string; job: string; purpose: string; assignedTo: string; priority: RoadTestPriority; testType: RoadTestType; remarks: string };
+const emptyUsers: AssigneeUser[] = [];
 const blank: Form = { vehicleId: '', job: '', purpose: '', assignedTo: '', priority: 'Normal', testType: 'Initial Road Test', remarks: '' };
 const badge = (status: string) => status === 'Completed' || status === 'Pass' ? 'default' : status === 'Fail' || status === 'Cancelled' ? 'destructive' : status === 'In Road Test' ? 'secondary' : 'outline';
 const csvCell = (value: string | number | undefined) => `"${String(value ?? '').replaceAll('"', '""')}"`;
@@ -52,7 +54,7 @@ const displayAssignee = (value: string | undefined, users: AssigneeUser[] = []) 
   return match?.name.trim() || 'Assigned user';
 };
 
-export function RoadTestManagement({ vehicles, locations, actor, actorRole, users: workspaceUsers = [], canCreateAssignment, canViewFullHistory, isAdministrator, initialVehicleId, initialTestType, onInitialVehicleHandled, onVehicleLocationChange, onLocateVehicle, onNotificationSound }: Props) {
+export function RoadTestManagement({ vehicles, locations, actor, actorRole, users: workspaceUsers = emptyUsers, canCreateAssignment, canViewFullHistory, isAdministrator, initialVehicleId, initialTestType, onInitialVehicleHandled, onVehicleLocationChange, onLocateVehicle, onNotificationSound }: Props) {
   const [tests, setTests] = useState<RoadTestRecord[]>(loadRoadTests);
   const [audit, setAudit] = useState<RoadTestAuditEntry[]>(loadRoadTestAudit);
   const [notifications, setNotifications] = useState<RoadTestNotification[]>(loadRoadTestNotifications);
@@ -80,7 +82,11 @@ export function RoadTestManagement({ vehicles, locations, actor, actorRole, user
     if (!supabase) return;
     void supabase.functions.invoke<{ users?: AssigneeUser[] }>('admin-users', { body: { action: 'assignees' } })
       .then(({ data, error }) => {
-        if (!active || error || !data?.users) return;
+        if (!active) return;
+        if (error || !data?.users) {
+          toast.error('Could not load the Technical Leader list.');
+          return;
+        }
         setApplicationUsers(data.users);
       });
     return () => { active = false; };
@@ -101,6 +107,15 @@ export function RoadTestManagement({ vehicles, locations, actor, actorRole, user
     setTab('assign');
     onInitialVehicleHandled();
   }, [initialTestType, initialVehicleId, onInitialVehicleHandled, vehicles]);
+  useEffect(() => {
+    const reload = () => {
+      setTests(loadRoadTests());
+      setAudit(loadRoadTestAudit());
+      setNotifications(loadRoadTestNotifications());
+    };
+    window.addEventListener(WORKSPACE_DATA_CHANGED, reload);
+    return () => window.removeEventListener(WORKSPACE_DATA_CHANGED, reload);
+  }, []);
   useEffect(() => {
     saveRoadTestData(tests, audit, notifications);
   }, [tests, audit, notifications]);
@@ -203,15 +218,17 @@ export function RoadTestManagement({ vehicles, locations, actor, actorRole, user
     if (!active || active.status !== 'Assigned') return;
     const conflictingTest = tests.find((test: RoadTestRecord) => test.id !== active.id && test.vehicleId === active.vehicleId && test.status === 'In Road Test');
     if (conflictingTest) return toast.error('Another road test is already in progress for this vehicle.');
-    const now = new Date().toISOString(); const departure = vehicle(active.vehicleId)?.currentLocationId; const claimedBy = active.assignedTo.trim() || actor;
-    const started: RoadTestRecord = { ...active, assignedTo: claimedBy, status: 'In Road Test', startTimestamp: now, startedBy: actor, departureLocationId: departure, odometerStart: odometer ? Number(odometer) : undefined };
+    const departure = vehicle(active.vehicleId)?.currentLocationId;
+    const started = startRoadTestRecord(active, actor, departure, odometer ? Number(odometer) : undefined);
+    const claimedBy = started.assignedTo;
     setTests((items: RoadTestRecord[]) => items.map((item: RoadTestRecord) => item.id === active.id ? started : item));
     addAudit(started, 'Started', `${active.assignedTo.trim() ? 'Road test' : `Unassigned task claimed by ${claimedBy} and`} started from ${roadTestLocationLabel(departure, locations)}.`, departure); onVehicleLocationChange(active.vehicleId, departure, undefined, true); setActive(undefined); setOdometer(''); toast.success(active.assignedTo.trim() ? 'Vehicle marked out for road test.' : `Road test claimed by ${claimedBy} and started.`); onNotificationSound('general');
   };
   const finish = () => {
     if (!active || !result || !finalBay) return toast.error('Result and final parking bay are required.');
-    const now = new Date().toISOString(); const duration = active.startTimestamp ? Math.max(1, Math.round((Date.now() - new Date(active.startTimestamp).getTime()) / 60000)) : 0;
-    const done: RoadTestRecord = { ...active, status: 'Completed', finishTimestamp: now, finishedBy: actor, odometerEnd: odometer ? Number(odometer) : undefined, durationMinutes: duration, finishNotes: notes, finalLocationId: finalBay, result, findings, recommendation, furtherActionRequired: further === 'yes', approved: true, approvedBy: actor, approvalTimestamp: now, immutable: true };
+    const done = finishRoadTestRecord(active, actor, finalBay, result, {
+      odometerEnd: odometer ? Number(odometer) : undefined, finishNotes: notes, findings, recommendation, furtherActionRequired: further === 'yes',
+    });
     setTests((items: RoadTestRecord[]) => items.map((item: RoadTestRecord) => item.id === active.id ? done : item)); addAudit(done, 'Completed', `${result} result recorded; vehicle parked at ${roadTestLocationLabel(finalBay, locations)}.`, active.departureLocationId, finalBay); notify(done, 'Completion', done.assignedBy, `${done.jobCardNumber} completed with result ${result}.`); if (result === 'Fail') notify(done, 'Failed Result', done.assignedBy, `Immediate attention: ${done.jobCardNumber} failed.`); onVehicleLocationChange(done.vehicleId, undefined, finalBay, false); setActive(undefined); setResult(undefined); setOdometer(''); setNotes(''); setFindings(''); setRecommendation(''); setFinalBay(''); toast[result === 'Fail' ? 'error' : 'success'](`Road test completed: ${result}.`); onNotificationSound(result === 'Fail' ? 'urgent' : 'success');
   };
   const cancel = () => {

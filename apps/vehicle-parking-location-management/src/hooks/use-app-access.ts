@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 
-export type AppRole = 'Administrator' | 'Supervisor' | 'TechnicalLeader' | 'Operator' | 'Drivers' | 'Guest Users' | 'Others';
+export type AppRole = 'Administrator' | 'Supervisor' | 'TechnicalLeader' | 'Operator' | 'Drivers' | 'Technician' | 'Guest Users' | 'Others';
 export type AccessFeature = 'Vehicles' | 'VehicleMovements' | 'ParkingLayout' | 'Reservations' | 'ApplicationSettings' | 'RolePermissions' | 'AuditLogs';
 export type AccessAction = 'View' | 'Create' | 'Edit' | 'Assign' | 'Transfer' | 'Release' | 'ManageSetting';
 
@@ -12,7 +12,7 @@ type AppAccess = {
 };
 
 const CACHED_ACCESS_PREFIX = 'vplm-cached-access-v1:';
-const validRoles: AppRole[] = ['Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Guest Users', 'Others'];
+const validRoles: AppRole[] = ['Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Technician', 'Guest Users', 'Others'];
 
 const readCachedRole = (userObjectId?: string): AppRole | undefined => {
   if (!userObjectId || typeof window === 'undefined') return undefined;
@@ -25,6 +25,7 @@ const readCachedRole = (userObjectId?: string): AppRole | undefined => {
 };
 
 const roleCan = (role: AppRole, feature: AccessFeature, action: AccessAction) => {
+  if (role === 'Technician') return feature === 'Vehicles' && ['View', 'Create', 'Assign'].includes(action);
   if (role === 'Administrator') return true;
   if (role === 'Supervisor') return feature !== 'ApplicationSettings' && feature !== 'RolePermissions';
   if (role === 'TechnicalLeader') return feature === 'Vehicles' || feature === 'VehicleMovements' || feature === 'AuditLogs';
@@ -61,7 +62,7 @@ export const useAppAccess = (userPrincipalName: string | undefined, userObjectId
         .eq('user_id', userObjectId)
         .single();
       if (error) throw error;
-      if (!['Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Guest Users', 'Others'].includes(data.role)) {
+      if (!validRoles.includes(data.role as AppRole)) {
         throw new Error('Workspace membership has an invalid role.');
       }
       const role = data.role as AppRole;

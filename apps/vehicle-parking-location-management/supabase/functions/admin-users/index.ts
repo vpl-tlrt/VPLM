@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient, type User } from 'npm:@supabase/supabase-js@2.118.0';
 
-const roles = ['Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Guest Users', 'Others'] as const;
+const roles = ['Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Technician', 'Guest Users', 'Others'] as const;
 type Role = (typeof roles)[number];
 type Database = {
   public: {
