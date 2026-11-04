@@ -1,8 +1,9 @@
+import { useActivePickup } from '@/hooks/use-active-pickup';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { parkingLocationLabel, parkingRecordKey, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
-import { submitPickupRequest, type PickupDestination, type PickupDriver } from '@/lib/pickup-request-data';
+import { pickupParkingNotice, submitPickupRequest, type PickupDestination, type PickupDriver } from '@/lib/pickup-request-data';
 import { findPickupDrivers } from '@/lib/pickup-driver-matching';
 import { supabase } from '@/lib/supabase';
 
@@ -46,6 +47,7 @@ export function AssistantPickup({ vehicles, locations, initialPlate, actor, user
   }, []);
 
   const vehicle = vehicles.find(item => item.id === vehicleId && item.currentLocationId);
+  const activePickup = useActivePickup(vehicle?.id);
   const parkedAt = (location: ParkingLocation) => vehicles.filter(item =>
     parkingRecordKey(item.currentLocationId) === parkingRecordKey(location.id));
   const receptionBay = locations.find(location => location.zone === 'Reception' && location.status === 'Available' && !parkedAt(location).length);
@@ -75,12 +77,12 @@ export function AssistantPickup({ vehicles, locations, initialPlate, actor, user
   };
 
   const submit = async () => {
-    if (!vehicle || !destination || !bay || !canSubmit || busy) return;
+    if (!vehicle || activePickup || !destination || !bay || !canSubmit || busy) return;
     if (hasDriverName && !selectedDriver) return;
     setBusy(true);
     setError('');
     try {
-      const error = await submitPickupRequest(vehicle, destination, bay.id, actor, userId, selectedDriver, occupant?.id);
+      const error = await submitPickupRequest(vehicle, destination, bay.id, actor, userId, selectedDriver, occupant?.id, locations);
       if (error) { setError(error); return; }
       onClose(`Pickup requested for ${vehicle.plateNumber} to ${parkingLocationLabel(bay)}. Assigned to ${selectedDriver?.name ?? 'Unassigned'}.${occupant ? ' The driver must confirm both moves when completing parking.' : ''}`);
     } catch {
@@ -97,7 +99,8 @@ export function AssistantPickup({ vehicles, locations, initialPlate, actor, user
         onChange={event => setPlate(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') selectVehicle(); }} />
       <Button size="sm" onClick={selectVehicle}>Continue</Button>
     </div>}
-    {vehicle && <>
+    {vehicle && activePickup && <p role="alert" className="font-semibold text-amber-700">{pickupParkingNotice(activePickup, locations)}</p>}
+    {vehicle && !activePickup && <>
       <p>Where should {vehicle.plateNumber} be parked?</p>
       <div className="flex gap-2">
         {(['Reception for Delivery', 'Workshop Bay'] as const).map(option => <Button key={option} size="sm" disabled={busy}

@@ -1,3 +1,5 @@
+import { useActivePickup } from '@/hooks/use-active-pickup';
+import { pickupParkingNotice } from '@/lib/pickup-request-data';
 import { TaskManagement } from '@/components/task-management';
 import { ApplicationLiveFlow } from '@/components/application-live-flow';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react';
@@ -161,14 +163,16 @@ type ParkingAppProps = {
   localGuest?: boolean;
   workspaceGuest?: boolean;
   onGuestRefresh?: () => void;
+  initialPickupRequestId?: string;
+  onPickupWorkspaceRefresh?: (id: string) => void;
   onExit: () => void;
 };
 
-export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = false, workspaceGuest = false, onGuestRefresh, onExit }: ParkingAppProps) {
+export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = false, workspaceGuest = false, onGuestRefresh, initialPickupRequestId, onPickupWorkspaceRefresh, onExit }: ParkingAppProps) {
   const { data: user } = useUser();
   const { soundEnabled, toggleSound, playSound } = useNotificationSound(user?.objectId ?? user?.userPrincipalName);
   const notificationClickTimer = useRef<number | undefined>(undefined);
-  const [screen, setScreen] = useState<Screen>('dashboard');
+  const [screen, setScreen] = useState<Screen>(initialPickupRequestId ? 'pickup-requests' : 'dashboard');
   const [manageTasks, setManageTasks] = useState(false);
   const [isReorderingMobileNavigation, setIsReorderingMobileNavigation] = useState(false);
   const [mobileNavigationOrder, setMobileNavigationOrder] = useState<Screen[]>(() => {
@@ -198,7 +202,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const [dashboardVehicleId, setDashboardVehicleId] = useState<string>();
   const [pullDistance, setPullDistance] = useState(0);
   const pullStartY = useRef<number | undefined>(undefined);
-  const { sync, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview);
+  const { sync, getRevision, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview);
   const isOnline = syncState !== 'offline';
   const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline · pending' : syncState === 'error' ? 'Sync needs attention' : pendingChanges ? 'Changes pending' : 'Cloud synced';
 
@@ -485,8 +489,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   };
   const finishPickupParking = (vehicleId: string, from: string, to: string, centreBayVehicleId?: string) => {
     const vehicle = activeVehicles.find(item => item.id === vehicleId);
-    if (!vehicle || vehicle.currentLocationId !== from) {
-      toast.error('Vehicle location has changed. Refresh before completing.');
+    if (!vehicle || parkingRecordKey(vehicle.currentLocationId) !== parkingRecordKey(from)) {
+      toast.error('The vehicle location has changed. Check its current location before finishing.');
       return false;
     }
     if (centreBayVehicleId) {
@@ -664,7 +668,12 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           }}>Refresh live data</Button>
         </div>}
         <motion.div key={screen} initial={{ opacity: 0, y: 12, scale: 0.995 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] as const }} className="mx-auto max-w-[1600px] p-4 md:p-6 xl:p-8">
-          {screen === 'pickup-requests' && <PickupRequestManagement readOnly={guestPreview} vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} onFinishParking={finishPickupParking} />}
+          {screen === 'pickup-requests' && <PickupRequestManagement getWorkspaceRevision={getRevision} initialRequestId={initialPickupRequestId} onRefreshWorkspace={id => {
+            if (pendingChanges || syncState === 'syncing' || syncState === 'error') {
+              if (!window.confirm('Reload the workspace and discard unsynced changes on this device?')) return;
+            }
+            onPickupWorkspaceRefresh?.(id);
+          }} readOnly={guestPreview} vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} onFinishParking={finishPickupParking} />}
           {screen === 'road-tests' && canAccessRoadTests && <RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} actorRole={role} canCreateAssignment canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} isAdministrator={isAdministrator} initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} /> }
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
           {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage} canEditVehicle={canEditVehicle} canTransferVehicle={canTransferVehicle} canAssignVehicle={canAssignVehicle} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} onContactVehicle={() => toast.info('Team sharing requires a configured cloud service.')} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} onAssignSelectedBay={(selectedBayId: string, vehicleForm: VehicleFormData) => { setBayId(selectedBayId); setZone(locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(selectedBayId))?.zone ?? zone); setAssignmentVehicle(vehicleForm); }} assignSelectedBay={(selectedBayId?: string) => handleAssign(selectedBayId)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
@@ -1686,6 +1695,7 @@ function SettingsScreen({ users, connected }: { users: OnlineUser[]; connected: 
 }
 
 function SearchScreen({ archiveOnSearchMiss, query, setQuery, result, locationLabel, locations, vehicles, movements, onLocateVehicle }: { archiveOnSearchMiss: boolean; query: string; setQuery: (value: string) => void; result?: Vehicle; locationLabel: (id?: string) => string; locations: ParkingLocation[]; vehicles: Vehicle[]; movements: Movement[]; onLocateVehicle: (vehicleId: string) => void }) {
+  const pickup = useActivePickup(result?.id);
   const [archiveQuery, setArchiveQuery] = useState('');
   const current = locations.find((item: ParkingLocation) => item.id === result?.currentLocationId);
   const roadTest = result ? getVehicleRoadTest(result.id) : undefined;
@@ -1726,6 +1736,7 @@ function SearchScreen({ archiveOnSearchMiss, query, setQuery, result, locationLa
             <CardDescription>{result.brand} {result.model} · {result.color}</CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-4 text-sm">
+            {pickup && <p role="alert" className="col-span-2 font-semibold text-amber-700">{pickupParkingNotice(pickup, locations)}</p>}
             <Info label="VIN" value={result.vin} /><Info label="Customer" value={result.customerName} />
             <div className="space-y-1"><p className="text-muted-foreground">Current bay</p><button type="button" disabled={!canLocateResult} onClick={() => onLocateVehicle(result.id)} className="font-semibold text-primary underline-offset-4 hover:underline disabled:cursor-default disabled:text-foreground disabled:no-underline">{isOut ? 'Out for road test' : result.currentLocationId ? locationLabel(result.currentLocationId) : result.status === 'Released' ? 'Released' : 'Unassigned Bay'}</button></div>
             <Info label="Zone" value={current?.zone} /><Info label="Road test status" value={roadTest?.status ?? 'No active road test'} /><Info label="Job card" value={roadTest?.jobCardNumber} /><Info label="Road tester" value={roadTest?.assignedTo} /><Info label="Assigned by" value={result.assignedBy} />
