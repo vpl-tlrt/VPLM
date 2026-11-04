@@ -24,6 +24,7 @@ type Pickup = {
 };
 type WorkspaceUser = { id: string; name: string; loginId: string; role: string };
 type Props = {
+  readOnly?: boolean;
   vehicles: Vehicle[]; locations: ParkingLocation[]; actor: string; userId: string;
   isAdministrator: boolean; canViewFullHistory: boolean; onClose: () => void;
   onFinishParking: (vehicleId: string, from: string, to: string, centreBayVehicleId?: string) => boolean;
@@ -38,7 +39,7 @@ const matchesDestination = (location: ParkingLocation, destination: Destination)
   : ['A', 'B', 'C'].includes(location.zone);
 const originType = (location: ParkingLocation | undefined) => /reception/i.test(location?.zone ?? '') ? 'Reception' : /workshop|\bbay\b|\bbp[123]\b/i.test(location?.zone ?? '') ? 'Workshop' : 'Other';
 
-export function PickupRequestManagement({ vehicles, locations, actor, userId, isAdministrator, canViewFullHistory, onClose, onFinishParking }: Props) {
+export function PickupRequestManagement({ readOnly = false, vehicles, locations, actor, userId, isAdministrator, canViewFullHistory, onClose, onFinishParking }: Props) {
   const [requests, setRequests] = useState<Pickup[]>([]);
   const [users, setUsers] = useState<WorkspaceUser[]>([]);
   const [query, setQuery] = useState('');
@@ -166,7 +167,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
     return [...byUser.values()].sort((a, b) => a.userName.localeCompare(b.userName));
   }, [canViewFullHistory, dateFrom, dateTo, requests, userFilter, users]);
   const action = async (status: Status) => {
-    if (!opened || !supabase || busy) return;
+    if (readOnly || !opened || !supabase || busy) return;
     if (status === 'Cancelled' && !isAdministrator && opened.requested_by_id !== userId) {
       return toast.error('Only an Administrator or the person who requested this pickup can cancel it.');
     }
@@ -202,7 +203,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
     setOpened(null); setFinalBay(''); void refresh();
   };
   const submit = async () => {
-    if (!supabase || !selectedVehicle || busy) return;
+    if (readOnly || !supabase || !selectedVehicle || busy) return;
     if (destination === 'Workshop Bay' && !workshopBay) return toast.error('Select a workshop bay.');
     if (!selectedVehicle.currentLocationId) return toast.error('Vehicle has no recorded parking location.');
     if (requests.some(item => item.vehicle_id === selectedVehicle.id && active(item.status))) return toast.error('An active pickup already exists for this vehicle.');
@@ -238,7 +239,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4">{counters.map(counter =>
       <Card key={counter.title}><CardContent className="p-4"><p className="text-sm text-muted-foreground">{counter.title} requests</p><strong className="text-3xl">{counter.count}</strong></CardContent></Card>
     )}</div>
-    <Card><CardHeader><CardTitle>New Pickup Request</CardTitle></CardHeader><CardContent className="space-y-3">
+    {!readOnly && <Card><CardHeader><CardTitle>New Pickup Request</CardTitle></CardHeader><CardContent className="space-y-3">
       <Input placeholder="Search vehicle number or VIN" value={query} onChange={event => setQuery(event.target.value)} aria-label="Search vehicle number or VIN"/>
       {query.trim() && <div className="grid max-h-60 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">{matching.map(vehicle =>
         <button key={vehicle.id} type="button" className={`rounded-xl border p-3 text-left hover:border-primary ${selectedVehicle?.id === vehicle.id ? 'border-primary bg-primary/10' : ''}`} onClick={() => setSelectedVehicle(vehicle)}>
@@ -259,7 +260,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
         </Select>
         <Button onClick={() => void submit()} disabled={busy || !supabase}>Submit Request</Button>
       </div>}
-    </CardContent></Card>
+    </CardContent></Card>}
     <Card><CardHeader><CardTitle>Task filters</CardTitle><CardDescription>{canViewFullHistory ? 'Filter pickup activity by date and user.' : 'Today’s requests and activity are shown; open requests remain visible until completed or cancelled.'}</CardDescription></CardHeader><CardContent className="grid gap-3 lg:grid-cols-4">
       <div className="grid gap-3">
         {([{ value: 'mine', label: '1 My Task' }, { value: 'all', label: '2 All Task' }] as const).map(option =>
@@ -295,7 +296,7 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
           <p>Requested for: {opened.destination_type}{opened.requested_bay_id ? ` · ${label(locationById(opened.requested_bay_id) ?? { zone: '', bayNumber: opened.requested_bay_id } as ParkingLocation)}` : ''}</p>
           <p>Requested by: {opened.requested_by}</p>{opened.accepted_by && <p>Accepted by: {opened.accepted_by}</p>}
           <p>Assigned to: {opened.assigned_to ?? 'Any driver'}</p>
-          {opened.status === 'In Transit' && <>
+          {!readOnly && opened.status === 'In Transit' && <>
             <Select value={otherBay ? 'other' : finalBay} onValueChange={value => { setOtherBay(value === 'other'); setBayNumber(''); setFinalBay(value === 'other' ? '' : value); }}><SelectTrigger><SelectValue placeholder="Where did you park the vehicle?"/></SelectTrigger><SelectContent>{finalLocations.map(location => <SelectItem key={location.id} value={location.id}>{label(location)}</SelectItem>)}{opened.destination_type === 'Workshop Bay' && <SelectItem value="other">Other · Enter Bay Number</SelectItem>}</SelectContent></Select>
             {otherBay && <div className="space-y-2">
               <Input aria-label="Enter Bay Number" placeholder="Enter Bay Number" inputMode="numeric" value={bayNumber} onChange={event => {
@@ -321,9 +322,9 @@ export function PickupRequestManagement({ vehicles, locations, actor, userId, is
           </>}
         </div>}
         <DialogFooter>
-          {opened?.status === 'Requested' && canCancel(opened) && <Button variant="destructive" disabled={busy} onClick={() => void action('Cancelled')}>Cancel Request</Button>}
-          {opened?.status === 'Requested' && canAccept(opened) && <Button disabled={busy} onClick={() => void action('In Transit')}>Accept</Button>}
-          {opened?.status === 'In Transit' && <div className="grid w-full gap-2">
+          {!readOnly && opened?.status === 'Requested' && canCancel(opened) && <Button variant="destructive" disabled={busy} onClick={() => void action('Cancelled')}>Cancel Request</Button>}
+          {!readOnly && opened?.status === 'Requested' && canAccept(opened) && <Button disabled={busy} onClick={() => void action('In Transit')}>Accept</Button>}
+          {!readOnly && opened?.status === 'In Transit' && <div className="grid w-full gap-2">
             {completionBlock && <p id="pickup-completion-status" className="text-sm text-muted-foreground">{completionBlock}</p>}
             <Button disabled={busy || !supabase || Boolean(completionBlock)} aria-describedby={completionBlock ? 'pickup-completion-status' : undefined}
               onClick={() => void action('Completed')}>Finish and Complete Parking</Button>

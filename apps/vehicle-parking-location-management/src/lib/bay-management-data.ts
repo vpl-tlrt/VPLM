@@ -44,7 +44,7 @@ export const emptyBayManagementState: BayManagementState = { reservations: [], m
 
 export const loadBayManagementState = (): BayManagementState => {
   try {
-    const value = window.localStorage.getItem(STORAGE_KEY);
+    const value = workspaceDataStorage().getItem(STORAGE_KEY);
     return value ? { ...emptyBayManagementState, ...(JSON.parse(value) as BayManagementState) } : emptyBayManagementState;
   } catch {
     return emptyBayManagementState;
@@ -53,9 +53,9 @@ export const loadBayManagementState = (): BayManagementState => {
 
 export const saveBayManagementState = (state: BayManagementState): void => {
   const serialized = JSON.stringify(state);
-  const changed = window.localStorage.getItem(STORAGE_KEY) !== serialized;
-  window.localStorage.setItem(STORAGE_KEY, serialized);
+  const changed = workspaceDataStorage().getItem(STORAGE_KEY) !== serialized;
+  workspaceDataStorage().setItem(STORAGE_KEY, serialized);
   if (changed) notifyWorkspaceDataChanged();
 };
 import { notifyWorkspaceDataChanged } from '@/lib/workspace-sync-events';
-import { appStorageKey } from '@/lib/local-storage-scope';
+import { appStorageKey, workspaceDataStorage } from '@/lib/local-storage-scope';

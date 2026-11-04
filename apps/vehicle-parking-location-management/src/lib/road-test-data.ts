@@ -1,6 +1,6 @@
 import type { ParkingLocation, Vehicle } from '@/lib/parking-data';
 import { notifyWorkspaceDataChanged } from '@/lib/workspace-sync-events';
-import { appStorageKey } from '@/lib/local-storage-scope';
+import { appStorageKey, workspaceDataStorage } from '@/lib/local-storage-scope';
 
 export type RoadTestStatus = 'Assigned' | 'In Road Test' | 'Completed' | 'Cancelled';
 export type RoadTestResult = 'Pass' | 'Fail';
@@ -76,7 +76,7 @@ const fallbackNotifications: RoadTestNotification[] = fallbackTests.map((test: R
 
 function load<T>(key: string, fallback: T): T {
   try {
-    const value = window.localStorage.getItem(key);
+    const value = workspaceDataStorage().getItem(key);
     return value ? JSON.parse(value) as T : fallback;
   } catch {
     return fallback;
@@ -91,8 +91,8 @@ export const saveRoadTestData = (tests: RoadTestRecord[], audit: RoadTestAuditEn
   let changed = false;
   for (const [key, value] of entries) {
     const serialized = JSON.stringify(value);
-    changed ||= window.localStorage.getItem(key) !== serialized;
-    window.localStorage.setItem(key, serialized);
+    changed ||= workspaceDataStorage().getItem(key) !== serialized;
+    workspaceDataStorage().setItem(key, serialized);
   }
   if (changed) notifyWorkspaceDataChanged();
 };
