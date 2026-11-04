@@ -1,3 +1,5 @@
+import { TaskManagement } from '@/components/task-management';
+import { ApplicationLiveFlow } from '@/components/application-live-flow';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { format } from 'date-fns';
 import { motion } from 'motion/react';
@@ -165,6 +167,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const { soundEnabled, toggleSound, playSound } = useNotificationSound(user?.objectId ?? user?.userPrincipalName);
   const notificationClickTimer = useRef<number | undefined>(undefined);
   const [screen, setScreen] = useState<Screen>('dashboard');
+  const [manageTasks, setManageTasks] = useState(false);
   const [isReorderingMobileNavigation, setIsReorderingMobileNavigation] = useState(false);
   const [mobileNavigationOrder, setMobileNavigationOrder] = useState<Screen[]>(() => {
     try {
@@ -662,7 +665,12 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           {screen === 'transfer' && <Transfer vehicles={vehicles} locations={locations} movements={movements} selectedVehicleId={selectedVehicleId} setSelectedVehicleId={setSelectedVehicleId} selectedVehicle={selectedVehicle} newLocationId={newLocationId} setNewLocationId={setNewLocationId} notes={notes} setNotes={setNotes} handleTransfer={handleTransfer} locationLabel={locationLabel} canAcceptContainer={containerCanAccept} />}
           {screen === 'history' && <HistoryScreen movements={movements} auditEvents={auditEvents} vehicles={vehicles} historyFilter={historyFilter} setHistoryFilter={setHistoryFilter} locationLabel={locationLabel} canRecoverDeliveredVehicle={canRecoverDeliveredVehicle} onRecoverDeliveredVehicle={recoverDeliveredVehicle} />}
           {screen === 'reservations' && <ReservationsScreen reservations={reservations} vehicles={vehicles} locations={locations} selectedVehicleId={selectedVehicleId} setSelectedVehicleId={setSelectedVehicleId} newLocationId={newLocationId} setNewLocationId={setNewLocationId} handleReserve={handleReserve} cancel={(id: string) => { const reservation = reservations.find((item: Reservation) => item.id === id); if (!reservation) return; setReservations((current: Reservation[]) => current.map((item: Reservation) => item.id === id ? { ...item, status: 'Cancelled' } : item)); logAudit('Cancel', 'Reservation', reservation.reservationId); toast.success('Reservation cancelled.'); }} locationLabel={locationLabel} />}
-          {screen === 'management' && canManage && <ManagementScreen role={role} locations={locations} setLocations={setLocations} vehicles={vehicles} setVehicles={setVehicles} movements={movements} auditEvents={auditEvents} setAuditEvents={setAuditEvents} logAudit={logAudit} actorId={queueOwnerId} garageLayout={garageLayout} setGarageLayout={setGarageLayout} />}
+          {screen === 'management' && canManage && (manageTasks
+            ? <TaskManagement actor={actor} vehicles={vehicles} locations={locations} reservations={reservations}
+              setVehicles={setVehicles} setLocations={setLocations} setReservations={setReservations} logAudit={logAudit} onClose={() => setManageTasks(false)} />
+            : <div className="space-y-4"><Button variant="outline" onClick={() => setManageTasks(true)}>Manage tasks</Button>
+              <ManagementScreen role={role} locations={locations} setLocations={setLocations} vehicles={vehicles} setVehicles={setVehicles} movements={movements} auditEvents={auditEvents} setAuditEvents={setAuditEvents} logAudit={logAudit} actorId={queueOwnerId} garageLayout={garageLayout} setGarageLayout={setGarageLayout} />
+            </div>)}
           {screen === 'settings' && isAdministrator && <SettingsScreen users={onlineUsers} connected={presenceConnected} />}
           {screen === 'backup-playback' && isAdministrator && <BackupPlayback />}
           {screen === 'profile' && <Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />}
@@ -1653,8 +1661,11 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
 }
 
 function SettingsScreen({ users, connected }: { users: OnlineUser[]; connected: boolean }) {
+  const [showFlow, setShowFlow] = useState(false);
   return <div className="mx-auto max-w-6xl space-y-5">
     <div><p className="technical-label">Administrator only</p><h2 className="text-2xl font-black">System settings</h2><p className="text-muted-foreground">Live user monitoring</p></div>
+    <Button variant="outline" onClick={() => setShowFlow(value => !value)}>{showFlow ? 'Close live flow' : 'View live application flow'}</Button>
+    {showFlow && <ApplicationLiveFlow />}
     <Card>
       <CardHeader><CardTitle>Currently online users ({users.length})</CardTitle><CardDescription>{connected ? 'Live connections reported by Supabase Presence. Multiple tabs for one account count as one user.' : 'Presence connection unavailable. Online count may be incomplete.'}</CardDescription></CardHeader>
       <CardContent className="space-y-2">

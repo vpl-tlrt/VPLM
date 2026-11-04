@@ -58,6 +58,32 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const changed = (before: string | null | undefined, after: string | null | undefined) =>
   (before ?? null) !== (after ?? null);
+const recordsById = (value: unknown): Map<string, Record<string, unknown>> => {
+  if (!Array.isArray(value)) throw new Error('Invalid workspace record list.');
+  return new Map(value.map(item => {
+    if (!isRecord(item) || typeof item.id !== 'string') throw new Error('Invalid workspace record.');
+    return [item.id, item];
+  }));
+};
+
+const canChangeRoadTests = (previous: string | null | undefined, next: string | null | undefined) => {
+  const oldRecords = recordsById(previous ? JSON.parse(previous) : []);
+  const newRecords = recordsById(next ? JSON.parse(next) : []);
+  for (const [id, old] of oldRecords) {
+    const updated = newRecords.get(id);
+    if (!updated) return false;
+    if (JSON.stringify(old) === JSON.stringify(updated) || old.status === 'Assigned') continue;
+    if (old.status !== 'In Road Test' || !['Completed', 'Cancelled'].includes(String(updated.status))) return false;
+    const allowed = new Set(['status', 'finishTimestamp', 'finishedBy', 'odometerEnd', 'durationMinutes', 'finishNotes',
+      'finalLocationId', 'result', 'findings', 'recommendation', 'furtherActionRequired', 'approved', 'approvedBy',
+      'approvalTimestamp', 'immutable', 'cancellationTimestamp', 'cancelledBy', 'cancellationReason']);
+    for (const key of new Set([...Object.keys(old), ...Object.keys(updated)])) {
+      if (!allowed.has(key) && JSON.stringify(old[key]) !== JSON.stringify(updated[key])) return false;
+    }
+  }
+  return true;
+};
+
 const canSave = (role: Role, before: Snapshot | null, after: Snapshot): boolean => {
   const changedKeys = snapshotKeys.filter((key) => changed(before?.[key], after[key]));
   const restrictedRoadTests = ['vplm-road-tests-v2', 'vplm-road-test-audit-v2', 'vplm-road-test-notifications-v2'];
@@ -65,14 +91,32 @@ const canSave = (role: Role, before: Snapshot | null, after: Snapshot): boolean 
     if (changedKeys.some((key) => restrictedRoadTests.includes(key))) return false;
   }
   if (role !== 'Administrator' && role !== 'Supervisor') {
+    if (changedKeys.includes('vplm-road-tests-v2')) {
+      try {
+        if (!canChangeRoadTests(before?.['vplm-road-tests-v2'], after['vplm-road-tests-v2'])) return false;
+      } catch { return false; }
+    }
     if (changedKeys.includes('vplm-bay-management-v1') || changedKeys.includes('vplm-garage-layout-v1')) return false;
     const previousState = before?.['vehicle-parking-browser-state-v2'];
     const nextState = after['vehicle-parking-browser-state-v2'];
+    if (previousState && !nextState) return false;
     if (changed(previousState, nextState) && nextState) {
       try {
         const oldReservations = previousState ? JSON.parse(previousState).reservations : null;
         const newReservations = JSON.parse(nextState).reservations;
         if (JSON.stringify(oldReservations) !== JSON.stringify(newReservations)) return false;
+        const oldVehicles = recordsById(previousState ? (JSON.parse(previousState).vehicles ?? []) : []);
+        const newVehicles = recordsById(JSON.parse(nextState).vehicles ?? []);
+        for (const [id, vehicle] of oldVehicles) {
+          if (vehicle.status !== 'Delivered') continue;
+          const updated = newVehicles.get(id);
+          if (JSON.stringify(vehicle) === JSON.stringify(updated)) continue;
+          const changedKeys = new Set([...Object.keys(vehicle), ...Object.keys(updated ?? {})]
+            .filter(key => JSON.stringify(vehicle[key]) !== JSON.stringify(updated?.[key])));
+          for (const photoKey of ['photoUrls', 'photoUploadedAt']) changedKeys.delete(photoKey);
+          if (!changedKeys.size && updated) continue;
+          if (role !== 'TechnicalLeader' || updated?.status !== 'Released' || updated.currentLocationId) return false;
+        }
       } catch {
         return false;
       }
