@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { applyWorkspaceSnapshot, clearWorkspaceSnapshot, readWorkspaceSnapshot } from '@/lib/workspace-storage';
 import { loadOfflineState } from '@/lib/offline-store';
+import { listPendingSyncMutations } from '@/lib/sync-queue';
 import { loadWorkspace } from '@/lib/workspace-cloud';
 import { isSupabaseConfigured, supabase, supabaseConfigurationError } from '@/lib/supabase';
 import { queryClient } from '@/lib/query-client';
@@ -366,7 +367,7 @@ export default function HomePage() {
       if (workspaceUserId) {
         // Signing out must not erase the only copy of pending assignments.
         let recoverySaved = true;
-        if (loadOfflineState()?.pendingChanges) {
+        if (loadOfflineState()?.pendingChanges || listPendingSyncMutations(workspaceUserId).length) {
           try {
             const recoveryKey = `vplm-unsynced-recovery:${workspaceUserId}`;
             if (!window.localStorage.getItem(recoveryKey)) {
@@ -390,16 +391,24 @@ export default function HomePage() {
       // A mobile device can have assignments not yet uploaded. Preserve that
       // exact local snapshot before replacing the displayed workspace with cloud data.
       // Do not upload it blindly: another user may have edited the same vehicles.
-      if (!isGuest && snapshot && loadOfflineState()?.pendingChanges) {
-        try {
-          const localSnapshot = readWorkspaceSnapshot();
-          if (localSnapshot['vehicle-parking-browser-state-v2'] !== snapshot['vehicle-parking-browser-state-v2']) {
+      if (!isGuest && (loadOfflineState()?.pendingChanges || listPendingSyncMutations(session.user.id).length)) {
+        const localSnapshot = readWorkspaceSnapshot();
+        if (localSnapshot['vehicle-parking-browser-state-v2'] !== snapshot?.['vehicle-parking-browser-state-v2']) {
+          try {
             const recoveryKey = `vplm-unsynced-recovery:${session.user.id}`;
             if (!window.localStorage.getItem(recoveryKey)) {
               window.localStorage.setItem(recoveryKey, JSON.stringify(localSnapshot));
             }
+            // The session hook must not re-upload the newer cloud snapshot as
+            // if it contained these preserved offline operations.
+            window.localStorage.setItem(`vplm-preserved-unsynced:${session.user.id}`, '1');
+          } catch {
+            setWorkspaceError('This device has pending vehicle data, but browser storage could not preserve a recovery copy. Export the local workspace before reloading.');
+            setWorkspaceUserId(session.user.id);
+            setWorkspaceLoaded(true);
+            return;
           }
-        } catch { /* Keep existing local storage untouched if recovery backup is unavailable. */ }
+        }
       }
       setGuestWorkspace(isGuest);
       applyWorkspaceSnapshot(snapshot ?? {});
@@ -455,6 +464,14 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             {workspaceError.toLowerCase().includes('member') && <RequestWorkspaceAccess userId={session.user.id} />}
+            {workspaceError.includes('pending vehicle data') && <Button variant="outline" onClick={() => {
+              const url = URL.createObjectURL(new Blob([JSON.stringify(readWorkspaceSnapshot())], { type: 'application/json' }));
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = 'vplm-unsynced-local-workspace.json';
+              link.click();
+              URL.revokeObjectURL(url);
+            }}>Download unsynced local workspace</Button>}
             <Button variant="outline" onClick={() => { void client.auth.signOut(); }}>Sign out</Button>
           </CardContent>
         </Card>
