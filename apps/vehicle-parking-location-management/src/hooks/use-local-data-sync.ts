@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import { mergeWorkspaceChanges } from '@/lib/workspace-recovery';
 import { loadWorkspace, saveWorkspace, WorkspaceConflictError } from '@/lib/workspace-cloud';
 import { supabase } from '@/lib/supabase';
-import { readWorkspaceSnapshot } from '@/lib/workspace-storage';
+import { applyWorkspaceSnapshot, readWorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
 
 const RETRY_BASE_MS = 1500;
@@ -105,8 +105,21 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
           if (JSON.stringify(readWorkspaceSnapshot()) !== JSON.stringify(draft)) {
             throw new Error('More local changes arrived during recovery.');
           }
+          // The cloud accepted a merged snapshot. Apply it locally and rehydrate
+          // the mounted workspace without a full page or screen reload.
+          applyWorkspaceSnapshot(merged);
           revision.current = nextRevision;
-          toast.success('Non-conflicting workspace changes synced. Reloading the current workspace.');
+          baseline.current = merged;
+          retryAttempt.current = 0;
+          if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
+          retryTimer.current = undefined;
+          if (recoveryKey && !conflictDetail) {
+            try { window.localStorage.removeItem(recoveryKey); } catch { /* Synced data is already in the cloud. */ }
+          }
+          setLastSyncAt(new Date().toISOString());
+          setPendingCount(0);
+          setState('idle');
+          toast.success('Non-conflicting workspace changes synced without reloading.');
           onRecovered();
           return true;
         } catch (mergeError) {
@@ -166,14 +179,17 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       if (localOnly) return;
       if (syncBlocked.current || !navigator.onLine) saveRecovery(readWorkspaceSnapshot());
       if (syncBlocked.current) return;
-      if (timer.current !== undefined) window.clearTimeout(timer.current);
       if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
       retryTimer.current = undefined;
       setPendingCount(1);
+      if (inFlight.current) { rerun.current = true; return; }
+      // Throttle rather than repeatedly resetting the timer: frequent edits must
+      // not indefinitely postpone the upload.
+      if (timer.current !== undefined) return;
       timer.current = window.setTimeout(() => {
         timer.current = undefined;
         void sync(false);
-      }, 500);
+      }, 180);
     };
     window.addEventListener(WORKSPACE_DATA_CHANGED, scheduleSync);
     return () => {
