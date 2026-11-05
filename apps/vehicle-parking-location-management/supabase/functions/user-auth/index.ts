@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.118.0';
 
-type Role = 'Administrator' | 'Supervisor' | 'TechnicalLeader' | 'Operator' | 'Drivers' | 'Guest Users' | 'Others';
+type Role = 'Administrator' | 'Supervisor' | 'TechnicalLeader' | 'TechnicalAdvisor' | 'Operator' | 'Drivers' | 'Guest Users' | 'Others';
 type Database = {
   public: {
     Tables: {

@@ -163,7 +163,7 @@ export default function AiAssistant({
     return { registration: message.match(/[A-Z0-9-]*\d[A-Z0-9-]*/i)?.[0] };
   };
 
-  const ownRunningRoadTest = (vehicle: Vehicle) => role === 'TechnicalLeader' && canAccessRoadTests
+  const ownRunningRoadTest = (vehicle: Vehicle) => (role === 'TechnicalLeader' || role === 'TechnicalAdvisor') && canAccessRoadTests
     ? loadRoadTests().find(test => test.vehicleId === vehicle.id && test.status === 'In Road Test'
       && (test.startedById ? test.startedById === userId : test.startedBy?.trim().toLowerCase() === actor.trim().toLowerCase()))
     : undefined;
@@ -701,7 +701,7 @@ export default function AiAssistant({
 
             {roadTest && canAccessRoadTests && <AssistantRoadTest key={`${roadTest.type}:${roadTest.vehicleId ?? ''}:${roadTest.resumeId ?? ''}`} ref={roadTestChat}
               type={roadTest.type} initialVehicleId={roadTest.vehicleId} resumeId={roadTest.resumeId}
-              canCreate={role === 'TechnicalLeader'} findOwnRunningTest={ownRunningRoadTest} userId={userId} onMessage={addAssistantMessage} vehicles={vehicles} locations={locations}
+              canCreate={(role === 'TechnicalLeader' || role === 'TechnicalAdvisor')} findOwnRunningTest={ownRunningRoadTest} userId={userId} onMessage={addAssistantMessage} vehicles={vehicles} locations={locations}
               actor={actor} onLocationChange={onRoadTestLocationChange} onClose={message => {
                 setRoadTest(undefined);
                 if (message) addAssistantMessage(message);

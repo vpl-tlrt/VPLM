@@ -1,6 +1,6 @@
 create table if not exists public.workspace_members (
   user_id uuid primary key references auth.users (id) on delete cascade,
-  role text not null check (role in ('Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Technician', 'Guest Users', 'Others')),
+  role text not null check (role in ('Administrator', 'Supervisor', 'TechnicalLeader', 'TechnicalAdvisor', 'Operator', 'Drivers', 'Technician', 'Guest Users', 'Others')),
   login_id text,
   user_name text,
   mobile_number text,
@@ -16,7 +16,7 @@ alter table public.workspace_members
   drop constraint if exists workspace_members_role_check;
 alter table public.workspace_members
   add constraint workspace_members_role_check
-  check (role in ('Administrator', 'Supervisor', 'TechnicalLeader', 'Operator', 'Drivers', 'Technician', 'Guest Users', 'Others'));
+  check (role in ('Administrator', 'Supervisor', 'TechnicalLeader', 'TechnicalAdvisor', 'Operator', 'Drivers', 'Technician', 'Guest Users', 'Others'));
 
 create unique index if not exists workspace_members_login_id_unique
   on public.workspace_members (lower(login_id))

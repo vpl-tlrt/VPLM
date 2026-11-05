@@ -178,7 +178,7 @@ export function VehicleOverviewDialog(props: VehicleOverviewDialogProps) {
   };
   const profileFields: [string, string | undefined][] = [
     ['Registration', vehicle.plateNumber], ['Make / Brand', vehicle.brand], ['Model', vehicle.model], ['Color', vehicle.color],
-    ['VIN / Chassis', vehicle.vin], ['Customer', vehicle.customerName], ['Driver / Owner', vehicle.driverOwner],
+    ['VIN / Chassis', vehicle.vin], ['Driver / Owner', vehicle.driverOwner],
     ['Department', vehicle.department], ['X Parking', vehicle.xParking ?? 'No'],
     ['Status', vehicle.status], ['Operational status', vehicle.operationalStatus],
     ['Assigned bay', location ? `${location.zone}-${location.bayNumber}` : vehicle.status === 'Assigned' ? 'Unassigned Bay' : 'Unassigned'],
@@ -189,13 +189,13 @@ export function VehicleOverviewDialog(props: VehicleOverviewDialogProps) {
     ['Geofence', vehicle.geofenceStatus],
   ];
   if (vehicle.xParking === 'Yes') {
-    profileFields.splice(9, 0, ['In front of vehicle', vehicle.xParkingOccupantPlateNumber ? `${vehicle.xParkingOccupantPlateNumber} · ${vehicle.xParkingOccupantModel ?? 'Model not recorded'}` : 'Not recorded']);
+    profileFields.splice(8, 0, ['In front of vehicle', vehicle.xParkingOccupantPlateNumber ? `${vehicle.xParkingOccupantPlateNumber} · ${vehicle.xParkingOccupantModel ?? 'Model not recorded'}` : 'Not recorded']);
   }
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><CarFront /> {vehicle.plateNumber}</DialogTitle><DialogDescription>Complete vehicle profile, location, assignment, and movement record.</DialogDescription></DialogHeader>
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
       <div className="space-y-4">{!isLimitedProfile && <><div className="relative min-h-52 overflow-hidden rounded-2xl bg-muted">{vehicle.photoUrls[0] ? <img src={vehicle.photoUrls[0]} alt={`${vehicle.plateNumber} vehicle`} className="h-52 w-full object-cover" /> : <div className="grid h-52 place-items-center text-muted-foreground"><CarFront className="h-16 w-16" /></div>}<Badge className="absolute left-3 top-3">{vehicle.operationalStatus}</Badge></div>{interactive && <><input ref={photoRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={uploadPhoto} /><Button variant="outline" className="w-full" onClick={() => photoRef.current?.click()}><Camera /> Capture or upload photo</Button></>}</>}
         <Tabs defaultValue="profile"><TabsList className="w-full"><TabsTrigger value="profile">Profile</TabsTrigger><TabsTrigger value="history">Parking history</TabsTrigger><TabsTrigger value="gps">GPS map</TabsTrigger></TabsList>
-          <TabsContent value="profile" className="space-y-4">{isEditing && draft ? <div className="rounded-2xl border bg-card p-4 text-card-foreground"><VehicleFormFields value={draft} onChange={setDraft} idPrefix="profile" showXParking hiddenFields={isLimitedProfile ? ['brand', 'vin', 'department'] : []} allowXParking={vehicle.xParking === 'Yes' || supportsXParkingLocation(location)} /></div> : <div className="grid gap-3 sm:grid-cols-2">{profileFields.filter(([label]) => !isLimitedProfile || !['Make / Brand', 'VIN / Chassis', 'Department', 'Assigned on'].includes(label)).map(([label, value]) => <div key={label} className="rounded-lg bg-muted p-3"><p className="text-xs font-bold text-muted-foreground">{label}</p><p className="font-semibold text-foreground">{value || '—'}</p></div>)}</div>}</TabsContent>
+          <TabsContent value="profile" className="space-y-4">{isEditing && draft ? <div className="rounded-2xl border bg-card p-4 text-card-foreground"><VehicleFormFields value={draft} onChange={setDraft} idPrefix="profile" showXParking hiddenFields={isLimitedProfile ? ['brand', 'vin', 'department', 'customerName'] : ['customerName']} allowXParking={vehicle.xParking === 'Yes' || supportsXParkingLocation(location)} /></div> : <div className="grid gap-3 sm:grid-cols-2">{profileFields.filter(([label]) => !isLimitedProfile || !['Make / Brand', 'VIN / Chassis', 'Department', 'Assigned on'].includes(label)).map(([label, value]) => <div key={label} className="rounded-lg bg-muted p-3"><p className="text-xs font-bold text-muted-foreground">{label}</p><p className="font-semibold text-foreground">{value || '—'}</p></div>)}</div>}</TabsContent>
           <TabsContent value="history" className="space-y-2">{history.length ? history.map((item: Movement) => <div key={item.id} className="flex gap-3 border-b py-3"><History className="mt-1 h-4 w-4 shrink-0" /><div><p className="font-semibold">{item.movementType}: {locationLabel(item.fromLocationId, locations)} → {locationLabel(item.toLocationId, locations)}</p><p className="text-sm text-muted-foreground">{format(new Date(item.actionDateTime), 'dd MMM yyyy, HH:mm')} · {item.performedBy}</p>{item.notes && <p className="mt-1 text-sm">{item.notes}</p>}</div></div>) : <p className="py-4 text-sm text-muted-foreground">No movement history recorded.</p>}</TabsContent>
           <TabsContent value="gps"><div className="relative h-64 overflow-hidden rounded-2xl bg-muted"><div className="absolute inset-0 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px]" /><div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary p-3 text-primary-foreground shadow-xl"><MapPin /></div><div className="absolute bottom-3 left-3 rounded-lg bg-popover p-3 text-sm text-popover-foreground shadow"><strong>{vehicle.latitude?.toFixed(5) ?? 'GPS pending'}, {vehicle.longitude?.toFixed(5) ?? '—'}</strong><p>{vehicle.distanceToBayMeters ?? '—'} m from assigned bay · {vehicle.geofenceStatus}</p></div></div>{interactive && <Button className="mt-3 w-full" onClick={updateGps}><Navigation /> Update current location</Button>}</TabsContent>
         </Tabs>
@@ -210,12 +210,22 @@ export function VehicleOverviewDialog(props: VehicleOverviewDialogProps) {
           <Select value={effectiveTargetZone} onValueChange={(zone: string) => { setTargetZone(zone); setTargetBay('none'); }}>
             <SelectTrigger><SelectValue placeholder="Select destination zone" /></SelectTrigger><SelectContent><SelectItem value="none">Select destination zone</SelectItem>{availableZones.map((zone: string) => <SelectItem key={zone} value={zone}>{zone}</SelectItem>)}</SelectContent>
           </Select>
-          <Select value={targetBay} onValueChange={setTargetBay} disabled={effectiveTargetZone === 'none'}>
-            <SelectTrigger><SelectValue placeholder={targetType === 'xParking' ? 'Select X Parking space' : 'Select bay number'} /></SelectTrigger>
-            <SelectContent><SelectItem value="none">{targetType === 'xParking' ? 'Select X Parking space' : 'Select bay number'}</SelectItem>{zoneBays.filter((item: ParkingLocation) => item.id).map((item: ParkingLocation) => <SelectItem key={item.id} value={item.id}>{compactBayLabel(item)}</SelectItem>)}<SelectItem value="manual">Manual entry</SelectItem></SelectContent>
-          </Select>
-          {targetBay === 'manual' && <div className="space-y-1"><Input value={manualBay} onChange={(event) => setManualBay(event.target.value)} placeholder="Enter A1, B47, W1..." aria-label="Enter parking bay number" />{manualQuery && <p className="text-xs text-muted-foreground">{manualLocation ? `Selected: ${compactBayLabel(manualLocation)}` : 'No available bay matches this number.'}</p>}</div>}
-          <Button disabled={!interactive.canTransfer || targetBay === 'none'} onClick={() => { const destination = targetBay === 'manual' ? manualLocation?.id : targetBay; if (!destination) return toast.error('Enter an available bay number, such as A1, B47 or W1.'); interactive.onTransfer(vehicle.id, destination, targetType === 'xParking'); setTargetBay('none'); setManualBay(''); }}><Upload /> Transfer / assign bay</Button>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="min-w-0 space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Select bay
+                <Select value={targetBay} onValueChange={(value: string) => { setTargetBay(value); setManualBay(''); }} disabled={effectiveTargetZone === 'none'}>
+                  <SelectTrigger className="mt-1 w-full min-w-0"><SelectValue placeholder="Bay" /></SelectTrigger>
+                  <SelectContent><SelectItem value="none">Select bay</SelectItem>{zoneBays.filter((item: ParkingLocation) => item.id).map((item: ParkingLocation) => <SelectItem key={item.id} value={item.id}>{compactBayLabel(item)}</SelectItem>)}</SelectContent>
+                </Select>
+              </label>
+            </div>
+            <div className="min-w-0 space-y-1">
+              <label htmlFor="vehicle-manual-bay" className="text-xs font-medium text-muted-foreground">Manual bay</label>
+              <Input id="vehicle-manual-bay" className="mt-1 w-full min-w-0" value={manualBay} onChange={(event) => { setManualBay(event.target.value); setTargetBay('none'); }} placeholder="A1 / W1" autoCapitalize="characters" />
+            </div>
+          </div>
+          {manualQuery && <p role="status" className="text-xs text-muted-foreground">{manualLocation ? `Selected: ${compactBayLabel(manualLocation)}` : 'No available bay matches this number.'}</p>}
+          <Button disabled={!interactive.canTransfer || (targetBay === 'none' && !manualQuery)} onClick={() => { const destination = manualQuery ? manualLocation?.id : targetBay; if (!destination || destination === 'none') return toast.error('Enter an available bay number, such as A1, B47 or W1.'); interactive.onTransfer(vehicle.id, destination, targetType === 'xParking'); setTargetBay('none'); setManualBay(''); }}><Upload /> Transfer / assign bay</Button>
           <Button variant="outline" disabled={!interactive.canEdit} onClick={beginEdit}><Pencil /> Edit vehicle details</Button>
           <Button variant="outline" onClick={() => action('Checked In', 'Check-In')}>Check-In vehicle</Button>
           <Button variant="outline" disabled={vehicle.operationalStatus !== 'Washing' && !interactive.canTransfer} onClick={() => vehicle.operationalStatus === 'Washing' ? action('Parked', 'Washing Completed') : interactive.onStartWashing(vehicle.id)}><CarFront /> {vehicle.operationalStatus === 'Washing' ? 'Finish Washing' : 'Washing'}</Button>
