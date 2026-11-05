@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 type AccessRequest = { user_id: string; name: string; reason: string; status: string; assigned_role?: string };
-const roles = ['Operator', 'TechnicalLeader', 'Drivers', 'Technician', 'Guest Users'];
+const roles = ['Operator', 'TechnicalLeader', 'TechnicalAdvisor', 'Drivers', 'Technician', 'Guest Users'];
 
 export function RequestWorkspaceAccess({ userId }: { userId: string }) {
   const [request, setRequest] = useState<AccessRequest>();
