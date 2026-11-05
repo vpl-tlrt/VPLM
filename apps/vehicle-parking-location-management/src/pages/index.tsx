@@ -363,7 +363,20 @@ export default function HomePage() {
       setWorkspaceRevision(null);
       setWorkspaceUserId(undefined);
       setWorkspaceError('');
-      if (workspaceUserId) clearWorkspaceSnapshot();
+      if (workspaceUserId) {
+        // Signing out must not erase the only copy of pending assignments.
+        let recoverySaved = true;
+        if (loadOfflineState()?.pendingChanges) {
+          try {
+            const recoveryKey = `vplm-unsynced-recovery:${workspaceUserId}`;
+            if (!window.localStorage.getItem(recoveryKey)) {
+              window.localStorage.setItem(recoveryKey, JSON.stringify(readWorkspaceSnapshot()));
+            }
+          } catch { recoverySaved = false; }
+        }
+        // A full browser-storage quota must never turn sign-out into data loss.
+        if (recoverySaved) clearWorkspaceSnapshot();
+      }
       setGuestWorkspace(false);
       setWorkspaceGuest(false);
       setPickupToReopen(undefined);
