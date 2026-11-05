@@ -28,7 +28,7 @@ const RETRY_MAX_MS = 30_000;
 export function useLocalDataSync(initialRevision: number | null, localOnly = false, userId?: string, onRecovered?: () => void) {
   const [state, setState] = useState<'idle' | 'offline' | 'syncing' | 'error'>(() => localOnly || navigator.onLine ? 'idle' : 'offline');
   const [lastSyncAt, setLastSyncAt] = useState<string>();
-  const [pendingCount, setPendingCount] = useState(() => listPendingSyncMutations(userId).length);
+  const [pendingCount, setPendingCount] = useState(() => userId ? listPendingSyncMutations(userId).length : 0);
   const revision = useRef(initialRevision);
   const baseline = useRef<ReturnType<typeof readWorkspaceSnapshot> | null>(null);
   if (!baseline.current && !localOnly) baseline.current = readWorkspaceSnapshot();
@@ -273,7 +273,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   }, [localOnly, userId, refreshCloudView]);
   const getRevision = useCallback(() => revision.current, []);
   const downloadOperationJournal = () => {
-    const url = URL.createObjectURL(new Blob([exportSyncJournal()], { type: 'application/json' }));
+    const url = URL.createObjectURL(new Blob([exportSyncJournal(userId)], { type: 'application/json' }));
     const link = document.createElement('a');
     link.href = url;
     link.download = 'vplm-operation-journal.json';
