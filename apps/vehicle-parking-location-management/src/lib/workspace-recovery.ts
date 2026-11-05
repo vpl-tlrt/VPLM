@@ -9,6 +9,27 @@ const mergeValue = (base: unknown, local: unknown, cloud: unknown, label: string
   if (equal(cloud, base)) return local;
   throw new Error(label);
 };
+// Parking transitions are one logical transaction. Field merging is allowed for
+// independent profile edits, but never for two competing physical movements.
+const movementFields = new Set([
+  'status', 'currentLocationId', 'xParking', 'operationalStatus',
+  'assignedDate', 'assignedBy', 'checkInAt', 'checkOutAt',
+  'deliveredAt', 'deliveredBy', 'finalParkingBay',
+  'xParkingOccupantPlateNumber', 'xParkingOccupantModel',
+]);
+function mergeVehicleRecord(base: Item, local: Item, cloud: Item, label: string): Item {
+  const allKeys = [...new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(cloud)])];
+  const localMovement = allKeys.some(key => movementFields.has(key) && !equal(local[key], base[key]));
+  const cloudMovement = allKeys.some(key => movementFields.has(key) && !equal(cloud[key], base[key]));
+  if (localMovement && cloudMovement) throw new Error(`Concurrent vehicle movements: ${label}`);
+  const merged: Item = {};
+  for (const key of allKeys) {
+    const result = mergeValue(base[key], local[key], cloud[key], `${label} / ${key}`);
+    if (result !== undefined) merged[key] = result;
+  }
+  return merged;
+}
+
 function mergeRows(base: unknown, local: unknown, cloud: unknown, label: string) {
   const records = (value: unknown) => {
     if (!Array.isArray(value) || value.some(item => !item || typeof item.id !== 'string')) throw new Error(label);
@@ -19,7 +40,12 @@ function mergeRows(base: unknown, local: unknown, cloud: unknown, label: string)
     // Local history trimming is not an operational deletion.
     if (['movements', 'auditEvents', 'vplm-road-test-audit-v2', 'vplm-road-test-notifications-v2'].includes(label)
       && before.has(id) && !edited.has(id)) return latest.has(id) ? [latest.get(id)] : [];
-    const row = mergeValue(before.get(id), edited.get(id), latest.get(id), `${label} / ${id}`);
+    const old = before.get(id), localRecord = edited.get(id), cloudRecord = latest.get(id);
+    const canMergeFields = label === 'vehicles' && old && localRecord && cloudRecord
+      && !equal(localRecord, old) && !equal(cloudRecord, old) && !equal(localRecord, cloudRecord);
+    const row = canMergeFields
+      ? mergeVehicleRecord(old, localRecord, cloudRecord, `${label} / ${id}`)
+      : mergeValue(old, localRecord, cloudRecord, `${label} / ${id}`);
     return row ? [row] : [];
   });
 }
