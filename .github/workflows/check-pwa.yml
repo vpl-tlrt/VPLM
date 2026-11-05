@@ -1,0 +1,101 @@
+name: Check web app installation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/check-pwa.yml']
+
+permissions:
+  contents: read
+  pages: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect live installation requirements
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, struct, sys
+          from html.parser import HTMLParser
+          from urllib.parse import urljoin, urlparse
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+
+          class Links(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.manifest = None
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs)
+                  if tag == "link" and "manifest" in attrs.get("rel", "").split():
+                      self.manifest = attrs.get("href")
+
+          class Redirects(__import__("urllib.request", fromlist=["HTTPRedirectHandler"]).HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  print(f"Redirect: {code} {req.full_url} -> {newurl}")
+                  return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+          from urllib.request import build_opener
+          opener = build_opener(Redirects())
+          def get(url):
+              with opener.open(Request(url, headers={"User-Agent": "VPLM-install-check", "Cache-Control": "no-cache"}), timeout=25) as response:
+                  body = response.read()
+                  print(f"GET {url}: {response.status}; final={response.url}; type={response.headers.get('Content-Type')}; bytes={len(body)}")
+                  return response.url, body
+
+          req = Request(f"https://api.github.com/repos/{os.environ['REPOSITORY']}/pages",
+                        headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                                 "Accept": "application/vnd.github+json",
+                                 "X-GitHub-Api-Version": "2022-11-28"})
+          try:
+              with urlopen(req, timeout=25) as response:
+                  settings = json.load(response)
+              print("Pages settings:", json.dumps({key: settings.get(key) for key in
+                    ["html_url", "cname", "https_enforced", "build_type", "https_certificate"]}))
+          except Exception as exc:
+              print("Pages settings unavailable:", exc)
+
+          failures = []
+          for url in ["https://vpl-tlrt.github.io/VPLM/", "https://vplm.qd.je/"]:
+              try:
+                  final, html = get(url)
+                  if urlparse(final).scheme != "https":
+                      raise ValueError("The final page uses HTTP, which prevents web app installation.")
+                  parser = Links()
+                  parser.feed(html.decode("utf-8"))
+                  if not parser.manifest:
+                      title = re.search(r"<title>(.*?)</title>", html.decode("utf-8"), re.S)
+                      raise ValueError("No manifest link on live page. Title: " + (title.group(1) if title else "(none)"))
+                  manifest_url, raw = get(urljoin(final, parser.manifest))
+                  manifest = json.loads(raw)
+                  print("Manifest:", json.dumps(manifest))
+                  if not (manifest.get("name") or manifest.get("short_name")):
+                      raise ValueError("Missing app name.")
+                  if manifest.get("display") not in ("standalone", "fullscreen", "minimal-ui", "window-controls-overlay"):
+                      raise ValueError("Missing standalone display mode.")
+                  sizes = set()
+                  for icon in manifest.get("icons", []):
+                      icon_url, image = get(urljoin(manifest_url, icon["src"]))
+                      if image[:8] != b"\x89PNG\r\n\x1a\n":
+                          raise ValueError("Icon did not return PNG data.")
+                      width, height = struct.unpack(">II", image[16:24])
+                      sizes.add((width, height))
+                  if not {(192, 192), (512, 512)} <= sizes:
+                      raise ValueError("Missing required icon dimensions.")
+                  start = urljoin(manifest_url, manifest["start_url"])
+                  if urlparse(start).netloc != urlparse(final).netloc:
+                      raise ValueError("Launch URL is on another origin.")
+                  get(start)
+                  print("PASS:", url)
+              except Exception as exc:
+                  failures.append(f"{url}: {exc}")
+                  print("FAIL:", failures[-1])
+          if failures:
+              print("\n".join(failures))
+              sys.exit(1)
+          PY
