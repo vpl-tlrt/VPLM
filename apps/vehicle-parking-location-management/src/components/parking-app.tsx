@@ -893,7 +893,8 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const appendBayAudit = (bayIdValue: string, action: string, comments: string) => {
     const entry: BayAuditEntry = { id: `bay-audit-${crypto.randomUUID()}`, bayId: bayIdValue, user: actor, role, timestamp: new Date().toISOString(), action, comments };
     setBayManagement((current) => ({ ...current, audit: [entry, ...current.audit] }));
-    logAudit(action, 'Parking bay', `${locationLabel(bayIdValue)} · ${comments} · role ${role}`);
+    const auditLocation = bayIdValue.startsWith('x-parking:') ? `X Parking beside ${locationLabel(bayIdValue.slice('x-parking:'.length))}` : locationLabel(bayIdValue);
+    logAudit(action, 'Parking bay', `${auditLocation} · ${comments} · role ${role}`);
   };
   const reserveBay = (data: Omit<BayReservation, 'bayId' | 'status'>) => {
     if (!selectedBay || selectedBay.status !== 'Available') return toast.error('This bay is no longer vacant.');
