@@ -12,7 +12,7 @@ type Database = {
         Relationships: [];
       };
       workspace_state: {
-        Row: { id: number; state: Snapshot; revision: number; updated_at: string };
+        Row: { id: number; state: Snapshot; revision: number; reset_floor: number; updated_at: string };
         Insert: { id: number; state: Snapshot; revision?: number; updated_at?: string };
         Update: { id?: number; state?: Snapshot; revision?: number; updated_at?: string };
         Relationships: [];
@@ -38,6 +38,7 @@ const snapshotKeys = [
   'vplm-road-test-audit-v2',
   'vplm-road-test-notifications-v2',
   'vplm-garage-layout-v1',
+  'vplm-vehicle-models-v1',
 ] as const;
 const readKey = (jsonName: string, legacyName: string): string => {
   const raw = Deno.env.get(jsonName);
@@ -96,6 +97,7 @@ const canSave = (role: Role, before: Snapshot | null, after: Snapshot): boolean 
     if (changedKeys.some((key) => restrictedRoadTests.includes(key))) return false;
   }
   if (role !== 'Administrator' && role !== 'Supervisor') {
+    if (changedKeys.includes('vplm-vehicle-models-v1')) return false;
     if (changedKeys.includes('vplm-road-tests-v2')) {
       try {
         if (!canChangeRoadTests(before?.['vplm-road-tests-v2'], after['vplm-road-tests-v2'])) return false;
@@ -172,9 +174,16 @@ Deno.serve(async (request) => {
     if (!membership) return respond({ error: 'Workspace membership is required.' }, 403);
 
     const { data: current, error: loadError } = await adminClient.from('workspace_state')
-      .select('state, revision').eq('id', 1).maybeSingle();
+      .select('state, revision, reset_floor').eq('id', 1).maybeSingle();
     if (loadError) throw loadError;
+    // Older installed clients omit this new key. Retain the current catalog rather than erase it.
+    if (!Object.prototype.hasOwnProperty.call(input.snapshot, 'vplm-vehicle-models-v1')) {
+      snapshot['vplm-vehicle-models-v1'] = current?.state?.['vplm-vehicle-models-v1'] ?? null;
+    }
     const expectedRevision = input.revision;
+    if (current?.reset_floor && (expectedRevision === null || Number(expectedRevision) < current.reset_floor)) {
+      return respond({ error: 'The workspace was reset for go-live. Reload to continue.', code: 'WORKSPACE_RESET' }, 410);
+    }
     if (current ? expectedRevision !== current.revision : expectedRevision !== null) {
       return respond({ error: 'Workspace data changed in another session. Reload the page before making more changes.', code: 'REVISION_CONFLICT' }, 409);
     }
