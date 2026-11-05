@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { applyWorkspaceSnapshot, clearWorkspaceSnapshot } from '@/lib/workspace-storage';
+import { applyWorkspaceSnapshot, clearWorkspaceSnapshot, readWorkspaceSnapshot } from '@/lib/workspace-storage';
+import { loadOfflineState } from '@/lib/offline-store';
 import { loadWorkspace } from '@/lib/workspace-cloud';
 import { isSupabaseConfigured, supabase, supabaseConfigurationError } from '@/lib/supabase';
 import { queryClient } from '@/lib/query-client';
@@ -373,6 +374,20 @@ export default function HomePage() {
     setWorkspaceError('');
     void loadWorkspace(session.user.id).then(({ snapshot, revision, isGuest }) => {
       if (!active) return;
+      // A mobile device can have assignments not yet uploaded. Preserve that
+      // exact local snapshot before replacing the displayed workspace with cloud data.
+      // Do not upload it blindly: another user may have edited the same vehicles.
+      if (!isGuest && snapshot && loadOfflineState()?.pendingChanges) {
+        try {
+          const localSnapshot = readWorkspaceSnapshot();
+          if (localSnapshot['vehicle-parking-browser-state-v2'] !== snapshot['vehicle-parking-browser-state-v2']) {
+            const recoveryKey = `vplm-unsynced-recovery:${session.user.id}`;
+            if (!window.localStorage.getItem(recoveryKey)) {
+              window.localStorage.setItem(recoveryKey, JSON.stringify(localSnapshot));
+            }
+          }
+        } catch { /* Keep existing local storage untouched if recovery backup is unavailable. */ }
+      }
       setGuestWorkspace(isGuest);
       applyWorkspaceSnapshot(snapshot ?? {});
       setWorkspaceGuest(isGuest);
