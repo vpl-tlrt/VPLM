@@ -5,6 +5,7 @@ import { loadWorkspace, saveWorkspace, WorkspaceConflictError, WorkspaceResetErr
 import { supabase } from '@/lib/supabase';
 import { applyWorkspaceSnapshot, readWorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
+import { acknowledgeSyncMutations, exportSyncJournal, listPendingSyncMutations } from '@/lib/sync-queue';
 
 const RETRY_BASE_MS = 1500;
 const RETRY_MAX_MS = 30_000;
@@ -12,7 +13,7 @@ const RETRY_MAX_MS = 30_000;
 export function useLocalDataSync(initialRevision: number | null, localOnly = false, userId?: string, onRecovered?: () => void) {
   const [state, setState] = useState<'idle' | 'offline' | 'syncing' | 'error'>(() => localOnly || navigator.onLine ? 'idle' : 'offline');
   const [lastSyncAt, setLastSyncAt] = useState<string>();
-  const [pendingCount, setPendingCount] = useState(0);
+  const [pendingCount, setPendingCount] = useState(() => listPendingSyncMutations(userId).length);
   const revision = useRef(initialRevision);
   const baseline = useRef<ReturnType<typeof readWorkspaceSnapshot> | null>(null);
   if (!baseline.current && !localOnly) baseline.current = readWorkspaceSnapshot();
@@ -90,6 +91,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     setPendingCount(1);
     try {
       const snapshot = readWorkspaceSnapshot();
+      const startedMutationIds = listPendingSyncMutations(userId).map(item => item.id);
       let nextRevision;
       try {
         nextRevision = await saveWorkspace(snapshot, revision.current);
@@ -110,6 +112,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
           applyWorkspaceSnapshot(merged);
           revision.current = nextRevision;
           baseline.current = merged;
+          acknowledgeSyncMutations(startedMutationIds);
           retryAttempt.current = 0;
           if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
           retryTimer.current = undefined;
@@ -129,6 +132,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
         }
       }
       revision.current = nextRevision;
+      acknowledgeSyncMutations(startedMutationIds);
       retryAttempt.current = 0;
       if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
       retryTimer.current = undefined;
@@ -186,7 +190,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       if (syncBlocked.current) return;
       if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
       retryTimer.current = undefined;
-      setPendingCount(1);
+      setPendingCount(Math.max(1, listPendingSyncMutations(userId).length));
       if (inFlight.current) { rerun.current = true; return; }
       // Throttle rather than repeatedly resetting the timer: frequent edits must
       // not indefinitely postpone the upload.
@@ -204,12 +208,23 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     };
   }, [localOnly, recoveryKey, sync]);
 
+  useEffect(() => {
+    if (!localOnly && listPendingSyncMutations(userId).length && navigator.onLine) void sync(false);
+  }, [localOnly, userId, sync]);
   const getRevision = useCallback(() => revision.current, []);
+  const downloadOperationJournal = () => {
+    const url = URL.createObjectURL(new Blob([exportSyncJournal()], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'vplm-operation-journal.json';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
   const downloadRecovery = () => {
     const saved = recoveryKey ? window.localStorage.getItem(recoveryKey) : null;
     const url = URL.createObjectURL(new Blob([saved ?? JSON.stringify(readWorkspaceSnapshot())], { type: 'application/json' }));
     const link = document.createElement('a');
     link.href = url; link.download = 'vplm-unsynced-recovery.json'; link.click(); URL.revokeObjectURL(url);
   };
-  return { sync, getRevision, conflictDetail, downloadRecovery, state, lastSyncAt, pendingCount, hasPublishedSnapshot: true };
+  return { sync, getRevision, conflictDetail, downloadRecovery, downloadOperationJournal, state, lastSyncAt, pendingCount, hasPublishedSnapshot: true };
 }
