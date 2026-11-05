@@ -77,7 +77,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       return false;
     }
     if (syncBlocked.current) {
-      if (announce) toast.error('Workspace sync is paused because another session changed the data. Reload before continuing.');
+      if (announce) toast.error('Workspace sync is paused to protect your unsynced data. Download the local backup before reloading.');
       return false;
     }
     if (inFlight.current) {
@@ -145,6 +145,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       setPendingCount(1);
       if (error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError) {
         saveRecovery(readWorkspaceSnapshot());
+        if (error instanceof WorkspaceResetError) setConflictDetail(error.message);
         syncBlocked.current = true;
         if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
         retryTimer.current = undefined;
