@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Cloud, HardDrive } from 'lucide-react';
-import { readWorkspaceSnapshot } from '@/lib/workspace-storage';
+import type { WorkspaceSnapshot } from '@/lib/workspace-storage';
+import { loadWorkspace } from '@/lib/workspace-cloud';
 import type { Vehicle } from '@/lib/parking-data';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
@@ -26,14 +27,28 @@ const label = (item: Item) => `${item.plateNumber} · ${item.currentLocationId |
 export function WorkspaceRecoveryReview({ userId, open, onOpenChange }: {
   userId?: string; open: boolean; onOpenChange: (open: boolean) => void;
 }) {
+  const [cloudSnapshot, setCloudSnapshot] = useState<WorkspaceSnapshot | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [cloudError, setCloudError] = useState('');
+  useEffect(() => {
+    if (!userId || !open) return;
+    let active = true;
+    setLoading(true);
+    setCloudError('');
+    setCloudSnapshot(null);
+    void loadWorkspace(userId).then(({ snapshot }) => { if (active) setCloudSnapshot(snapshot); })
+      .catch(() => { if (active) setCloudError('Could not read the latest cloud data. Keep the local backup and try again online.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [userId, open]);
   const result = useMemo(() => {
-    if (!userId || !open) return null;
+    if (!userId || !open || !cloudSnapshot) return null;
     try {
       const raw = window.localStorage.getItem(`vplm-unsynced-recovery:${userId}`);
       if (!raw) return null;
       const local = JSON.parse(raw) as Record<string, unknown>;
       const saved = parseVehicles(local['vehicle-parking-browser-state-v2']);
-      const cloud = parseVehicles(readWorkspaceSnapshot()['vehicle-parking-browser-state-v2']);
+      const cloud = parseVehicles(cloudSnapshot['vehicle-parking-browser-state-v2']);
       const byId = new Map(cloud.map(item => [item.id, item]));
       const localOnly = saved.filter(item => !byId.has(item.id));
       const different = saved.filter(item => byId.has(item.id) && changed(item, byId.get(item.id)!));
@@ -43,7 +58,7 @@ export function WorkspaceRecoveryReview({ userId, open, onOpenChange }: {
           || (item.currentLocationId && slot(item) === slot(other)))));
       return { localCount: saved.length, cloudCount: cloud.length, localOnly, different, blocked };
     } catch { return null; }
-  }, [userId, open]);
+  }, [userId, open, cloudSnapshot]);
 
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="max-h-[90dvh] max-w-xl overflow-y-auto">
@@ -51,7 +66,9 @@ export function WorkspaceRecoveryReview({ userId, open, onOpenChange }: {
         <DialogTitle>Unsynced vehicle recovery review</DialogTitle>
         <DialogDescription>Read-only comparison of this device's preserved copy and the current shared workspace. No records are changed or uploaded.</DialogDescription>
       </DialogHeader>
-      {!result ? <p role="alert" className="text-sm">No readable local recovery backup was found for this account. Keep the device storage intact.</p> : <>
+      {loading ? <p className="text-sm">Checking the latest cloud records…</p> :
+        cloudError ? <p role="alert" className="text-sm">{cloudError}</p> :
+        !result ? <p role="alert" className="text-sm">No readable local recovery backup or cloud snapshot was found for this account. Keep the device storage intact.</p> : <>
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-lg border p-3"><HardDrive className="mb-2 h-4 w-4" /><div className="text-xl font-semibold">{result.localCount}</div><div className="text-xs text-muted-foreground">Vehicles in local copy</div></div>
           <div className="rounded-lg border p-3"><Cloud className="mb-2 h-4 w-4" /><div className="text-xl font-semibold">{result.cloudCount}</div><div className="text-xs text-muted-foreground">Vehicles in cloud copy</div></div>
