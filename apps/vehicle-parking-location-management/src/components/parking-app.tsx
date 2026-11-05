@@ -810,6 +810,18 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const roadTests = loadRoadTests();
   const currentRoadTests = roadTests.filter((test: RoadTestRecord) => test.status !== 'Completed');
   const activeVehicles = useMemo(() => vehicles.filter((item: Vehicle) => item.status !== 'Delivered'), [vehicles]);
+  // In-memory slot index avoids scanning every vehicle for every bay on each render.
+  const vehiclesByLocation = useMemo(() => {
+    const index = new Map<string, Vehicle[]>();
+    for (const vehicle of activeVehicles) {
+      const key = parkingRecordKey(vehicle.currentLocationId);
+      if (!key) continue;
+      const records = index.get(key) ?? [];
+      records.push(vehicle);
+      index.set(key, records);
+    }
+    return index;
+  }, [activeVehicles]);
   const unassignedVehicles = activeVehicles.filter((item: Vehicle) => !item.currentLocationId && item.status !== 'Released');
 
   const showVehiclesOnMap = true;
@@ -1084,7 +1096,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                     const lanes = Array.from(new Set(zoneLocations.map((location: ParkingLocation) => location.lane.trim()).filter((lane: string) => Boolean(lane))));
                     const renderXParkingSpaces = (bays: ParkingLocation[]) => <div className="x-parking-spaces" aria-label="X Parking spaces">
                       {bays.map((bay: ParkingLocation) => {
-                        const xVehicle = showVehiclesOnMap ? activeVehicles.find((item: Vehicle) => item.xParking === 'Yes' && parkingRecordKey(item.currentLocationId) === parkingRecordKey(bay.id)) : undefined;
+                        const xVehicle = showVehiclesOnMap ? vehiclesByLocation.get(parkingRecordKey(bay.id))?.find((item: Vehicle) => item.xParking === 'Yes') : undefined;
                         const xVehicleRoadTest = xVehicle ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === xVehicle.id) : undefined;
                         const slotId = xParkingSlotId(bay.id);
                         const reserved = bayManagement.reservations.some((item: BayReservation) => item.bayId === slotId && item.status !== 'Released');
@@ -1114,7 +1126,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                       })}
                     </div>;
                     const renderBay = (bay: ParkingLocation, index: number) => {
-                      const bayVehicles = showVehiclesOnMap ? activeVehicles.filter((item: Vehicle) => parkingRecordKey(item.currentLocationId) === parkingRecordKey(bay.id)) : [];
+                      const bayVehicles = showVehiclesOnMap ? vehiclesByLocation.get(parkingRecordKey(bay.id)) ?? [] : [];
                       const vehicle = bayVehicles.find((item: Vehicle) => item.xParking !== 'Yes');
                       const xParkingVehicle = bayVehicles.find((item: Vehicle) => item.xParking === 'Yes');
                       // The adjacent X space has its own hit target and cannot replace the regular bay's vehicle.
