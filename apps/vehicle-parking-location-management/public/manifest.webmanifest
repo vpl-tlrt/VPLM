@@ -1,0 +1,26 @@
+{
+  "id": "./",
+  "name": "Vehicle Parking Location Management",
+  "short_name": "VPLM",
+  "description": "Manage vehicle parking assignments, reservations, movements, and road tests.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "theme_color": "#075f63",
+  "background_color": "#075f63",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
