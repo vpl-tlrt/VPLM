@@ -363,7 +363,18 @@ export default function HomePage() {
       setWorkspaceRevision(null);
       setWorkspaceUserId(undefined);
       setWorkspaceError('');
-      if (workspaceUserId) clearWorkspaceSnapshot();
+      if (workspaceUserId) {
+        // Signing out must not erase the only copy of pending assignments.
+        if (loadOfflineState()?.pendingChanges) {
+          try {
+            const recoveryKey = `vplm-unsynced-recovery:${workspaceUserId}`;
+            if (!window.localStorage.getItem(recoveryKey)) {
+              window.localStorage.setItem(recoveryKey, JSON.stringify(readWorkspaceSnapshot()));
+            }
+          } catch { /* Preserve existing browser data when a backup cannot be written. */ }
+        }
+        clearWorkspaceSnapshot();
+      }
       setGuestWorkspace(false);
       setWorkspaceGuest(false);
       setPickupToReopen(undefined);
