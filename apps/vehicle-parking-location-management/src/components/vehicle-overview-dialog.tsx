@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import { BatteryWarning, Camera, CarFront, CircleStop, Fuel, History, MapPin, Navigation, Pencil, Route, Save, Trash2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { isLiveGarageContainer, mapParkingLocationId, supportsXParkingLocation, type Movement, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
+import { loadBayManagementState, xParkingSlotId } from '@/lib/bay-management-data';
 import type { RoadTestRecord } from '@/lib/road-test-data';
 import { VehicleFormFields, type VehicleFormData } from '@/components/vehicle-form-fields';
 import { Badge } from '@/components/ui/badge';
@@ -91,8 +92,12 @@ export function VehicleOverviewDialog(props: VehicleOverviewDialogProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState<VehicleFormData>();
   const photoRef = useRef<HTMLInputElement>(null);
+  const xParkingManagement = loadBayManagementState();
   const availableBays = locations.filter((item: ParkingLocation) => targetType === 'xParking'
-    ? supportsXParkingLocation(item) && !vehicles.some((candidate: Vehicle) => candidate.xParking === 'Yes' && mapParkingLocationId(candidate.currentLocationId) === mapParkingLocationId(item.id))
+    ? supportsXParkingLocation(item)
+      && !vehicles.some((candidate: Vehicle) => candidate.xParking === 'Yes' && candidate.id !== vehicle?.id && mapParkingLocationId(candidate.currentLocationId) === mapParkingLocationId(item.id))
+      && !xParkingManagement.reservations.some((entry) => entry.bayId === xParkingSlotId(item.id) && entry.status !== 'Released')
+      && !xParkingManagement.maintenance.some((entry) => entry.bayId === xParkingSlotId(item.id) && entry.status === 'Active')
     : item.status !== 'Reserved' && item.status !== 'Maintenance' && (isLiveGarageContainer(item)
       ? vehicles.filter((candidate: Vehicle) => candidate.status !== 'Delivered' && mapParkingLocationId(candidate.currentLocationId) === mapParkingLocationId(item.id)).length < 15
       : !vehicles.some((candidate: Vehicle) => candidate.xParking !== 'Yes' && mapParkingLocationId(candidate.currentLocationId) === mapParkingLocationId(item.id))));
