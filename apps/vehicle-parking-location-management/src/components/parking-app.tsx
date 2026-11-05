@@ -202,6 +202,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const ownerId = access.data?.appUser.id;
   const queueOwnerId = ownerId ?? '';
   const hasMounted = useRef(false);
+  const skipNextPersist = useRef(false);
   const [roadTestVehicleId, setRoadTestVehicleId] = useState<string>();
   const [dashboardVehicleId, setDashboardVehicleId] = useState<string>();
   const [pullDistance, setPullDistance] = useState(0);
@@ -210,6 +211,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     // Hydrate a successful conflict merge in place without remounting open screens.
     const updated = loadOfflineState();
     if (!updated) { onSyncRecovered?.(); return; }
+    skipNextPersist.current = true;
     setVehicles(updated.vehicles);
     setLocations(reconcileParkingLayout(updated.locations));
     setMovements(updated.movements);
@@ -307,6 +309,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
 
   useEffect(() => {
     if (!hasPublishedSnapshot) return;
+    if (skipNextPersist.current) { skipNextPersist.current = false; return; }
     if (!hasMounted.current) hasMounted.current = true;
     saveOfflineState({ vehicles, locations, movements, reservations, auditEvents, pendingChanges, savedAt: new Date().toISOString() });
   }, [vehicles, locations, movements, reservations, auditEvents, pendingChanges, garageLayout, hasPublishedSnapshot]);
