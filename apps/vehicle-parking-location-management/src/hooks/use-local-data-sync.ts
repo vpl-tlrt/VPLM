@@ -3,9 +3,24 @@ import { toast } from 'sonner';
 import { mergeWorkspaceChanges } from '@/lib/workspace-recovery';
 import { loadWorkspace, saveWorkspace, WorkspaceConflictError, WorkspaceResetError } from '@/lib/workspace-cloud';
 import { supabase } from '@/lib/supabase';
-import { applyWorkspaceSnapshot, readWorkspaceSnapshot } from '@/lib/workspace-storage';
+import { applyWorkspaceSnapshot, readWorkspaceSnapshot, workspaceStorageKeys, type WorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
 import { acknowledgeSyncMutations, exportSyncJournal, listPendingSyncMutations } from '@/lib/sync-queue';
+
+const hasUncommittedData = (before: WorkspaceSnapshot, current: WorkspaceSnapshot): boolean =>
+  workspaceStorageKeys.some(key => {
+    if (before[key] === current[key]) return false;
+    if (key !== 'vehicle-parking-browser-state-v2') return true;
+    try {
+      const normalize = (serialized: string | null) => {
+        const { pendingChanges: _pending, savedAt: _savedAt, ...content } = JSON.parse(serialized ?? '{}') as Record<string, unknown>;
+        void _pending;
+        void _savedAt;
+        return JSON.stringify(content);
+      };
+      return normalize(before[key]) !== normalize(current[key]);
+    } catch { return true; }
+  });
 
 const RETRY_BASE_MS = 1500;
 const RETRY_MAX_MS = 30_000;
@@ -34,6 +49,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   const retryTimer = useRef<number | undefined>(undefined);
   const retryAttempt = useRef(0);
   const inFlight = useRef(false);
+  const refreshing = useRef(false);
   const rerun = useRef(false);
   const syncBlocked = useRef(false);
 
@@ -91,7 +107,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     setPendingCount(1);
     try {
       const snapshot = readWorkspaceSnapshot();
-      const startedMutationIds = listPendingSyncMutations(userId).map(item => item.id);
+      const startedMutationIds = userId ? listPendingSyncMutations(userId).map(item => item.id) : [];
       let nextRevision;
       try {
         nextRevision = await saveWorkspace(snapshot, revision.current);
@@ -209,8 +225,52 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   }, [localOnly, recoveryKey, sync]);
 
   useEffect(() => {
-    if (!localOnly && listPendingSyncMutations(userId).length && navigator.onLine) void sync(false);
+    if (!localOnly && userId && listPendingSyncMutations(userId).length && navigator.onLine) void sync(false);
   }, [localOnly, userId, sync]);
+
+  // Realtime events are hints. Fetch and adopt the authoritative snapshot only
+  // when no local edits are pending; never overwrite an unsynced browser session.
+  const refreshCloudView = useCallback(async () => {
+    if (localOnly || !supabase || !userId || !onRecovered || !navigator.onLine ||
+        inFlight.current || refreshing.current || syncBlocked.current ||
+        listPendingSyncMutations(userId).length) return false;
+    if (!baseline.current || hasUncommittedData(baseline.current, readWorkspaceSnapshot())) return false;
+    refreshing.current = true;
+    try {
+      const latest = await loadWorkspace(userId);
+      if (!latest.snapshot || latest.isGuest || latest.revision === null || latest.revision <= (revision.current ?? 0)) return false;
+      if (inFlight.current || listPendingSyncMutations(userId).length ||
+          !baseline.current || hasUncommittedData(baseline.current, readWorkspaceSnapshot())) return false;
+      applyWorkspaceSnapshot(latest.snapshot);
+      baseline.current = latest.snapshot;
+      revision.current = latest.revision;
+      onRecovered();
+      return true;
+    } catch {
+      // Network loss is handled by the normal durable sync/recovery path.
+      return false;
+    } finally {
+      refreshing.current = false;
+    }
+  }, [localOnly, userId, onRecovered]);
+
+  useEffect(() => {
+    if (!supabase || localOnly || !userId) return;
+    const client = supabase;
+    const channel = client.channel(`vplm-vehicle-deltas-${userId}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'vplm_vehicle_delta_events' },
+        payload => {
+          const remoteRevision = Number((payload.new as Record<string, unknown>).workspace_revision);
+          if (Number.isSafeInteger(remoteRevision) && remoteRevision > (revision.current ?? 0)) {
+            void refreshCloudView();
+          }
+        })
+      .subscribe(status => { if (status === 'SUBSCRIBED') void refreshCloudView(); });
+    const onForeground = () => { if (document.visibilityState === 'visible') void refreshCloudView(); };
+    document.addEventListener('visibilitychange', onForeground);
+    return () => { document.removeEventListener('visibilitychange', onForeground); void client.removeChannel(channel); };
+  }, [localOnly, userId, refreshCloudView]);
   const getRevision = useCallback(() => revision.current, []);
   const downloadOperationJournal = () => {
     const url = URL.createObjectURL(new Blob([exportSyncJournal()], { type: 'application/json' }));
