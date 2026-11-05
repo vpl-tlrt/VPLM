@@ -1,0 +1,79 @@
+import { useMemo } from 'react';
+import { AlertTriangle, Cloud, HardDrive } from 'lucide-react';
+import { readWorkspaceSnapshot } from '@/lib/workspace-storage';
+import type { Vehicle } from '@/lib/parking-data';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+
+type Item = Pick<Vehicle, 'id' | 'plateNumber' | 'currentLocationId' | 'xParking' | 'status' | 'model' | 'color'>;
+const parseVehicles = (raw: unknown): Item[] => {
+  if (typeof raw !== 'string') return [];
+  try {
+    const state: unknown = JSON.parse(raw);
+    if (!state || typeof state !== 'object' || !('vehicles' in state)) return [];
+    const vehicles = (state as { vehicles: unknown }).vehicles;
+    if (!Array.isArray(vehicles)) return [];
+    return vehicles.filter((item): item is Item =>
+      item && typeof item.id === 'string' && typeof item.plateNumber === 'string');
+  } catch { return []; }
+};
+const changed = (a: Item, b: Item) =>
+  ['plateNumber', 'currentLocationId', 'xParking', 'status', 'model', 'color'].some(
+    field => JSON.stringify(a[field as keyof Item]) !== JSON.stringify(b[field as keyof Item]));
+const slot = (item: Item) => `${item.currentLocationId ?? 'unassigned'}:${item.xParking === 'Yes' ? 'X' : 'regular'}`;
+const label = (item: Item) => `${item.plateNumber} · ${item.currentLocationId || 'Unassigned'}${item.xParking === 'Yes' ? ' (X)' : ''}`;
+
+export function WorkspaceRecoveryReview({ userId, open, onOpenChange }: {
+  userId?: string; open: boolean; onOpenChange: (open: boolean) => void;
+}) {
+  const result = useMemo(() => {
+    if (!userId || !open) return null;
+    try {
+      const raw = window.localStorage.getItem(`vplm-unsynced-recovery:${userId}`);
+      if (!raw) return null;
+      const local = JSON.parse(raw) as Record<string, unknown>;
+      const saved = parseVehicles(local['vehicle-parking-browser-state-v2']);
+      const cloud = parseVehicles(readWorkspaceSnapshot()['vehicle-parking-browser-state-v2']);
+      const byId = new Map(cloud.map(item => [item.id, item]));
+      const localOnly = saved.filter(item => !byId.has(item.id));
+      const different = saved.filter(item => byId.has(item.id) && changed(item, byId.get(item.id)!));
+      const blocked = localOnly.filter(item => cloud.some(other =>
+        other.status !== 'Delivered' && item.status !== 'Delivered' &&
+        (other.plateNumber.trim().toUpperCase() === item.plateNumber.trim().toUpperCase()
+          || (item.currentLocationId && slot(item) === slot(other)))));
+      return { localCount: saved.length, cloudCount: cloud.length, localOnly, different, blocked };
+    } catch { return null; }
+  }, [userId, open]);
+
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="max-h-[90dvh] max-w-xl overflow-y-auto">
+      <DialogHeader>
+        <DialogTitle>Unsynced vehicle recovery review</DialogTitle>
+        <DialogDescription>Read-only comparison of this device's preserved copy and the current shared workspace. No records are changed or uploaded.</DialogDescription>
+      </DialogHeader>
+      {!result ? <p role="alert" className="text-sm">No readable local recovery backup was found for this account. Keep the device storage intact.</p> : <>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-lg border p-3"><HardDrive className="mb-2 h-4 w-4" /><div className="text-xl font-semibold">{result.localCount}</div><div className="text-xs text-muted-foreground">Vehicles in local copy</div></div>
+          <div className="rounded-lg border p-3"><Cloud className="mb-2 h-4 w-4" /><div className="text-xl font-semibold">{result.cloudCount}</div><div className="text-xs text-muted-foreground">Vehicles in cloud copy</div></div>
+        </div>
+        <div className="space-y-2">
+          <p className="font-semibold">Not found in cloud by record ID <Badge variant="secondary">{result.localOnly.length}</Badge></p>
+          {result.localOnly.length === 0 ? <p className="text-sm text-muted-foreground">No local-only vehicle IDs found.</p> :
+            result.localOnly.map(item => <div key={item.id} className="flex justify-between gap-2 rounded-md border p-2 text-sm">
+              <span>{label(item)}</span>
+              {result.blocked.some(row => row.id === item.id) && <Badge variant="destructive">Needs conflict review</Badge>}
+            </div>)}
+        </div>
+        <div className="space-y-2">
+          <p className="font-semibold">Records different from cloud <Badge variant="secondary">{result.different.length}</Badge></p>
+          {result.different.length === 0 ? <p className="text-sm text-muted-foreground">No changes in the compared vehicle fields.</p> :
+            result.different.map(item => <p key={item.id} className="rounded-md border p-2 text-sm">{label(item)} — check location and profile against current cloud record</p>)}
+        </div>
+        {(result.localOnly.length > 0 || result.different.length > 0) && <div role="alert" className="flex gap-2 rounded-md border p-3 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          Export the local backup and operation journal before reconciling. This screen does not automatically restore records or override another user's parking changes.
+        </div>}
+      </>}
+    </DialogContent>
+  </Dialog>;
+}
