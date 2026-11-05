@@ -78,8 +78,8 @@ export function VehicleFormFields({ value, onChange, idPrefix, assignmentMode = 
       ];
   const normalizedModel = normalizeVehicleModel(value.model);
   const modelOptions = normalizedModel && !currentModels.includes(normalizedModel)
-    ? [normalizedModel, ...vehicleModels]
-    : vehicleModels;
+    ? [normalizedModel, ...currentModels]
+    : currentModels;
   const storedColor = value.color.trim();
   const hasKnownColor = toyotaColors.some((color: (typeof toyotaColors)[number]) => color.name === storedColor);
   return <div className="grid gap-4 sm:grid-cols-2">
