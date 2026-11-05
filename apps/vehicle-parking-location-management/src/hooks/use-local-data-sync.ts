@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { mergeWorkspaceChanges } from '@/lib/workspace-recovery';
-import { loadWorkspace, saveWorkspace, WorkspaceConflictError } from '@/lib/workspace-cloud';
+import { loadWorkspace, saveWorkspace, WorkspaceConflictError, WorkspaceResetError } from '@/lib/workspace-cloud';
 import { supabase } from '@/lib/supabase';
 import { applyWorkspaceSnapshot, readWorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
@@ -141,9 +141,10 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       if (announce) toast.success('Workspace data synced.');
       return true;
     } catch (error) {
-      setState(error instanceof WorkspaceConflictError ? 'error' : navigator.onLine ? 'error' : 'offline');
+      setState(error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError ? 'error' : navigator.onLine ? 'error' : 'offline');
       setPendingCount(1);
-      if (error instanceof WorkspaceConflictError) {
+      if (error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError) {
+        saveRecovery(readWorkspaceSnapshot());
         syncBlocked.current = true;
         if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
         retryTimer.current = undefined;
@@ -160,10 +161,13 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
           else setState('offline');
         }, delay);
       }
-      const message = error instanceof WorkspaceConflictError
-        ? error.message
-        : 'Could not reach the workspace service. Your changes remain saved locally and will retry automatically.';
-      if (announce || error instanceof WorkspaceConflictError) toast.error(message);
+      const serviceMessage = error instanceof Error ? error.message : '';
+      const message = error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError
+        ? serviceMessage
+        : /permission|membership|role|session|invalid|unauthoriz|forbidden/i.test(serviceMessage)
+          ? `${serviceMessage} Your local backup is still available.`
+          : 'Could not reach the workspace service. Your changes remain saved locally and will retry automatically.';
+      if (announce || error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError || /permission|membership|unauthoriz|forbidden/i.test(serviceMessage)) toast.error(message);
       return false;
     } finally {
       inFlight.current = false;
