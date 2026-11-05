@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { mergeWorkspaceChanges } from '@/lib/workspace-recovery';
-import { loadWorkspace, saveWorkspace, WorkspaceConflictError } from '@/lib/workspace-cloud';
+import { loadWorkspace, saveWorkspace, WorkspaceConflictError, WorkspaceResetError } from '@/lib/workspace-cloud';
 import { supabase } from '@/lib/supabase';
-import { readWorkspaceSnapshot } from '@/lib/workspace-storage';
+import { applyWorkspaceSnapshot, readWorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
 
 const RETRY_BASE_MS = 1500;
@@ -77,7 +77,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       return false;
     }
     if (syncBlocked.current) {
-      if (announce) toast.error('Workspace sync is paused because another session changed the data. Reload before continuing.');
+      if (announce) toast.error('Workspace sync is paused to protect your unsynced data. Download the local backup before reloading.');
       return false;
     }
     if (inFlight.current) {
@@ -105,8 +105,21 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
           if (JSON.stringify(readWorkspaceSnapshot()) !== JSON.stringify(draft)) {
             throw new Error('More local changes arrived during recovery.');
           }
+          // The cloud accepted a merged snapshot. Apply it locally and rehydrate
+          // the mounted workspace without a full page or screen reload.
+          applyWorkspaceSnapshot(merged);
           revision.current = nextRevision;
-          toast.success('Non-conflicting workspace changes synced. Reloading the current workspace.');
+          baseline.current = merged;
+          retryAttempt.current = 0;
+          if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
+          retryTimer.current = undefined;
+          if (recoveryKey && !conflictDetail) {
+            try { window.localStorage.removeItem(recoveryKey); } catch { /* Synced data is already in the cloud. */ }
+          }
+          setLastSyncAt(new Date().toISOString());
+          setPendingCount(0);
+          setState('idle');
+          toast.success('Non-conflicting workspace changes synced without reloading.');
           onRecovered();
           return true;
         } catch (mergeError) {
@@ -128,9 +141,11 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       if (announce) toast.success('Workspace data synced.');
       return true;
     } catch (error) {
-      setState(error instanceof WorkspaceConflictError ? 'error' : navigator.onLine ? 'error' : 'offline');
+      setState(error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError ? 'error' : navigator.onLine ? 'error' : 'offline');
       setPendingCount(1);
-      if (error instanceof WorkspaceConflictError) {
+      if (error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError) {
+        saveRecovery(readWorkspaceSnapshot());
+        if (error instanceof WorkspaceResetError) setConflictDetail(error.message);
         syncBlocked.current = true;
         if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
         retryTimer.current = undefined;
@@ -147,10 +162,13 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
           else setState('offline');
         }, delay);
       }
-      const message = error instanceof WorkspaceConflictError
-        ? error.message
-        : 'Could not reach the workspace service. Your changes remain saved locally and will retry automatically.';
-      if (announce || error instanceof WorkspaceConflictError) toast.error(message);
+      const serviceMessage = error instanceof Error ? error.message : '';
+      const message = error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError
+        ? serviceMessage
+        : /permission|membership|role|session|invalid|unauthoriz|forbidden/i.test(serviceMessage)
+          ? `${serviceMessage} Your local backup is still available.`
+          : 'Could not reach the workspace service. Your changes remain saved locally and will retry automatically.';
+      if (announce || error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError || /permission|membership|unauthoriz|forbidden/i.test(serviceMessage)) toast.error(message);
       return false;
     } finally {
       inFlight.current = false;
@@ -166,14 +184,17 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       if (localOnly) return;
       if (syncBlocked.current || !navigator.onLine) saveRecovery(readWorkspaceSnapshot());
       if (syncBlocked.current) return;
-      if (timer.current !== undefined) window.clearTimeout(timer.current);
       if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
       retryTimer.current = undefined;
       setPendingCount(1);
+      if (inFlight.current) { rerun.current = true; return; }
+      // Throttle rather than repeatedly resetting the timer: frequent edits must
+      // not indefinitely postpone the upload.
+      if (timer.current !== undefined) return;
       timer.current = window.setTimeout(() => {
         timer.current = undefined;
         void sync(false);
-      }, 500);
+      }, 180);
     };
     window.addEventListener(WORKSPACE_DATA_CHANGED, scheduleSync);
     return () => {

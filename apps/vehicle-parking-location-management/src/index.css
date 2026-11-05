@@ -358,7 +358,9 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   .x-parking-spaces { position: relative; display: grid; grid-template-columns: repeat(23, minmax(4.75rem, 1fr)); gap: 0; padding-inline: 0.5rem; overflow: visible; border-radius: 0.35rem; background: color-mix(in oklch, var(--foreground) 8%, var(--muted)); }
   .x-parking-spaces::before { position: absolute; top: 50%; right: 0.5rem; left: 0.5rem; border-top: 2px dashed color-mix(in oklch, var(--card) 85%, transparent); content: ""; pointer-events: none; }
   .x-parking-row-label { padding: 0.2rem 0.75rem; color: var(--muted-foreground); font-size: 0.68rem; font-weight: 850; letter-spacing: 0.04em; text-transform: uppercase; }
-  .x-parking-space { position: relative; z-index: 1; min-height: 4.5rem; border: 0; background: transparent; color: inherit; }
+  .x-parking-space { position: relative; z-index: 5; min-height: 4.5rem; border: 0; background: transparent; color: inherit; cursor: pointer; touch-action: manipulation; }
+  .x-parking-empty-label { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); font-size: 0.75rem; font-weight: 800; opacity: 0.65; pointer-events: none; }
+  .x-parking-space:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
   .x-parking-space:disabled { cursor: default; opacity: 1; }
   .x-parking-space .x-parked-car { top: 50%; width: 2.55rem; height: 4.45rem; transform: translate(-50%, -50%) rotate(90deg); }
   .x-parking-space:hover .x-parked-car { transform: translate(-50%, -50%) rotate(90deg) scale(1.04); }

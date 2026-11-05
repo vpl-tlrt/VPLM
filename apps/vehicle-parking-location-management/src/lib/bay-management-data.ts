@@ -32,6 +32,9 @@ export type BayAuditEntry = {
   comments: string;
 };
 
+// X Parking shares a numbered bay as an anchor, but has separate reservations and maintenance.
+export const xParkingSlotId = (anchorBayId: string): string => `x-parking:${anchorBayId}`;
+
 export type BayManagementState = {
   reservations: BayReservation[];
   maintenance: BayMaintenance[];

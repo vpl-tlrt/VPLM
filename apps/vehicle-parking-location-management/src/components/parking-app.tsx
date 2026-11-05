@@ -25,7 +25,7 @@ import { emptyVehicleForm, VehicleFormFields, vehicleColorClass, type VehicleFor
 import { RoadTestManagement } from '@/components/road-test-management';
 import { PickupRequestManagement } from '@/components/pickup-request-management';
 import { BackupPlayback } from '@/components/backup-playback';
-import { loadBayManagementState, saveBayManagementState, type BayAuditEntry, type BayMaintenance, type BayReservation } from '@/lib/bay-management-data';
+import { loadBayManagementState, saveBayManagementState, type BayAuditEntry, type BayMaintenance, type BayReservation, xParkingSlotId } from '@/lib/bay-management-data';
 import { getVehicleRoadTest, loadRoadTestAudit, loadRoadTests, type RoadTestRecord } from '@/lib/road-test-data';
 import {
   mapParkingLocationId,
@@ -204,7 +204,18 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const [dashboardVehicleId, setDashboardVehicleId] = useState<string>();
   const [pullDistance, setPullDistance] = useState(0);
   const pullStartY = useRef<number | undefined>(undefined);
-  const { sync, getRevision, conflictDetail, downloadRecovery, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview, user?.objectId, onSyncRecovered);
+  const onWorkspaceMerged = useCallback(() => {
+    // Hydrate a successful conflict merge in place without remounting open screens.
+    const updated = loadOfflineState();
+    if (!updated) { onSyncRecovered?.(); return; }
+    setVehicles(updated.vehicles);
+    setLocations(reconcileParkingLayout(updated.locations));
+    setMovements(updated.movements);
+    setReservations(updated.reservations);
+    setAuditEvents(updated.auditEvents);
+    setGarageLayout(loadGarageLayout());
+  }, [onSyncRecovered]);
+  const { sync, getRevision, conflictDetail, downloadRecovery, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview, user?.objectId, onWorkspaceMerged);
   const isOnline = syncState !== 'offline';
   const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline · pending' : syncState === 'error' ? 'Sync needs attention' : pendingChanges ? 'Changes pending' : 'Cloud synced';
 
@@ -373,6 +384,14 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     if (isXParking && (toUnassignedBay || !location)) { toast.error('Choose an X Parking space beside a supported A, B, or C bay.'); return false; }
     if (location && isXParking && !supportsXParkingLocation(location)) { toast.error('X Parking is only available in the marked A, B, and C bay rows.'); return false; }
     if (location && !isXParking && !containerCanAccept(location) && (location.status !== 'Available' || linkedVehicleLocationIds.has(normalizedBayId))) { toast.error('This bay is no longer available.'); return false; }
+    if (location && isXParking) {
+      const management = loadBayManagementState();
+      const slotId = xParkingSlotId(location.id);
+      if (management.reservations.some((item) => item.bayId === slotId && item.status !== 'Released')
+        || management.maintenance.some((item) => item.bayId === slotId && item.status === 'Active')) {
+        toast.error('This X Parking space is reserved or under maintenance.'); return false;
+      }
+    }
     if (location && isXParking && activeVehicles.some((item: Vehicle) => item.xParking === 'Yes' && parkingRecordKey(item.currentLocationId) === normalizedBayId && item.id !== existing?.id)) {
       toast.error('This bay already has an X-Parked vehicle in front of it. Choose another bay.');
       return false;
@@ -449,6 +468,12 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     const target = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(destinationId));
     if (!target) { toast.error('Choose a valid destination.'); return false; }
     if (toXParking) {
+      const management = loadBayManagementState();
+      const slotId = xParkingSlotId(target.id);
+      if (management.reservations.some((item) => item.bayId === slotId && item.status !== 'Released')
+        || management.maintenance.some((item) => item.bayId === slotId && item.status === 'Active')) {
+        toast.error('This X Parking space is reserved or under maintenance.'); return false;
+      }
       if (!supportsXParkingLocation(target)) { toast.error('X Parking is only available in the marked A, B, and C bay rows.'); return false; }
       if (activeVehicles.some((item: Vehicle) => item.xParking === 'Yes' && item.id !== vehicle.id && parkingRecordKey(item.currentLocationId) === parkingRecordKey(target.id))) {
         toast.error('This X Parking space is already occupied.');
@@ -674,6 +699,13 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           <span>Sync conflict: {conflictDetail}. Local work is available to download.</span>
           <Button size="sm" variant="outline" onClick={downloadRecovery}>Download pending changes</Button>
         </div>}
+        {!guestPreview && pendingChanges > 0 && (syncState === 'error' || syncState === 'offline') && !conflictDetail && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-sm">
+          <span>Vehicle data has not reached the cloud yet. Keep this device's local data until sync succeeds.</span>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={downloadRecovery}>Download local backup</Button>
+            {syncState !== 'offline' && <Button size="sm" onClick={() => void sync(true)}>Retry sync</Button>}
+          </div>
+        </div>}
         {workspaceGuest && <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-sm">
           <span>Guest preview. Vehicle changes are temporary. Pickup requests are view-only.</span>
           <Button size="sm" variant="outline" onClick={() => {
@@ -757,6 +789,7 @@ function TopViewCar({ vehicle, roadTest, xParked = false, onSelect }: { vehicle:
 
 function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, zoneStats, occupied, available, reserved, utilization, locationLabel, actor, actorId, role, addMovement, canManage, canEditVehicle, canTransferVehicle, canAssignVehicle, canAccessRoadTests, logAudit, garageLayout, focusedVehicleId, onFocusedVehicleHandled, onOpenRoadTests, onAssignUnassignedVehicle, assignSelectedBay, assignmentVehicle, setAssignmentVehicle }: { locations: ParkingLocation[]; setLocations: React.Dispatch<React.SetStateAction<ParkingLocation[]>>; movements: Movement[]; vehicles: Vehicle[]; setVehicles: React.Dispatch<React.SetStateAction<Vehicle[]>>; zoneStats: { zone: string; total: number; available: number; percent: number; state: string }[]; occupied: number; available: number; reserved: number; utilization: number; locationLabel: (id?: string) => string; actor: string; actorId: string; role: Role; addMovement: (vehicleId: string, fromLocationId: string | undefined, toLocationId: string | undefined, type: Movement['movementType']) => void; canManage: boolean; canEditVehicle: boolean; canTransferVehicle: boolean; canAssignVehicle: boolean; canAccessRoadTests: boolean; logAudit: (action: string, entity: string, detail: string) => void; garageLayout: GarageLayoutItem[]; focusedVehicleId?: string; onFocusedVehicleHandled: () => void; onOpenRoadTests: (vehicleId?: string) => void; onAssignUnassignedVehicle: (vehicle: Vehicle) => void; assignSelectedBay: (bayId?: string, vehicleForm?: VehicleFormData) => boolean; assignmentVehicle: VehicleFormData; setAssignmentVehicle: React.Dispatch<React.SetStateAction<VehicleFormData>> }) {
   const [selectedBayId, setSelectedBayId] = useState<string>();
+  const [selectedXParkingBayId, setSelectedXParkingBayId] = useState<string>();
   const [overviewVehicleId, setOverviewVehicleId] = useState<string>();
   const [draggedVehicleId, setDraggedVehicleId] = useState<string>();
   const [garageZoneFilter, setGarageZoneFilter] = useState('all');
@@ -845,37 +878,45 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
 
 
   const bayStyle = (status: ParkingLocation['status']) => status === 'Occupied' ? 'bay-occupied' : status === 'Reserved' ? 'bay-reserved' : status === 'Maintenance' ? 'bay-maintenance' : 'bay-available';
-  const selectedBay = locations.find((item: ParkingLocation) => item.id === selectedBayId);
-  const selectedBayVehicle = activeVehicles.find((item: Vehicle) => parkingRecordKey(item.currentLocationId) === parkingRecordKey(selectedBayId));
-  const selectedReservation = bayManagement.reservations.find((item: BayReservation) => item.bayId === selectedBayId && item.status !== 'Released');
-  const selectedMaintenance = bayManagement.maintenance.find((item: BayMaintenance) => item.bayId === selectedBayId && item.status === 'Active');
-  const selectedHistory = bayManagement.audit.filter((item: BayAuditEntry) => item.bayId === selectedBayId);
+  const selectedAnchorId = selectedXParkingBayId ?? selectedBayId;
+  const selectedSlotId = selectedXParkingBayId ? xParkingSlotId(selectedXParkingBayId) : selectedBayId;
+  const selectedPhysicalBay = locations.find((item: ParkingLocation) => item.id === selectedAnchorId);
+  const selectedBayVehicle = activeVehicles.find((item: Vehicle) =>
+    parkingRecordKey(item.currentLocationId) === parkingRecordKey(selectedAnchorId)
+    && (item.xParking === 'Yes') === Boolean(selectedXParkingBayId));
+  const selectedReservation = bayManagement.reservations.find((item: BayReservation) => item.bayId === selectedSlotId && item.status !== 'Released');
+  const selectedMaintenance = bayManagement.maintenance.find((item: BayMaintenance) => item.bayId === selectedSlotId && item.status === 'Active');
+  const selectedHistory = bayManagement.audit.filter((item: BayAuditEntry) => item.bayId === selectedSlotId);
+  const selectedBay = selectedPhysicalBay && selectedXParkingBayId
+    ? { ...selectedPhysicalBay, status: (selectedBayVehicle ? 'Occupied' : selectedMaintenance ? 'Maintenance' : selectedReservation ? 'Reserved' : 'Available') as ParkingLocation['status'] }
+    : selectedPhysicalBay;
   const appendBayAudit = (bayIdValue: string, action: string, comments: string) => {
     const entry: BayAuditEntry = { id: `bay-audit-${crypto.randomUUID()}`, bayId: bayIdValue, user: actor, role, timestamp: new Date().toISOString(), action, comments };
     setBayManagement((current) => ({ ...current, audit: [entry, ...current.audit] }));
-    logAudit(action, 'Parking bay', `${locationLabel(bayIdValue)} · ${comments} · role ${role}`);
+    const auditLocation = bayIdValue.startsWith('x-parking:') ? `X Parking beside ${locationLabel(bayIdValue.slice('x-parking:'.length))}` : locationLabel(bayIdValue);
+    logAudit(action, 'Parking bay', `${auditLocation} · ${comments} · role ${role}`);
   };
   const reserveBay = (data: Omit<BayReservation, 'bayId' | 'status'>) => {
     if (!selectedBay || selectedBay.status !== 'Available') return toast.error('This bay is no longer vacant.');
-    const reservation: BayReservation = { bayId: selectedBay.id, status: 'Active', ...data };
-    setBayManagement((current) => ({ ...current, reservations: [reservation, ...current.reservations.filter((item: BayReservation) => item.bayId !== selectedBay.id || item.status === 'Released')] }));
-    setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => item.id === selectedBay.id ? { ...item, status: 'Reserved', remarks: data.reason } : item));
-    appendBayAudit(selectedBay.id, 'Reservation Created', `${data.reservedBy}; ${data.reason}; ${data.startAt} to ${data.endAt}`);
+    const reservation: BayReservation = { bayId: selectedSlotId ?? selectedBay.id, status: 'Active', ...data };
+    setBayManagement((current) => ({ ...current, reservations: [reservation, ...current.reservations.filter((item: BayReservation) => item.bayId !== selectedSlotId || item.status === 'Released')] }));
+    if (!selectedXParkingBayId) setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => item.id === selectedBay.id ? { ...item, status: 'Reserved', remarks: data.reason } : item));
+    appendBayAudit(selectedSlotId ?? selectedBay.id, 'Reservation Created', `${data.reservedBy}; ${data.reason}; ${data.startAt} to ${data.endAt}`);
     toast.success(`Bay ${selectedBay.zone}-${selectedBay.bayNumber} reserved.`);
   };
   const markMaintenance = (data: Omit<BayMaintenance, 'bayId' | 'status'>) => {
     if (!selectedBay || selectedBay.status !== 'Available') return toast.error('Only vacant bays can enter maintenance.');
-    const record: BayMaintenance = { bayId: selectedBay.id, status: 'Active', ...data };
-    setBayManagement((current) => ({ ...current, maintenance: [record, ...current.maintenance.filter((item: BayMaintenance) => item.bayId !== selectedBay.id || item.status === 'Completed')] }));
-    setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => item.id === selectedBay.id ? { ...item, status: 'Maintenance', remarks: data.reason } : item));
-    appendBayAudit(selectedBay.id, 'Maintenance Started', `${data.reason}; expected ${data.expectedCompletion}`);
+    const record: BayMaintenance = { bayId: selectedSlotId ?? selectedBay.id, status: 'Active', ...data };
+    setBayManagement((current) => ({ ...current, maintenance: [record, ...current.maintenance.filter((item: BayMaintenance) => item.bayId !== selectedSlotId || item.status === 'Completed')] }));
+    if (!selectedXParkingBayId) setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => item.id === selectedBay.id ? { ...item, status: 'Maintenance', remarks: data.reason } : item));
+    appendBayAudit(selectedSlotId ?? selectedBay.id, 'Maintenance Started', `${data.reason}; expected ${data.expectedCompletion}`);
     toast.success('Bay marked under maintenance.');
   };
   const completeMaintenance = () => {
     if (!selectedBay) return;
-    setBayManagement((current) => ({ ...current, maintenance: current.maintenance.map((item: BayMaintenance) => item.bayId === selectedBay.id && item.status === 'Active' ? { ...item, status: 'Completed' } : item) }));
-    setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => item.id === selectedBay.id ? { ...item, status: 'Available', remarks: '' } : item));
-    appendBayAudit(selectedBay.id, 'Maintenance Completed', 'Bay returned to service');
+    setBayManagement((current) => ({ ...current, maintenance: current.maintenance.map((item: BayMaintenance) => item.bayId === selectedSlotId && item.status === 'Active' ? { ...item, status: 'Completed' } : item) }));
+    if (!selectedXParkingBayId) setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => item.id === selectedBay.id ? { ...item, status: 'Available', remarks: '' } : item));
+    appendBayAudit(selectedSlotId ?? selectedBay.id, 'Maintenance Completed', 'Bay returned to service');
     toast.success('Maintenance completed; bay is vacant.');
   };
 
@@ -885,16 +926,16 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     const requesterName = requester.trim() || actor;
     const releaseReason = reason.trim();
     const requestAt = new Date().toISOString();
-    setBayManagement((current) => ({ ...current, reservations: current.reservations.map((item: BayReservation) => item.bayId === selectedBay.id && item.status === 'Active' ? { ...item, status: 'Release Pending', requesterName, requestAt, releaseReason } : item) }));
-    appendBayAudit(selectedBay.id, 'Release Request Submitted', releaseReason ? `${requesterName}: ${releaseReason}` : `${requesterName}: no reason provided`);
+    setBayManagement((current) => ({ ...current, reservations: current.reservations.map((item: BayReservation) => item.bayId === selectedSlotId && item.status === 'Active' ? { ...item, status: 'Release Pending', requesterName, requestAt, releaseReason } : item) }));
+    appendBayAudit(selectedSlotId ?? selectedBay.id, 'Release Request Submitted', releaseReason ? `${requesterName}: ${releaseReason}` : `${requesterName}: no reason provided`);
     toast.info(`${selectedReservation.reservedBy} notified of the release request.`);
   };
   const decideRelease = (approved: boolean) => {
     if (!selectedBay || !selectedReservation || selectedReservation.status !== 'Release Pending') return toast.error('No pending release request was found for this bay.');
     const decisionAt = new Date().toISOString();
-    setBayManagement((current) => ({ ...current, reservations: current.reservations.map((item: BayReservation) => item.bayId === selectedBay.id && item.status === 'Release Pending' ? { ...item, status: approved ? 'Released' : 'Active', decisionAt, decisionBy: actor } : item) }));
-    if (approved) setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => item.id === selectedBay.id ? { ...item, status: 'Available', remarks: '' } : item));
-    appendBayAudit(selectedBay.id, approved ? 'Release Approved' : 'Release Rejected', `${actor}; requester ${selectedReservation.requesterName ?? '—'} notified`);
+    setBayManagement((current) => ({ ...current, reservations: current.reservations.map((item: BayReservation) => item.bayId === selectedSlotId && item.status === 'Release Pending' ? { ...item, status: approved ? 'Released' : 'Active', decisionAt, decisionBy: actor } : item) }));
+    if (approved && !selectedXParkingBayId) setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => item.id === selectedBay.id ? { ...item, status: 'Available', remarks: '' } : item));
+    appendBayAudit(selectedSlotId ?? selectedBay.id, approved ? 'Release Approved' : 'Release Rejected', `${actor}; requester ${selectedReservation.requesterName ?? '—'} notified`);
     toast.success(approved ? 'Release approved; bay is now vacant.' : 'Reservation kept; requester notified.');
   };
   const containerVehicleCount = (locationId: string) => activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId)).length;
@@ -904,6 +945,12 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     const destination = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(destinationId));
     if (!vehicle || !destination) return toast.error('Choose a valid destination.');
     if (toXParking) {
+      const management = loadBayManagementState();
+      const slotId = xParkingSlotId(destination.id);
+      if (management.reservations.some((item) => item.bayId === slotId && item.status !== 'Released')
+        || management.maintenance.some((item) => item.bayId === slotId && item.status === 'Active')) {
+        return toast.error('This X Parking space is reserved or under maintenance.');
+      }
       if (!supportsXParkingLocation(destination)) return toast.error('X Parking is only available in the marked A, B, and C bay rows.');
       if (activeVehicles.some((item: Vehicle) => item.xParking === 'Yes' && item.id !== vehicle.id && parkingRecordKey(item.currentLocationId) === parkingRecordKey(destination.id))) {
         return toast.error('This X Parking space is already occupied.');
@@ -1030,8 +1077,30 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                       {bays.map((bay: ParkingLocation) => {
                         const xVehicle = showVehiclesOnMap ? activeVehicles.find((item: Vehicle) => item.xParking === 'Yes' && parkingRecordKey(item.currentLocationId) === parkingRecordKey(bay.id)) : undefined;
                         const xVehicleRoadTest = xVehicle ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === xVehicle.id) : undefined;
-                        return <button key={`x-parking-${bay.id}`} id={xVehicle ? `garage-vehicle-${xVehicle.id}` : undefined} type="button" className={`x-parking-space${isHighlightedBay(bay.id, true) ? ' garage-located-bay' : ''}`} onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()} onDrop={() => { if (draggedVehicleId && !xVehicle) transferVehicle(draggedVehicleId, bay.id, true); setDraggedVehicleId(undefined); }} onClick={() => xVehicle && setOverviewVehicleId(xVehicle.id)} aria-label={`X Parking space in front of ${bay.zone}-${bay.bayNumber}${xVehicle ? `, vehicle ${xVehicle.plateNumber}` : ', vacant'}`}>
-                          {xVehicle && <TopViewCar vehicle={xVehicle} roadTest={xVehicleRoadTest} xParked />}
+                        const slotId = xParkingSlotId(bay.id);
+                        const reserved = bayManagement.reservations.some((item: BayReservation) => item.bayId === slotId && item.status !== 'Released');
+                        const maintenance = bayManagement.maintenance.some((item: BayMaintenance) => item.bayId === slotId && item.status === 'Active');
+                        const status = xVehicle ? 'Occupied' : maintenance ? 'Maintenance' : reserved ? 'Reserved' : 'Available';
+                        return <button key={`x-parking-${bay.id}`} id={xVehicle ? `garage-vehicle-${xVehicle.id}` : undefined} type="button"
+                          className={`x-parking-space ${bayStyle(status)}${isHighlightedBay(bay.id, true) ? ' garage-located-bay' : ''}`}
+                          draggable={Boolean(xVehicle && canTransferVehicle)}
+                          onDragStart={() => { if (xVehicle && canTransferVehicle) setDraggedVehicleId(xVehicle.id); }}
+                          onDragEnd={() => setDraggedVehicleId(undefined)}
+                          onDragOver={(event: React.DragEvent<HTMLButtonElement>) => { if (status === 'Available') event.preventDefault(); }}
+                          onDrop={(event: React.DragEvent<HTMLButtonElement>) => {
+                            event.preventDefault();
+                            if (draggedVehicleId && status === 'Available' && canTransferVehicle) transferVehicle(draggedVehicleId, bay.id, true);
+                            setDraggedVehicleId(undefined);
+                          }}
+                          onClick={() => {
+                            setSelectedBayId(undefined);
+                            if (xVehicle) { setSelectedXParkingBayId(undefined); setOverviewVehicleId(xVehicle.id); }
+                            else { setOverviewVehicleId(undefined); setSelectedXParkingBayId(bay.id); }
+                          }}
+                          title={`X Parking beside ${bay.zone}-${bay.bayNumber}: ${status}`}
+                          aria-label={`X Parking beside ${bay.zone}-${bay.bayNumber}: ${status}${xVehicle ? `, vehicle ${xVehicle.plateNumber}` : ''}`}>
+                          {xVehicle ? <TopViewCar vehicle={xVehicle} roadTest={xVehicleRoadTest} xParked onSelect={() => { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); setOverviewVehicleId(xVehicle.id); }} />
+                            : <span className="x-parking-empty-label">X</span>}
                         </button>;
                       })}
                     </div>;
@@ -1039,10 +1108,11 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                       const bayVehicles = showVehiclesOnMap ? activeVehicles.filter((item: Vehicle) => parkingRecordKey(item.currentLocationId) === parkingRecordKey(bay.id)) : [];
                       const vehicle = bayVehicles.find((item: Vehicle) => item.xParking !== 'Yes');
                       const xParkingVehicle = bayVehicles.find((item: Vehicle) => item.xParking === 'Yes');
-                      const displayVehicle = vehicle ?? xParkingVehicle;
+                      // The adjacent X space has its own hit target and cannot replace the regular bay's vehicle.
+                      const displayVehicle = vehicle;
                       const vehicleRoadTest = displayVehicle ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === displayVehicle.id) : undefined;
-                      const displayStatus: ParkingLocation['status'] = vehicle ? 'Occupied' : bayVehicles.length === 0 && bay.status === 'Occupied' ? 'Available' : bay.status;
-                      return <motion.button id={vehicle ? `garage-vehicle-${vehicle.id}` : undefined} key={bay.id} type="button" draggable={Boolean(displayVehicle && canTransferVehicle)} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: Math.min(index, 12) * 0.025, ease: 'easeOut' as const }} onDragStart={() => displayVehicle && setDraggedVehicleId(displayVehicle.id)} onDragEnd={() => setDraggedVehicleId(undefined)} onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()} onDrop={() => { if (draggedVehicleId && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(draggedVehicleId, bay.id); setDraggedVehicleId(undefined); }} onClick={() => { if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }} className={`parking-space ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`} aria-label={`${isLiveGarageContainer(bay) ? 'Container' : 'Bay ' + bay.bayNumber}, ${zoneDisplayName(bay.zone)}, ${displayStatus}${vehicle ? `, vehicle ${vehicle.plateNumber}` : ''}${xParkingVehicle ? `, X-Parked vehicle ${xParkingVehicle.plateNumber}` : ''}`}>
+                      const displayStatus: ParkingLocation['status'] = vehicle ? 'Occupied' : bay.status === 'Occupied' ? 'Available' : bay.status;
+                      return <motion.button id={vehicle ? `garage-vehicle-${vehicle.id}` : undefined} key={bay.id} type="button" draggable={Boolean(displayVehicle && canTransferVehicle)} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: Math.min(index, 12) * 0.025, ease: 'easeOut' as const }} onDragStart={() => vehicle && setDraggedVehicleId(vehicle.id)} onDragEnd={() => setDraggedVehicleId(undefined)} onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()} onDrop={() => { if (draggedVehicleId && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(draggedVehicleId, bay.id); setDraggedVehicleId(undefined); }} onClick={() => { setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }} className={`parking-space ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`} aria-label={`${isLiveGarageContainer(bay) ? 'Container' : 'Bay ' + bay.bayNumber}, ${zoneDisplayName(bay.zone)}, ${displayStatus}${vehicle ? `, vehicle ${vehicle.plateNumber}` : ''}${xParkingVehicle ? `, X-Parked vehicle ${xParkingVehicle.plateNumber}` : ''}`}>
                         <span className="absolute bottom-0.5 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap text-xs font-black">{isLiveGarageContainer(bay) ? bay.zone : `${bay.zone === 'Reception' ? 'R ' : bay.zone === 'Workshop' ? 'W ' : bay.zone}-${bay.bayNumber}`}</span>
                         {vehicle && <TopViewCar vehicle={vehicle} roadTest={vehicleRoadTest} onSelect={() => { setSelectedBayId(undefined); setOverviewVehicleId(vehicle.id); }} />}
                         {!displayVehicle && bay.status !== 'Available' && bay.status !== 'Occupied' && <Badge className="bay-status-label" variant={bay.status === 'Reserved' ? 'secondary' : 'outline'}>{bay.status}</Badge>}
@@ -1108,12 +1178,12 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                 <p className="mt-1 text-sm text-muted-foreground">{occupant.brand} {occupant.model} · {occupant.color}</p>
                 <div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Info label="Customer" value={occupant.customerName} /><Info label="Assigned by" value={occupant.assignedBy} /><Info label="Assigned on" value={occupant.assignedDate ? format(new Date(occupant.assignedDate), 'dd MMM yyyy, HH:mm') : undefined} /></div>
               </button>) : <p className="text-sm text-muted-foreground">No vehicles assigned.</p>}
-              <Button variant="outline" className="w-full" onClick={() => { setOverviewVehicleId(undefined); setSelectedBayId(container.id); }}>View container details</Button>
+              <Button variant="outline" className="w-full" onClick={() => { setOverviewVehicleId(undefined); setSelectedXParkingBayId(undefined); setSelectedBayId(container.id); }}>View container details</Button>
             </CardContent>
           </Card>;
         })}
       </div>
-      <BayInformationDialog bay={selectedBay} open={Boolean(selectedBayId)} onOpenChange={(open: boolean) => { if (!open) setSelectedBayId(undefined); }} vehicle={selectedBayVehicle} reservation={selectedReservation} maintenance={selectedMaintenance} history={selectedHistory} actor={actor} role={role} onReserve={reserveBay} onMaintenance={markMaintenance} onCompleteMaintenance={completeMaintenance} assignmentVehicle={assignmentVehicle} onAssignmentVehicleChange={setAssignmentVehicle} canAssignVehicle={canAssignVehicle} onAssignVehicle={() => { if (!selectedBay) return; if (assignSelectedBay(selectedBay.id, assignmentVehicle)) setSelectedBayId(undefined); }} onRequestRelease={requestRelease} onReleaseDecision={decideRelease} />
+      <BayInformationDialog key={selectedSlotId ?? 'no-bay'} isXParking={Boolean(selectedXParkingBayId)} bay={selectedBay} open={Boolean(selectedAnchorId)} onOpenChange={(open: boolean) => { if (!open) { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); } }} vehicle={selectedBayVehicle} reservation={selectedReservation} maintenance={selectedMaintenance} history={selectedHistory} actor={actor} role={role} onReserve={reserveBay} onMaintenance={markMaintenance} onCompleteMaintenance={completeMaintenance} assignmentVehicle={assignmentVehicle} onAssignmentVehicleChange={setAssignmentVehicle} canAssignVehicle={canAssignVehicle} onAssignVehicle={() => { if (!selectedBay) return; const form = selectedXParkingBayId ? { ...assignmentVehicle, xParking: 'Yes' as const } : assignmentVehicle; if (assignSelectedBay(selectedBay.id, form)) { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); } }} onRequestRelease={requestRelease} onReleaseDecision={decideRelease} />
       <VehicleOverviewDialog viewerRole={role} vehicle={activeVehicles.find((item: Vehicle) => item.id === overviewVehicleId)} open={Boolean(overviewVehicleId)} onOpenChange={(open: boolean) => { if (!open) setOverviewVehicleId(undefined); }} locations={locations} vehicles={activeVehicles} movements={movements} roadTest={overviewVehicleId ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === overviewVehicleId) : undefined} canRequestRoadTest={canAccessRoadTests} canEdit={canEditVehicle} canTransfer={canTransferVehicle} canDelete={canManage} onRequestRoadTest={(vehicle: Vehicle) => { setOverviewVehicleId(undefined); onOpenRoadTests(vehicle.id); }} onUpdate={updateVehicle} onTransfer={transferVehicle} onStartWashing={startWashing} onDeliver={deliverVehicle} onDelete={deleteVehicle} />
     </div>
   );
@@ -1126,9 +1196,14 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
   const [occupantPlateNumber, setOccupantPlateNumber] = useState('');
   const [occupantModel, setOccupantModel] = useState('');
   const selectedBay = locations.find((item: ParkingLocation) => item.id === bayId);
-  const selectedOccupant = vehicles.find((item: Vehicle) => parkingRecordKey(item.currentLocationId) === parkingRecordKey(bayId));
-  const selectedBayOccupied = Boolean(selectedOccupant);
-  const vacantBays = locations.filter((item: ParkingLocation) => supportsXParkingLocation(item) && item.status === 'Available' && !vehicles.some((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(item.id)));
+  const selectedOccupant = vehicles.find((item: Vehicle) => item.xParking !== 'Yes' && parkingRecordKey(item.currentLocationId) === parkingRecordKey(bayId));
+  const selectedXOccupant = vehicles.find((item: Vehicle) => item.xParking === 'Yes' && parkingRecordKey(item.currentLocationId) === parkingRecordKey(bayId));
+  const selectedBayOccupied = Boolean(selectedXOccupant);
+  const management = loadBayManagementState();
+  const vacantBays = locations.filter((item: ParkingLocation) => supportsXParkingLocation(item)
+    && !vehicles.some((vehicle: Vehicle) => vehicle.xParking === 'Yes' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(item.id))
+    && !management.reservations.some((record) => record.bayId === xParkingSlotId(item.id) && record.status !== 'Released')
+    && !management.maintenance.some((record) => record.bayId === xParkingSlotId(item.id) && record.status === 'Active'));
   const suggestedBay = selectedBay ? [...vacantBays].filter((item: ParkingLocation) => item.id !== selectedBay.id).sort((left: ParkingLocation, right: ParkingLocation) => {
     const scopeRank = (item: ParkingLocation) => item.zone !== selectedBay.zone ? 3 : item.section !== selectedBay.section ? 2 : item.lane !== selectedBay.lane ? 1 : 0;
     const scopeDifference = scopeRank(left) - scopeRank(right);
@@ -1136,7 +1211,7 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
     return Math.abs(Number(left.bayNumber) - Number(selectedBay.bayNumber)) - Math.abs(Number(right.bayNumber) - Number(selectedBay.bayNumber));
   })[0] : undefined;
   const baysForSelection = assignmentVehicle.xParking === 'Yes' ? locations.filter(supportsXParkingLocation) : availableBays;
-  const parkHereBay = selectedBayOccupied ? suggestedBay ?? selectedBay : selectedBay;
+  const parkHereBay = selectedBayOccupied ? suggestedBay : selectedBay;
   const openAssignment = () => {
     if (assignmentVehicle.xParking !== 'Yes') {
       handleAssign();
@@ -1182,9 +1257,11 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2"><Label>Parking zone</Label><Select value={zone} onValueChange={(value: string) => { setZone(value); setBayId(''); }}><SelectTrigger className="h-12"><SelectValue /></SelectTrigger><SelectContent>{zoneNames.filter((item: string) => item).map((item: string) => <SelectItem key={item} value={item}>{['Lexus Reception', 'Toyota Reception', 'Washing Area', 'BP1', 'BP2', 'BP3', 'Workshop Centre Bay'].includes(item) ? item : `Zone ${item}`}</SelectItem>)}</SelectContent></Select></div>
             <div className="space-y-2"><Label>{assignmentVehicle.xParking === 'Yes' ? 'Parking bay / X Parking anchor' : 'Available bay'}</Label><Select value={bayId || 'none'} onValueChange={(value: string) => { const nextBayId = value === 'none' ? '' : value; setBayId(nextBayId); const nextBay = locations.find((item: ParkingLocation) => item.id === nextBayId); if (nextBay && nextBay.zone !== zone) setZone(nextBay.zone); }}><SelectTrigger className="h-12"><SelectValue placeholder="Select bay" /></SelectTrigger><SelectContent><SelectItem value="none">Select a bay</SelectItem>{baysForSelection.filter((item: ParkingLocation) => item.id).map((item: ParkingLocation) => {
-              const occupant = vehicles.find((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(item.id));
-              const isAvailable = !occupant && item.status === 'Available';
-              return <SelectItem key={item.id} value={item.id}>{parkingLocationLabel(item)} · {item.section ?? 'Main'} / {item.lane}{assignmentVehicle.xParking === 'Yes' ? ` · ${isAvailable ? 'Vacant' : occupant ? `Occupied by ${occupant.plateNumber}` : item.status}` : ''}</SelectItem>;
+              const occupant = vehicles.find((vehicle: Vehicle) => vehicle.xParking === 'Yes' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(item.id));
+              const xReserved = management.reservations.some((record) => record.bayId === xParkingSlotId(item.id) && record.status !== 'Released');
+              const xMaintenance = management.maintenance.some((record) => record.bayId === xParkingSlotId(item.id) && record.status === 'Active');
+              const xStatus = occupant ? `X occupied by ${occupant.plateNumber}` : xMaintenance ? 'X under maintenance' : xReserved ? 'X reserved' : 'X vacant';
+              return <SelectItem key={item.id} value={item.id}>{parkingLocationLabel(item)} · {item.section ?? 'Main'} / {item.lane}{assignmentVehicle.xParking === 'Yes' ? ` · ${xStatus}` : ''}</SelectItem>;
             })}</SelectContent></Select></div>
           </div>
           <div className="grid gap-3 sm:grid-cols-2"><Button size="lg" onClick={openAssignment}><CircleParking /> Assign vehicle</Button><Button size="lg" variant="outline" onClick={handleRelease}><X /> Release vehicle</Button></div>
@@ -1195,9 +1272,9 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
     </div>
     <Dialog open={xParkingConfirmationOpen} onOpenChange={setXParkingConfirmationOpen}>
       <DialogContent>
-        <DialogHeader><DialogTitle>Confirm X Parking location</DialogTitle><DialogDescription>{selectedBay ? `${selectedBay.zone}-${selectedBay.bayNumber} is ${selectedBayOccupied ? `occupied by ${selectedOccupant?.plateNumber}` : 'vacant'}.` : 'Choose a bay to continue.'} {suggestedBay ? `Nearby vacant bay suggestion: ${suggestedBay.zone}-${suggestedBay.bayNumber}.` : 'No nearby vacant bay is available.'}</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>Confirm X Parking location</DialogTitle><DialogDescription>{selectedBay ? `${selectedBay.zone}-${selectedBay.bayNumber} X Parking is ${selectedBayOccupied ? `occupied by ${selectedXOccupant?.plateNumber}` : 'vacant'}${selectedOccupant ? `; the adjacent regular bay contains ${selectedOccupant.plateNumber}` : ''}.` : 'Choose a bay to continue.'} {suggestedBay ? `Nearby vacant bay suggestion: ${suggestedBay.zone}-${suggestedBay.bayNumber}.` : 'No nearby vacant bay is available.'}</DialogDescription></DialogHeader>
         <div className="grid gap-3">
-          <Button variant="outline" onClick={openOccupantDetails}>Bay is already occupied</Button>
+          <Button variant="outline" onClick={openOccupantDetails} disabled={selectedBayOccupied}>Record adjacent regular bay vehicle (optional)</Button>
           <Button onClick={parkHere} disabled={!parkHereBay}>{parkHereBay && parkHereBay.id !== selectedBay?.id ? `Park Here · ${parkHereBay.zone}-${parkHereBay.bayNumber}` : 'Park Here'}</Button>
         </div>
         <DialogFooter><Button variant="ghost" onClick={() => setXParkingConfirmationOpen(false)}>Cancel</Button></DialogFooter>

@@ -109,7 +109,7 @@ export const saveOfflineState = (state: OfflineState): boolean => {
           movements: state.movements.slice(0, 100),
           auditEvents: state.auditEvents.slice(0, 100),
         };
-        workspaceDataStorage().removeItem(STORAGE_KEY);
+        // Overwrite atomically; never delete the only local copy before a successful save.
         workspaceDataStorage().setItem(STORAGE_KEY, JSON.stringify(minimalState));
         notifyWorkspaceDataChanged();
         return true;
