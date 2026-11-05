@@ -1,4 +1,5 @@
 import { appStorageKey, workspaceDataStorage } from '@/lib/local-storage-scope';
+import { toast } from 'sonner';
 import { getWorkspaceSessionId } from '@/lib/workspace-session';
 
 export type LocalMutation = { id: string; entity: string; action: string; recordId: string; ownerId?: string; [key: string]: unknown };
@@ -18,10 +19,12 @@ export const listPendingSyncMutations = (ownerId?: string) => read().filter(item
 export function enqueueSync(operation: LocalMutation): boolean {
   const rows = read();
   if (!operation.id || rows.some(item => item.id === operation.id)) return Boolean(operation.id);
-  if (rows.filter(item => !item.acknowledgedAt).length >= 3000) return false;
-  return save([...rows.filter(item => !item.acknowledgedAt), ...rows.filter(item => item.acknowledgedAt).slice(-50), {
+  if (rows.filter(item => !item.acknowledgedAt).length >= 3000) { toast.error('Offline sync journal is full. Export a local backup before continuing.'); return false; }
+  const saved = save([...rows.filter(item => !item.acknowledgedAt), ...rows.filter(item => item.acknowledgedAt).slice(-50), {
     ...operation, sessionId: getWorkspaceSessionId(), queuedAt: new Date().toISOString(),
   }]);
+  if (!saved) toast.error('Could not save the offline sync journal. Keep the device data and export a local backup.');
+  return saved;
 }
 export function acknowledgeSyncMutations(ids: readonly string[]): boolean {
   if (!ids.length) return true;
