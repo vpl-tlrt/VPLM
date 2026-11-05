@@ -8,6 +8,13 @@ export class WorkspaceConflictError extends Error {
   }
 }
 
+export class WorkspaceResetError extends Error {
+  constructor() {
+    super('The shared workspace was reset. Download your unsynced local backup before reloading; old records cannot be uploaded automatically.');
+    this.name = 'WorkspaceResetError';
+  }
+}
+
 export async function loadWorkspace(userId: string): Promise<{ snapshot: WorkspaceSnapshot | null; revision: number | null; isGuest: boolean }> {
   if (!supabase) throw new Error('Supabase is not configured.');
 
@@ -54,6 +61,7 @@ export async function saveWorkspace(snapshot: WorkspaceSnapshot, revision: numbe
     if (error.context instanceof Response) {
       const body = await error.context.clone().json().catch(() => null) as { code?: string; error?: string } | null;
       if (error.context.status === 409 || body?.code === 'REVISION_CONFLICT') throw new WorkspaceConflictError();
+      if (error.context.status === 410 || body?.code === 'WORKSPACE_RESET') throw new WorkspaceResetError();
       throw new Error(body?.error ?? error.message);
     }
     throw error;
