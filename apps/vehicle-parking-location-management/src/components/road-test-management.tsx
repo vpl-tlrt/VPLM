@@ -164,7 +164,7 @@ export function RoadTestManagement({ vehicles, locations, actor, actorRole, user
   const assignableUsers = useMemo(() => {
     const users = applicationUsers
       .filter((candidate) => candidate.name.trim())
-      .filter((candidate) => ['TechnicalLeader', 'TechnicalAdvisor'].includes(candidate.role))
+      .filter((candidate) => candidate.role === 'TechnicalLeader' || candidate.role === 'TechnicalAdvisor')
       .map((candidate) => ({ id: candidate.id, name: candidate.name.trim(), loginId: candidate.loginId ?? '', role: candidate.role }))
       .sort((a, b) => a.name.localeCompare(b.name));
     if (['TechnicalLeader', 'TechnicalAdvisor'].includes(actorRole) && !users.some((candidate) => candidate.name.toLowerCase() === actor.trim().toLowerCase())) {
