@@ -186,7 +186,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     }
   });
   const [isNeumorphism, setIsNeumorphism] = useState<boolean>(() => window.localStorage.getItem(appStorageKey('vplm-ui-mode')) === 'neumorphism');
-  const [currentTime, setCurrentTime] = useState(() => new Date());
+  // Clock changes are isolated from the vehicle layout.
 
   const access = useAppAccess(user?.userPrincipalName, user?.objectId, localGuest);
   const role: Role = workspaceGuest ? 'Guest Users' : access.data?.role ?? 'Operator';
@@ -300,10 +300,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
 
 
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+
 
 
   useEffect(() => {
@@ -325,7 +322,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const actor = localGuest ? 'Guest User' : user?.fullName ?? 'Local Operator';
   const { users: onlineUsers, connected: presenceConnected } = useOnlineUsers(!localGuest && !guestPreview && queueOwnerId ? { id: queueOwnerId, name: actor, role } : null);
 
-  const activeVehicles = vehicles.filter((item: Vehicle) => item.status !== 'Delivered');
+  const activeVehicles = useMemo(() => vehicles.filter((item: Vehicle) => item.status !== 'Delivered'), [vehicles]);
   const containerVehicleCount = (locationId: string) => activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId)).length;
   const containerCanAccept = (location: ParkingLocation) => isLiveGarageContainer(location) && location.status !== 'Reserved' && location.status !== 'Maintenance' && containerVehicleCount(location.id) < 15;
   const linkedVehicleLocationIds = useMemo(() => new Set(activeVehicles.filter((item: Vehicle) => item.xParking !== 'Yes').map((item: Vehicle) => parkingRecordKey(item.currentLocationId)).filter((id: string) => Boolean(id))), [activeVehicles]);
@@ -663,13 +660,13 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
 
 
             <div className="relative mx-auto hidden max-w-xl flex-1 overflow-hidden rounded-2xl bg-background lg:block">
-              <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-lg font-bold tabular-nums text-muted-foreground" aria-hidden="true">{format(currentTime, 'HH:mm:ss')}</span>
+              <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-lg font-bold tabular-nums text-muted-foreground" aria-hidden="true"><LiveClock formatString="HH:mm:ss" /></span>
               <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} onFocus={() => { if (searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-28" aria-label="Global vehicle search" />
             </div>
             <div className="ml-auto flex items-center gap-2">
               {guestPreview && <Badge variant="secondary" className="shrink-0 border border-amber-500/60 bg-amber-100 font-black text-amber-950">GUEST PREVIEW · NO CLOUD SAVES</Badge>}
-              <div className="hidden text-right xl:block"><p className="text-sm font-semibold">{format(currentTime, 'EEE, d MMM')}</p><p className="text-xs text-muted-foreground">{format(currentTime, 'HH:mm:ss')}</p></div>
+              <div className="hidden text-right xl:block"><p className="text-sm font-semibold"><LiveClock formatString="EEE, d MMM" /></p><p className="text-xs text-muted-foreground"><LiveClock formatString="HH:mm:ss" /></p></div>
               <Button variant={isOnline && syncState !== 'error' ? 'default' : 'secondary'} size="sm" className="rounded-xl" onClick={() => void sync(true)} aria-label={`Data storage status: ${syncLabel}`} title={localGuest || guestPreview ? 'Guest changes are not uploaded.' : lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Click to sync workspace data'}><span className="live-dot" /><span className="hidden lg:inline">{syncLabel}</span></Button>
               <Button variant="outline" size="icon" className="rounded-xl" onClick={handleNotificationClick} onDoubleClick={(event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault()} aria-label={`Notifications. Sound ${soundEnabled ? 'on' : 'off'}. Double-click to toggle sound.`} title={`Notification sound ${soundEnabled ? 'on' : 'off'} · double-click to toggle`}>{soundEnabled ? <Bell /> : <BellOff />}</Button>
               <DropdownMenu>
@@ -693,7 +690,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
               <Sheet><SheetTrigger asChild><Button variant="outline" size="icon" className="rounded-xl" aria-label="Open quick actions"><Plus /></Button></SheetTrigger><SheetContent side="right"><SheetHeader><SheetTitle>Quick actions</SheetTitle></SheetHeader><div className="mt-6 grid gap-2">{visibleNavigation.filter((item) => ['assignment', 'search', 'transfer', 'reservations', 'road-tests', 'pickup-requests'].includes(item.id)).map(({ id, label, icon: Icon }) => <Button key={id} variant="outline" className="justify-start" onClick={() => setScreen(id)}><Icon />{label}</Button>)}</div><div className="mt-6 rounded-2xl bg-muted p-4 text-muted-foreground"><p className="font-semibold text-foreground">{actor}</p><p className="text-sm">{roleLabel(role)}</p></div></SheetContent></Sheet>
             </div>
           </div>
-          <div className="relative mt-3 overflow-hidden rounded-2xl bg-background lg:hidden"><span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-base font-bold tabular-nums text-muted-foreground" aria-hidden="true">{format(currentTime, 'HH:mm:ss')}</span><Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-24" aria-label="Global vehicle search" /></div>
+          <div className="relative mt-3 overflow-hidden rounded-2xl bg-background lg:hidden"><span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-base font-bold tabular-nums text-muted-foreground" aria-hidden="true"><LiveClock formatString="HH:mm:ss" /></span><Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-24" aria-label="Global vehicle search" /></div>
         </header>
         {conflictDetail && <div role="alert" className="flex flex-wrap items-center gap-2 border-b bg-muted p-3 text-sm">
           <span>Sync conflict: {conflictDetail}. Local work is available to download.</span>
@@ -760,6 +757,15 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   return appShell;
 }
 
+function LiveClock({ formatString }: { formatString: string }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <>{format(now, formatString)}</>;
+}
+
 function Brand({ onHome }: { onHome: () => void }) { return <button type="button" aria-label="Go to home page" onClick={onHome} className="flex h-20 w-full items-center gap-3 border-b px-5 text-left"><div className="grid h-10 w-10 place-items-center rounded-lg bg-primary text-primary-foreground"><CarFront /></div><div><p className="font-bold">Vehicle Parking</p><p className="text-xs text-muted-foreground">Location Management</p></div></button>; }
 
 type AnalysisMatch = { plateNumber: string; bayLabel: string; locationId: string; confidence: number };
@@ -800,7 +806,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
 
   const roadTests = loadRoadTests();
   const currentRoadTests = roadTests.filter((test: RoadTestRecord) => test.status !== 'Completed');
-  const activeVehicles = vehicles.filter((item: Vehicle) => item.status !== 'Delivered');
+  const activeVehicles = useMemo(() => vehicles.filter((item: Vehicle) => item.status !== 'Delivered'), [vehicles]);
   const unassignedVehicles = activeVehicles.filter((item: Vehicle) => !item.currentLocationId && item.status !== 'Released');
 
   const showVehiclesOnMap = true;
