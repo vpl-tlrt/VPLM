@@ -66,7 +66,6 @@ export function VehicleFormFields({ value, onChange, idPrefix, assignmentMode = 
   const fields: { key: keyof VehicleFormData; label: string; placeholder: string }[] = assignmentMode
     ? [
         { key: 'plateNumber', label: 'Registration number', placeholder: 'ABC-1234' },
-        { key: 'vin', label: 'VIN / chassis number', placeholder: 'Enter VIN' },
       ]
     : [
         { key: 'plateNumber', label: 'Registration number', placeholder: 'ABC-1234' },
