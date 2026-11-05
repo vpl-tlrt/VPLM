@@ -68,7 +68,7 @@ export function ReviewWorkspaceAccess({ administrator }: { administrator: boolea
       {request.status === 'Pending' && <div className="flex flex-wrap gap-2">
         <select aria-label={`Role for ${request.name}`} className="rounded-md border bg-background px-2"
           value={selected[request.user_id] ?? 'Operator'} onChange={e => setSelected({ ...selected, [request.user_id]: e.target.value })}>
-          {(administrator ? [...roles, 'Supervisor'] : roles).map(role => <option key={role}>{role}</option>)}
+          {(administrator ? [...roles, 'Supervisor'] : roles).map(role => <option key={role} value={role}>{role === 'TechnicalLeader' ? 'Technical Leader' : role === 'TechnicalAdvisor' ? 'Technical Advisor' : role}</option>)}
         </select>
         <Button disabled={Boolean(busy)} onClick={() => void review(request, 'Approved')}>Approve</Button>
         <Button disabled={Boolean(busy)} variant="outline" onClick={() => void review(request, 'Rejected')}>Reject</Button>
