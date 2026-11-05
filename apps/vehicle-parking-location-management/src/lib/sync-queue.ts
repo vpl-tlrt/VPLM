@@ -29,4 +29,4 @@ export function acknowledgeSyncMutations(ids: readonly string[]): boolean {
   const rows = read().map(item => done.has(item.id) ? { ...item, acknowledgedAt: new Date().toISOString() } : item);
   return save([...rows.filter(item => !item.acknowledgedAt), ...rows.filter(item => item.acknowledgedAt).slice(-50)]);
 }
-export const exportSyncJournal = () => JSON.stringify({ exportedAt: new Date().toISOString(), operations: read() }, null, 2);
+export const exportSyncJournal = (ownerId?: string) => JSON.stringify({ exportedAt: new Date().toISOString(), operations: read().filter(item => !ownerId || item.ownerId === ownerId) }, null, 2);
