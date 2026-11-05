@@ -699,6 +699,13 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           <span>Sync conflict: {conflictDetail}. Local work is available to download.</span>
           <Button size="sm" variant="outline" onClick={downloadRecovery}>Download pending changes</Button>
         </div>}
+        {!guestPreview && pendingChanges > 0 && (syncState === 'error' || syncState === 'offline') && !conflictDetail && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-sm">
+          <span>Vehicle data has not reached the cloud yet. Keep this device's local data until sync succeeds.</span>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={downloadRecovery}>Download local backup</Button>
+            {syncState !== 'offline' && <Button size="sm" onClick={() => void sync(true)}>Retry sync</Button>}
+          </div>
+        </div>}
         {workspaceGuest && <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-sm">
           <span>Guest preview. Vehicle changes are temporary. Pickup requests are view-only.</span>
           <Button size="sm" variant="outline" onClick={() => {
