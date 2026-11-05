@@ -215,7 +215,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setAuditEvents(updated.auditEvents);
     setGarageLayout(loadGarageLayout());
   }, [onSyncRecovered]);
-  const { sync, getRevision, conflictDetail, downloadRecovery, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview, user?.objectId, onWorkspaceMerged);
+  const { sync, getRevision, conflictDetail, downloadRecovery, downloadOperationJournal, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview, user?.objectId, onWorkspaceMerged);
   const isOnline = syncState !== 'offline';
   const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline · pending' : syncState === 'error' ? 'Sync needs attention' : pendingChanges ? 'Changes pending' : 'Cloud synced';
 
@@ -320,7 +320,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const [historyFilter, setHistoryFilter] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const actor = localGuest ? 'Guest User' : user?.fullName ?? 'Local Operator';
-  const { users: onlineUsers, connected: presenceConnected } = useOnlineUsers(!localGuest && !guestPreview && queueOwnerId ? { id: queueOwnerId, name: actor, role } : null);
+  const { users: onlineUsers, connected: presenceConnected, otherSessions } = useOnlineUsers(!localGuest && !guestPreview && queueOwnerId ? { id: queueOwnerId, name: actor, role } : null);
 
   const activeVehicles = useMemo(() => vehicles.filter((item: Vehicle) => item.status !== 'Delivered'), [vehicles]);
   const containerVehicleCount = (locationId: string) => activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId)).length;
@@ -667,6 +667,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
             <div className="ml-auto flex items-center gap-2">
               {guestPreview && <Badge variant="secondary" className="shrink-0 border border-amber-500/60 bg-amber-100 font-black text-amber-950">GUEST PREVIEW · NO CLOUD SAVES</Badge>}
               <div className="hidden text-right xl:block"><p className="text-sm font-semibold"><LiveClock formatString="EEE, d MMM" /></p><p className="text-xs text-muted-foreground"><LiveClock formatString="HH:mm:ss" /></p></div>
+              {otherSessions > 0 && <span className="hidden rounded-lg border px-2 py-1 text-xs text-muted-foreground sm:inline-flex" title="This account is signed in on more than one tab or device. Concurrent changes are checked before saving.">{otherSessions} other session{otherSessions === 1 ? '' : 's'}</span>}
               <Button variant={isOnline && syncState !== 'error' ? 'default' : 'secondary'} size="sm" className="rounded-xl" onClick={() => void sync(true)} aria-label={`Data storage status: ${syncLabel}`} title={localGuest || guestPreview ? 'Guest changes are not uploaded.' : lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Click to sync workspace data'}><span className="live-dot" /><span className="hidden lg:inline">{syncLabel}</span></Button>
               <Button variant="outline" size="icon" className="rounded-xl" onClick={handleNotificationClick} onDoubleClick={(event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault()} aria-label={`Notifications. Sound ${soundEnabled ? 'on' : 'off'}. Double-click to toggle sound.`} title={`Notification sound ${soundEnabled ? 'on' : 'off'} · double-click to toggle`}>{soundEnabled ? <Bell /> : <BellOff />}</Button>
               <DropdownMenu>
@@ -695,11 +696,13 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
         {conflictDetail && <div role="alert" className="flex flex-wrap items-center gap-2 border-b bg-muted p-3 text-sm">
           <span>Sync conflict: {conflictDetail}. Local work is available to download.</span>
           <Button size="sm" variant="outline" onClick={downloadRecovery}>Download pending changes</Button>
+          <Button size="sm" variant="outline" onClick={downloadOperationJournal}>Download operation journal</Button>
         </div>}
         {!guestPreview && pendingChanges > 0 && (syncState === 'error' || syncState === 'offline') && !conflictDetail && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-sm">
           <span>Vehicle data has not reached the cloud yet. Keep this device's local data until sync succeeds.</span>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={downloadRecovery}>Download local backup</Button>
+            <Button size="sm" variant="outline" onClick={downloadOperationJournal}>Download sync journal</Button>
             {syncState !== 'offline' && <Button size="sm" onClick={() => void sync(true)}>Retry sync</Button>}
           </div>
         </div>}
