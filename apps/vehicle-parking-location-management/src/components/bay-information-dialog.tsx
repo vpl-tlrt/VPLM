@@ -19,6 +19,7 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   vehicle?: Vehicle;
+  isXParking?: boolean;
 
   reservation?: BayReservation;
   maintenance?: BayMaintenance;
@@ -38,7 +39,7 @@ type Props = {
 
 const nowText = () => format(new Date(), "yyyy-MM-dd HH:mm");
 
-export function BayInformationDialog({ bay, open, onOpenChange, vehicle, reservation, maintenance, history, actor, role, onReserve, onMaintenance, onCompleteMaintenance, assignmentVehicle, onAssignmentVehicleChange, onAssignVehicle, canAssignVehicle, onRequestRelease, onReleaseDecision }: Props) {
+export function BayInformationDialog({ bay, open, onOpenChange, vehicle, isXParking = false, reservation, maintenance, history, actor, role, onReserve, onMaintenance, onCompleteMaintenance, assignmentVehicle, onAssignmentVehicleChange, onAssignVehicle, canAssignVehicle, onRequestRelease, onReleaseDecision }: Props) {
   const [reservedBy, setReservedBy] = useState(actor);
   const [reason, setReason] = useState('');
   const [startAt, setStartAt] = useState(nowText());
@@ -53,6 +54,7 @@ export function BayInformationDialog({ bay, open, onOpenChange, vehicle, reserva
 
   const activeMaintenance = maintenance?.status === 'Active';
   const displayStatus = bay.status === 'Available' ? 'Vacant' : bay.status;
+  const bayLabel = isXParking ? `X Parking beside ${bay.zone}-${bay.bayNumber}` : `Bay ${bay.zone}-${bay.bayNumber}`;
   const updatedAt = history[0]?.timestamp ?? vehicle?.assignedDate ?? new Date().toISOString();
   const submitReservation = () => {
     if (!reservedBy.trim() || !reason.trim() || !startAt.trim() || !endAt.trim()) return toast.error('Complete all required reservation fields.');
@@ -67,12 +69,12 @@ export function BayInformationDialog({ bay, open, onOpenChange, vehicle, reserva
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
-        <DialogHeader><DialogTitle>Bay {bay.zone}-{bay.bayNumber}</DialogTitle><DialogDescription>Live bay information, actions, reservation workflow, and immutable history.</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>{bayLabel}</DialogTitle><DialogDescription>Live bay information, actions, reservation workflow, and immutable history.</DialogDescription></DialogHeader>
         <Tabs defaultValue={bay.status === 'Available' ? 'assignment' : 'summary'} className="space-y-4">
           <TabsList className={`grid w-full ${bay.status === 'Available' ? 'grid-cols-4' : 'grid-cols-3'}`}>{bay.status === 'Available' && <TabsTrigger value="assignment">Assign vehicle</TabsTrigger>}<TabsTrigger value="summary">Summary</TabsTrigger><TabsTrigger value="actions">Actions</TabsTrigger><TabsTrigger value="history">History</TabsTrigger></TabsList>
           <TabsContent value="summary" className="space-y-4">
             <div className="grid gap-3 rounded-xl border bg-card p-4 text-card-foreground sm:grid-cols-3">
-              <Info label="Bay number" value={`${bay.zone}-${bay.bayNumber}`} /><Info label="Zone" value={bay.zone} /><div><p className="text-sm text-muted-foreground">Status</p><Badge variant={bay.status === 'Occupied' ? 'destructive' : bay.status === 'Reserved' ? 'secondary' : 'outline'}>{displayStatus}</Badge></div>
+              <Info label="Bay number" value={bayLabel} /><Info label="Zone" value={bay.zone} /><div><p className="text-sm text-muted-foreground">Status</p><Badge variant={bay.status === 'Occupied' ? 'destructive' : bay.status === 'Reserved' ? 'secondary' : 'outline'}>{displayStatus}</Badge></div>
               <Info label="Registration" value={vehicle?.plateNumber} /><Info label="Owner / driver" value={vehicle?.driverOwner ?? vehicle?.customerName} /><Info label="Last updated" value={format(new Date(updatedAt), 'dd MMM yyyy, HH:mm')} />
             </div>
             <div className="grid gap-3 rounded-xl bg-muted p-4 text-muted-foreground sm:grid-cols-2">
@@ -83,9 +85,11 @@ export function BayInformationDialog({ bay, open, onOpenChange, vehicle, reserva
           {bay.status === 'Available' && (
             <TabsContent value="assignment" className="space-y-4">
               <section className="space-y-5 rounded-xl border bg-card p-4 text-card-foreground">
-                <div><h3 className="flex items-center gap-2 font-bold"><CircleParking /> Assign vehicle to {bay.zone}-{bay.bayNumber}</h3><p className="mt-1 text-sm text-muted-foreground">Complete the same vehicle profile used in Vehicle assignment. This bay is selected automatically.</p></div>
-                <VehicleFormFields value={assignmentVehicle} onChange={onAssignmentVehicleChange} idPrefix="bay-assignment" assignmentMode allowXParking={supportsXParkingLocation(bay)} />
-                <div className="grid gap-3 rounded-lg bg-muted p-3 text-muted-foreground sm:grid-cols-2"><Info label="Parking zone" value={bay.zone} /><Info label="Selected bay" value={`${bay.zone}-${bay.bayNumber} · ${bay.section ?? 'Main'} / ${bay.lane}`} /></div>
+                <div><h3 className="flex items-center gap-2 font-bold"><CircleParking /> Assign vehicle to {bayLabel}</h3><p className="mt-1 text-sm text-muted-foreground">Complete the same vehicle profile used in Vehicle assignment. This bay is selected automatically.</p></div>
+                <VehicleFormFields value={isXParking ? { ...assignmentVehicle, xParking: 'Yes' } : assignmentVehicle}
+                  onChange={(value) => onAssignmentVehicleChange(isXParking ? { ...value, xParking: 'Yes' } : value)}
+                  idPrefix="bay-assignment" assignmentMode showXParking={!isXParking} allowXParking={supportsXParkingLocation(bay)} />
+                <div className="grid gap-3 rounded-lg bg-muted p-3 text-muted-foreground sm:grid-cols-2"><Info label="Parking zone" value={bay.zone} /><Info label="Selected bay" value={isXParking ? `X Parking beside ${bay.zone}-${bay.bayNumber}` : `${bay.zone}-${bay.bayNumber} · ${bay.section ?? 'Main'} / ${bay.lane}`} /></div>
                 <Button size="lg" onClick={onAssignVehicle} disabled={!canAssignVehicle}><CircleParking /> Assign vehicle</Button>
               </section>
             </TabsContent>
