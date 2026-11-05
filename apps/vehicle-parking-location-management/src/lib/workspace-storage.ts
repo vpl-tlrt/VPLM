@@ -7,6 +7,7 @@ export const workspaceStorageKeys = [
   'vplm-road-test-audit-v2',
   'vplm-road-test-notifications-v2',
   'vplm-garage-layout-v1',
+  'vplm-vehicle-models-v1',
 ] as const;
 
 export type WorkspaceSnapshot = Record<(typeof workspaceStorageKeys)[number], string | null>;
