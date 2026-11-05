@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.118.0';
 
-type Role = 'Administrator' | 'Supervisor' | 'TechnicalLeader' | 'Operator' | 'Drivers' | 'Guest Users' | 'Others';
+type Role = 'Administrator' | 'Supervisor' | 'TechnicalLeader' | 'TechnicalAdvisor' | 'Operator' | 'Drivers' | 'Guest Users' | 'Others';
 type Snapshot = Record<string, string | null>;
 type Database = {
   public: {
@@ -122,7 +122,7 @@ const canSave = (role: Role, before: Snapshot | null, after: Snapshot): boolean 
             .filter(key => JSON.stringify(vehicle[key]) !== JSON.stringify(updated?.[key])));
           for (const photoKey of ['photoUrls', 'photoUploadedAt']) changedKeys.delete(photoKey);
           if (!changedKeys.size && updated) continue;
-          if (role !== 'TechnicalLeader' || updated?.status !== 'Released' || updated.currentLocationId) return false;
+          if (!['TechnicalLeader', 'TechnicalAdvisor'].includes(role) || updated?.status !== 'Released' || updated.currentLocationId) return false;
         }
       } catch {
         return false;
