@@ -20,6 +20,7 @@ import { useLocalDataSync } from '@/hooks/use-local-data-sync';
 import { BayInformationDialog } from '@/components/bay-information-dialog';
 import { VehicleOverviewDialog } from '@/components/vehicle-overview-dialog';
 import { VehicleModelManagement } from '@/components/vehicle-model-management';
+import { WorkspaceRecoveryReview } from '@/components/workspace-recovery-review';
 import AiAssistant from '@/components/ai-assistant';
 import { emptyVehicleForm, VehicleFormFields, vehicleColorClass, type VehicleFormData } from '@/components/vehicle-form-fields';
 import { RoadTestManagement } from '@/components/road-test-management';
@@ -175,6 +176,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const { soundEnabled, toggleSound, playSound } = useNotificationSound(user?.objectId ?? user?.userPrincipalName);
   const notificationClickTimer = useRef<number | undefined>(undefined);
   const [screen, setScreen] = useState<Screen>(initialPickupRequestId ? 'pickup-requests' : 'dashboard');
+  const [recoveryReviewOpen, setRecoveryReviewOpen] = useState(false);
   const [manageTasks, setManageTasks] = useState(false);
   const [isReorderingMobileNavigation, setIsReorderingMobileNavigation] = useState(false);
   const [mobileNavigationOrder, setMobileNavigationOrder] = useState<Screen[]>(() => {
@@ -697,6 +699,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           <span>Sync conflict: {conflictDetail}. Local work is available to download.</span>
           <Button size="sm" variant="outline" onClick={downloadRecovery}>Download pending changes</Button>
           <Button size="sm" variant="outline" onClick={downloadOperationJournal}>Download operation journal</Button>
+          <Button size="sm" variant="outline" onClick={() => setRecoveryReviewOpen(true)}>Review local vs cloud</Button>
         </div>}
         {!guestPreview && pendingChanges > 0 && (syncState === 'error' || syncState === 'offline') && !conflictDetail && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-sm">
           <span>Vehicle data has not reached the cloud yet. Keep this device's local data until sync succeeds.</span>
@@ -754,6 +757,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 md:hidden" aria-label="Primary navigation">
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
+      <WorkspaceRecoveryReview userId={user?.objectId} open={recoveryReviewOpen} onOpenChange={setRecoveryReviewOpen} />
       {!localGuest && <AiAssistant vehicles={vehicles} movements={movements} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} locationLabel={locationLabel} onAssign={openAssistantAssignment} onTransfer={transferVehicleById} />}
     </div>
   );
