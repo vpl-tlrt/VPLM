@@ -20,6 +20,7 @@ import { useLocalDataSync } from '@/hooks/use-local-data-sync';
 import { BayInformationDialog } from '@/components/bay-information-dialog';
 import { VehicleOverviewDialog } from '@/components/vehicle-overview-dialog';
 import { VehicleModelManagement } from '@/components/vehicle-model-management';
+import { WorkspaceRecoveryReview } from '@/components/workspace-recovery-review';
 import AiAssistant from '@/components/ai-assistant';
 import { emptyVehicleForm, VehicleFormFields, vehicleColorClass, type VehicleFormData } from '@/components/vehicle-form-fields';
 import { RoadTestManagement } from '@/components/road-test-management';
@@ -175,6 +176,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const { soundEnabled, toggleSound, playSound } = useNotificationSound(user?.objectId ?? user?.userPrincipalName);
   const notificationClickTimer = useRef<number | undefined>(undefined);
   const [screen, setScreen] = useState<Screen>(initialPickupRequestId ? 'pickup-requests' : 'dashboard');
+  const [recoveryReviewOpen, setRecoveryReviewOpen] = useState(false);
   const [manageTasks, setManageTasks] = useState(false);
   const [isReorderingMobileNavigation, setIsReorderingMobileNavigation] = useState(false);
   const [mobileNavigationOrder, setMobileNavigationOrder] = useState<Screen[]>(() => {
@@ -186,7 +188,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     }
   });
   const [isNeumorphism, setIsNeumorphism] = useState<boolean>(() => window.localStorage.getItem(appStorageKey('vplm-ui-mode')) === 'neumorphism');
-  const [currentTime, setCurrentTime] = useState(() => new Date());
+  // Clock changes are isolated from the vehicle layout.
 
   const access = useAppAccess(user?.userPrincipalName, user?.objectId, localGuest);
   const role: Role = workspaceGuest ? 'Guest Users' : access.data?.role ?? 'Operator';
@@ -200,6 +202,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const ownerId = access.data?.appUser.id;
   const queueOwnerId = ownerId ?? '';
   const hasMounted = useRef(false);
+  const skipNextPersist = useRef(false);
   const [roadTestVehicleId, setRoadTestVehicleId] = useState<string>();
   const [dashboardVehicleId, setDashboardVehicleId] = useState<string>();
   const [pullDistance, setPullDistance] = useState(0);
@@ -208,6 +211,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     // Hydrate a successful conflict merge in place without remounting open screens.
     const updated = loadOfflineState();
     if (!updated) { onSyncRecovered?.(); return; }
+    skipNextPersist.current = true;
     setVehicles(updated.vehicles);
     setLocations(reconcileParkingLayout(updated.locations));
     setMovements(updated.movements);
@@ -215,7 +219,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setAuditEvents(updated.auditEvents);
     setGarageLayout(loadGarageLayout());
   }, [onSyncRecovered]);
-  const { sync, getRevision, conflictDetail, downloadRecovery, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview, user?.objectId, onWorkspaceMerged);
+  const { sync, getRevision, conflictDetail, downloadRecovery, downloadOperationJournal, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview, user?.objectId, onWorkspaceMerged);
   const isOnline = syncState !== 'offline';
   const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline · pending' : syncState === 'error' ? 'Sync needs attention' : pendingChanges ? 'Changes pending' : 'Cloud synced';
 
@@ -300,14 +304,12 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
 
 
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+
 
 
   useEffect(() => {
     if (!hasPublishedSnapshot) return;
+    if (skipNextPersist.current) { skipNextPersist.current = false; return; }
     if (!hasMounted.current) hasMounted.current = true;
     saveOfflineState({ vehicles, locations, movements, reservations, auditEvents, pendingChanges, savedAt: new Date().toISOString() });
   }, [vehicles, locations, movements, reservations, auditEvents, pendingChanges, garageLayout, hasPublishedSnapshot]);
@@ -323,9 +325,9 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const [historyFilter, setHistoryFilter] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const actor = localGuest ? 'Guest User' : user?.fullName ?? 'Local Operator';
-  const { users: onlineUsers, connected: presenceConnected } = useOnlineUsers(!localGuest && !guestPreview && queueOwnerId ? { id: queueOwnerId, name: actor, role } : null);
+  const { users: onlineUsers, connected: presenceConnected, otherSessions } = useOnlineUsers(!localGuest && !guestPreview && queueOwnerId ? { id: queueOwnerId, name: actor, role } : null);
 
-  const activeVehicles = vehicles.filter((item: Vehicle) => item.status !== 'Delivered');
+  const activeVehicles = useMemo(() => vehicles.filter((item: Vehicle) => item.status !== 'Delivered'), [vehicles]);
   const containerVehicleCount = (locationId: string) => activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId)).length;
   const containerCanAccept = (location: ParkingLocation) => isLiveGarageContainer(location) && location.status !== 'Reserved' && location.status !== 'Maintenance' && containerVehicleCount(location.id) < 15;
   const linkedVehicleLocationIds = useMemo(() => new Set(activeVehicles.filter((item: Vehicle) => item.xParking !== 'Yes').map((item: Vehicle) => parkingRecordKey(item.currentLocationId)).filter((id: string) => Boolean(id))), [activeVehicles]);
@@ -663,13 +665,14 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
 
 
             <div className="relative mx-auto hidden max-w-xl flex-1 overflow-hidden rounded-2xl bg-background lg:block">
-              <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-lg font-bold tabular-nums text-muted-foreground" aria-hidden="true">{format(currentTime, 'HH:mm:ss')}</span>
+              <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-lg font-bold tabular-nums text-muted-foreground" aria-hidden="true"><LiveClock formatString="HH:mm:ss" /></span>
               <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} onFocus={() => { if (searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-28" aria-label="Global vehicle search" />
             </div>
             <div className="ml-auto flex items-center gap-2">
               {guestPreview && <Badge variant="secondary" className="shrink-0 border border-amber-500/60 bg-amber-100 font-black text-amber-950">GUEST PREVIEW · NO CLOUD SAVES</Badge>}
-              <div className="hidden text-right xl:block"><p className="text-sm font-semibold">{format(currentTime, 'EEE, d MMM')}</p><p className="text-xs text-muted-foreground">{format(currentTime, 'HH:mm:ss')}</p></div>
+              <div className="hidden text-right xl:block"><p className="text-sm font-semibold"><LiveClock formatString="EEE, d MMM" /></p><p className="text-xs text-muted-foreground"><LiveClock formatString="HH:mm:ss" /></p></div>
+              {otherSessions > 0 && <span className="hidden rounded-lg border px-2 py-1 text-xs text-muted-foreground sm:inline-flex" title="This account is signed in on more than one tab or device. Concurrent changes are checked before saving.">{otherSessions} other session{otherSessions === 1 ? '' : 's'}</span>}
               <Button variant={isOnline && syncState !== 'error' ? 'default' : 'secondary'} size="sm" className="rounded-xl" onClick={() => void sync(true)} aria-label={`Data storage status: ${syncLabel}`} title={localGuest || guestPreview ? 'Guest changes are not uploaded.' : lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Click to sync workspace data'}><span className="live-dot" /><span className="hidden lg:inline">{syncLabel}</span></Button>
               <Button variant="outline" size="icon" className="rounded-xl" onClick={handleNotificationClick} onDoubleClick={(event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault()} aria-label={`Notifications. Sound ${soundEnabled ? 'on' : 'off'}. Double-click to toggle sound.`} title={`Notification sound ${soundEnabled ? 'on' : 'off'} · double-click to toggle`}>{soundEnabled ? <Bell /> : <BellOff />}</Button>
               <DropdownMenu>
@@ -693,16 +696,19 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
               <Sheet><SheetTrigger asChild><Button variant="outline" size="icon" className="rounded-xl" aria-label="Open quick actions"><Plus /></Button></SheetTrigger><SheetContent side="right"><SheetHeader><SheetTitle>Quick actions</SheetTitle></SheetHeader><div className="mt-6 grid gap-2">{visibleNavigation.filter((item) => ['assignment', 'search', 'transfer', 'reservations', 'road-tests', 'pickup-requests'].includes(item.id)).map(({ id, label, icon: Icon }) => <Button key={id} variant="outline" className="justify-start" onClick={() => setScreen(id)}><Icon />{label}</Button>)}</div><div className="mt-6 rounded-2xl bg-muted p-4 text-muted-foreground"><p className="font-semibold text-foreground">{actor}</p><p className="text-sm">{roleLabel(role)}</p></div></SheetContent></Sheet>
             </div>
           </div>
-          <div className="relative mt-3 overflow-hidden rounded-2xl bg-background lg:hidden"><span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-base font-bold tabular-nums text-muted-foreground" aria-hidden="true">{format(currentTime, 'HH:mm:ss')}</span><Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-24" aria-label="Global vehicle search" /></div>
+          <div className="relative mt-3 overflow-hidden rounded-2xl bg-background lg:hidden"><span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-base font-bold tabular-nums text-muted-foreground" aria-hidden="true"><LiveClock formatString="HH:mm:ss" /></span><Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-24" aria-label="Global vehicle search" /></div>
         </header>
         {conflictDetail && <div role="alert" className="flex flex-wrap items-center gap-2 border-b bg-muted p-3 text-sm">
           <span>Sync conflict: {conflictDetail}. Local work is available to download.</span>
           <Button size="sm" variant="outline" onClick={downloadRecovery}>Download pending changes</Button>
+          <Button size="sm" variant="outline" onClick={downloadOperationJournal}>Download operation journal</Button>
+          <Button size="sm" variant="outline" onClick={() => setRecoveryReviewOpen(true)}>Review local vs cloud</Button>
         </div>}
         {!guestPreview && pendingChanges > 0 && (syncState === 'error' || syncState === 'offline') && !conflictDetail && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-sm">
           <span>Vehicle data has not reached the cloud yet. Keep this device's local data until sync succeeds.</span>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={downloadRecovery}>Download local backup</Button>
+            <Button size="sm" variant="outline" onClick={downloadOperationJournal}>Download sync journal</Button>
             {syncState !== 'offline' && <Button size="sm" onClick={() => void sync(true)}>Retry sync</Button>}
           </div>
         </div>}
@@ -754,10 +760,20 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 md:hidden" aria-label="Primary navigation">
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
+      <WorkspaceRecoveryReview userId={user?.objectId} open={recoveryReviewOpen} onOpenChange={setRecoveryReviewOpen} />
       {!localGuest && <AiAssistant vehicles={vehicles} movements={movements} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} locationLabel={locationLabel} onAssign={openAssistantAssignment} onTransfer={transferVehicleById} />}
     </div>
   );
   return appShell;
+}
+
+function LiveClock({ formatString }: { formatString: string }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <>{format(now, formatString)}</>;
 }
 
 function Brand({ onHome }: { onHome: () => void }) { return <button type="button" aria-label="Go to home page" onClick={onHome} className="flex h-20 w-full items-center gap-3 border-b px-5 text-left"><div className="grid h-10 w-10 place-items-center rounded-lg bg-primary text-primary-foreground"><CarFront /></div><div><p className="font-bold">Vehicle Parking</p><p className="text-xs text-muted-foreground">Location Management</p></div></button>; }
@@ -800,7 +816,19 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
 
   const roadTests = loadRoadTests();
   const currentRoadTests = roadTests.filter((test: RoadTestRecord) => test.status !== 'Completed');
-  const activeVehicles = vehicles.filter((item: Vehicle) => item.status !== 'Delivered');
+  const activeVehicles = useMemo(() => vehicles.filter((item: Vehicle) => item.status !== 'Delivered'), [vehicles]);
+  // In-memory slot index avoids scanning every vehicle for every bay on each render.
+  const vehiclesByLocation = useMemo(() => {
+    const index = new Map<string, Vehicle[]>();
+    for (const vehicle of activeVehicles) {
+      const key = parkingRecordKey(vehicle.currentLocationId);
+      if (!key) continue;
+      const records = index.get(key) ?? [];
+      records.push(vehicle);
+      index.set(key, records);
+    }
+    return index;
+  }, [activeVehicles]);
   const unassignedVehicles = activeVehicles.filter((item: Vehicle) => !item.currentLocationId && item.status !== 'Released');
 
   const showVehiclesOnMap = true;
@@ -1075,7 +1103,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                     const lanes = Array.from(new Set(zoneLocations.map((location: ParkingLocation) => location.lane.trim()).filter((lane: string) => Boolean(lane))));
                     const renderXParkingSpaces = (bays: ParkingLocation[]) => <div className="x-parking-spaces" aria-label="X Parking spaces">
                       {bays.map((bay: ParkingLocation) => {
-                        const xVehicle = showVehiclesOnMap ? activeVehicles.find((item: Vehicle) => item.xParking === 'Yes' && parkingRecordKey(item.currentLocationId) === parkingRecordKey(bay.id)) : undefined;
+                        const xVehicle = showVehiclesOnMap ? vehiclesByLocation.get(parkingRecordKey(bay.id))?.find((item: Vehicle) => item.xParking === 'Yes') : undefined;
                         const xVehicleRoadTest = xVehicle ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === xVehicle.id) : undefined;
                         const slotId = xParkingSlotId(bay.id);
                         const reserved = bayManagement.reservations.some((item: BayReservation) => item.bayId === slotId && item.status !== 'Released');
@@ -1105,7 +1133,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                       })}
                     </div>;
                     const renderBay = (bay: ParkingLocation, index: number) => {
-                      const bayVehicles = showVehiclesOnMap ? activeVehicles.filter((item: Vehicle) => parkingRecordKey(item.currentLocationId) === parkingRecordKey(bay.id)) : [];
+                      const bayVehicles = showVehiclesOnMap ? vehiclesByLocation.get(parkingRecordKey(bay.id)) ?? [] : [];
                       const vehicle = bayVehicles.find((item: Vehicle) => item.xParking !== 'Yes');
                       const xParkingVehicle = bayVehicles.find((item: Vehicle) => item.xParking === 'Yes');
                       // The adjacent X space has its own hit target and cannot replace the regular bay's vehicle.

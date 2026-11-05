@@ -3,8 +3,24 @@ import { toast } from 'sonner';
 import { mergeWorkspaceChanges } from '@/lib/workspace-recovery';
 import { loadWorkspace, saveWorkspace, WorkspaceConflictError, WorkspaceResetError } from '@/lib/workspace-cloud';
 import { supabase } from '@/lib/supabase';
-import { applyWorkspaceSnapshot, readWorkspaceSnapshot } from '@/lib/workspace-storage';
+import { applyWorkspaceSnapshot, readWorkspaceSnapshot, workspaceStorageKeys, type WorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
+import { acknowledgeSyncMutations, exportSyncJournal, listPendingSyncMutations } from '@/lib/sync-queue';
+
+const hasUncommittedData = (before: WorkspaceSnapshot, current: WorkspaceSnapshot): boolean =>
+  workspaceStorageKeys.some(key => {
+    if (before[key] === current[key]) return false;
+    if (key !== 'vehicle-parking-browser-state-v2') return true;
+    try {
+      const normalize = (serialized: string | null) => {
+        const { pendingChanges: _pending, savedAt: _savedAt, ...content } = JSON.parse(serialized ?? '{}') as Record<string, unknown>;
+        void _pending;
+        void _savedAt;
+        return JSON.stringify(content);
+      };
+      return normalize(before[key]) !== normalize(current[key]);
+    } catch { return true; }
+  });
 
 const RETRY_BASE_MS = 1500;
 const RETRY_MAX_MS = 30_000;
@@ -12,11 +28,12 @@ const RETRY_MAX_MS = 30_000;
 export function useLocalDataSync(initialRevision: number | null, localOnly = false, userId?: string, onRecovered?: () => void) {
   const [state, setState] = useState<'idle' | 'offline' | 'syncing' | 'error'>(() => localOnly || navigator.onLine ? 'idle' : 'offline');
   const [lastSyncAt, setLastSyncAt] = useState<string>();
-  const [pendingCount, setPendingCount] = useState(0);
+  const [pendingCount, setPendingCount] = useState(() => userId ? listPendingSyncMutations(userId).length : 0);
   const revision = useRef(initialRevision);
   const baseline = useRef<ReturnType<typeof readWorkspaceSnapshot> | null>(null);
   if (!baseline.current && !localOnly) baseline.current = readWorkspaceSnapshot();
   const recoveryKey = userId ? `vplm-unsynced-recovery:${userId}` : undefined;
+  const preservedKey = userId ? `vplm-preserved-unsynced:${userId}` : undefined;
   const [conflictDetail, setConflictDetail] = useState('');
   useEffect(() => {
     if (!recoveryKey || localOnly) return;
@@ -33,8 +50,18 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   const retryTimer = useRef<number | undefined>(undefined);
   const retryAttempt = useRef(0);
   const inFlight = useRef(false);
+  const refreshing = useRef(false);
   const rerun = useRef(false);
   const syncBlocked = useRef(false);
+  useEffect(() => {
+    if (!preservedKey || localOnly) return;
+    try {
+      if (window.localStorage.getItem(preservedKey)) {
+        syncBlocked.current = true;
+        setConflictDetail('Unsynced records were preserved before cloud reload. Download the local backup and reconcile before uploading.');
+      }
+    } catch { /* Do not remove any local recovery data. */ }
+  }, [preservedKey, localOnly]);
 
   useEffect(() => {
     if (localOnly) return;
@@ -90,6 +117,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     setPendingCount(1);
     try {
       const snapshot = readWorkspaceSnapshot();
+      const startedMutationIds = userId ? listPendingSyncMutations(userId).map(item => item.id) : [];
       let nextRevision;
       try {
         nextRevision = await saveWorkspace(snapshot, revision.current);
@@ -110,6 +138,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
           applyWorkspaceSnapshot(merged);
           revision.current = nextRevision;
           baseline.current = merged;
+          acknowledgeSyncMutations(startedMutationIds);
           retryAttempt.current = 0;
           if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
           retryTimer.current = undefined;
@@ -129,6 +158,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
         }
       }
       revision.current = nextRevision;
+      acknowledgeSyncMutations(startedMutationIds);
       retryAttempt.current = 0;
       if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
       retryTimer.current = undefined;
@@ -186,7 +216,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       if (syncBlocked.current) return;
       if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
       retryTimer.current = undefined;
-      setPendingCount(1);
+      setPendingCount(Math.max(1, listPendingSyncMutations(userId).length));
       if (inFlight.current) { rerun.current = true; return; }
       // Throttle rather than repeatedly resetting the timer: frequent edits must
       // not indefinitely postpone the upload.
@@ -204,12 +234,66 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     };
   }, [localOnly, recoveryKey, sync]);
 
+  // Never auto-acknowledge historical journal entries after the login cloud load.
+  // Only domain-change events or explicit user sync can start an upload.
+
+  // Realtime events are hints. Fetch and adopt the authoritative snapshot only
+  // when no local edits are pending; never overwrite an unsynced browser session.
+  const refreshCloudView = useCallback(async () => {
+    if (localOnly || !supabase || !userId || !onRecovered || !navigator.onLine ||
+        inFlight.current || refreshing.current || syncBlocked.current ||
+        listPendingSyncMutations(userId).length) return false;
+    if (!baseline.current || hasUncommittedData(baseline.current, readWorkspaceSnapshot())) return false;
+    refreshing.current = true;
+    try {
+      const latest = await loadWorkspace(userId);
+      if (!latest.snapshot || latest.isGuest || latest.revision === null || latest.revision <= (revision.current ?? 0)) return false;
+      if (inFlight.current || listPendingSyncMutations(userId).length ||
+          !baseline.current || hasUncommittedData(baseline.current, readWorkspaceSnapshot())) return false;
+      applyWorkspaceSnapshot(latest.snapshot);
+      baseline.current = latest.snapshot;
+      revision.current = latest.revision;
+      onRecovered();
+      return true;
+    } catch {
+      // Network loss is handled by the normal durable sync/recovery path.
+      return false;
+    } finally {
+      refreshing.current = false;
+    }
+  }, [localOnly, userId, onRecovered]);
+
+  useEffect(() => {
+    if (!supabase || localOnly || !userId) return;
+    const client = supabase;
+    const channel = client.channel(`vplm-vehicle-deltas-${userId}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'vplm_vehicle_delta_events' },
+        payload => {
+          const remoteRevision = Number((payload.new as Record<string, unknown>).workspace_revision);
+          if (Number.isSafeInteger(remoteRevision) && remoteRevision > (revision.current ?? 0)) {
+            void refreshCloudView();
+          }
+        })
+      .subscribe(status => { if (status === 'SUBSCRIBED') void refreshCloudView(); });
+    const onForeground = () => { if (document.visibilityState === 'visible') void refreshCloudView(); };
+    document.addEventListener('visibilitychange', onForeground);
+    return () => { document.removeEventListener('visibilitychange', onForeground); void client.removeChannel(channel); };
+  }, [localOnly, userId, refreshCloudView]);
   const getRevision = useCallback(() => revision.current, []);
+  const downloadOperationJournal = () => {
+    const url = URL.createObjectURL(new Blob([exportSyncJournal(userId)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'vplm-operation-journal.json';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
   const downloadRecovery = () => {
     const saved = recoveryKey ? window.localStorage.getItem(recoveryKey) : null;
     const url = URL.createObjectURL(new Blob([saved ?? JSON.stringify(readWorkspaceSnapshot())], { type: 'application/json' }));
     const link = document.createElement('a');
     link.href = url; link.download = 'vplm-unsynced-recovery.json'; link.click(); URL.revokeObjectURL(url);
   };
-  return { sync, getRevision, conflictDetail, downloadRecovery, state, lastSyncAt, pendingCount, hasPublishedSnapshot: true };
+  return { sync, getRevision, conflictDetail, downloadRecovery, downloadOperationJournal, state, lastSyncAt, pendingCount, hasPublishedSnapshot: true };
 }
