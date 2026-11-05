@@ -33,6 +33,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   const baseline = useRef<ReturnType<typeof readWorkspaceSnapshot> | null>(null);
   if (!baseline.current && !localOnly) baseline.current = readWorkspaceSnapshot();
   const recoveryKey = userId ? `vplm-unsynced-recovery:${userId}` : undefined;
+  const preservedKey = userId ? `vplm-preserved-unsynced:${userId}` : undefined;
   const [conflictDetail, setConflictDetail] = useState('');
   useEffect(() => {
     if (!recoveryKey || localOnly) return;
@@ -52,6 +53,15 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   const refreshing = useRef(false);
   const rerun = useRef(false);
   const syncBlocked = useRef(false);
+  useEffect(() => {
+    if (!preservedKey || localOnly) return;
+    try {
+      if (window.localStorage.getItem(preservedKey)) {
+        syncBlocked.current = true;
+        setConflictDetail('Unsynced records were preserved before cloud reload. Download the local backup and reconcile before uploading.');
+      }
+    } catch { /* Do not remove any local recovery data. */ }
+  }, [preservedKey, localOnly]);
 
   useEffect(() => {
     if (localOnly) return;
@@ -224,9 +234,8 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     };
   }, [localOnly, recoveryKey, sync]);
 
-  useEffect(() => {
-    if (!localOnly && userId && listPendingSyncMutations(userId).length && navigator.onLine) void sync(false);
-  }, [localOnly, userId, sync]);
+  // Never auto-acknowledge historical journal entries after the login cloud load.
+  // Only domain-change events or explicit user sync can start an upload.
 
   // Realtime events are hints. Fetch and adopt the authoritative snapshot only
   // when no local edits are pending; never overwrite an unsynced browser session.
