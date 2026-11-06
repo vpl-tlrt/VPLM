@@ -1,0 +1,31 @@
+name: VPLM compact Parking Lot UI verification
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/vehicle-parking-location-management/**'
+      - '.github/workflows/vplm-compact-parking-ui-verify-temp.yml'
+permissions:
+  contents: read
+jobs:
+  production-build-and-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/vehicle-parking-location-management/package-lock.json
+      - run: npm ci
+        working-directory: apps/vehicle-parking-location-management
+      - name: Typecheck and production build
+        run: npm run build
+        working-directory: apps/vehicle-parking-location-management
+      - name: Verify parking workspace merge invariants
+        run: node scripts/verify-workspace-recovery.mjs
+        working-directory: apps/vehicle-parking-location-management
+      - name: Verify compact Parking Lot UI only
+        working-directory: apps/vehicle-parking-location-management
+        run: |
+          node -e 'const fs=require("fs"); const assert=require("assert"); const app=fs.readFileSync("src/components/parking-app.tsx","utf8"); const css=fs.readFileSync("src/index.css","utf8"); const details=fs.readFileSync("src/components/vehicle-overview-dialog.tsx","utf8"); const bay=fs.readFileSync("src/components/bay-information-dialog.tsx","utf8"); assert(app.includes("vplm-compact-zone-tile")); assert(app.includes("vplm-parking-chip-grid")); assert(!app.includes("vplm-zone-shortcuts")); assert(!app.includes("vplm-zone-hero")); assert(app.includes("showOtherParkingAreas")); assert(app.includes("parkingSheet")); assert(css.includes("vplm-parking-sheet")); assert(details.includes("parkingSheet?: boolean")); assert(bay.includes("parkingSheet?: boolean")); console.log("PASS: compact Parking Lot structure and sheet presentation");'
