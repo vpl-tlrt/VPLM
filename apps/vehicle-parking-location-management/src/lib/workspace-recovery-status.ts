@@ -51,15 +51,30 @@ export const recoveryFingerprint = (raw: string): string => {
  * Keep historical local copies if a later offline session creates another draft.
  * Never overwrite the only unsynced snapshot or erase it to free storage.
  */
-export const preserveWorkspaceRecoveryCopy = (userId: string, snapshot: Partial<WorkspaceSnapshot>): boolean => {
+export const preserveWorkspaceRecoveryCopy = (
+  userId: string,
+  snapshot: Partial<WorkspaceSnapshot>,
+  archivePrevious = true,
+): boolean => {
   if (typeof window === 'undefined' || !userId) return false;
   const key = `vplm-unsynced-recovery:${userId}`;
   const next = JSON.stringify(snapshot);
   try {
     const previous = window.localStorage.getItem(key);
-    if (previous === next) return true;
+    // Offline retries often change savedAt and pendingChanges only. Do not
+    // duplicate a half-megabyte workspace copy for every timestamp change.
+    if (previous === next || (previous && workspaceContentMatches(readRecoverySnapshot(previous), snapshot))) return true;
     if (previous) {
-      const archiveKey = `vplm-unsynced-recovery-archive:${userId}:${recoveryFingerprint(previous)}`;
+      if (!archivePrevious && window.localStorage.getItem(`vplm-preserved-unsynced:${userId}`)) {
+        // Another session's unsynced work is protected. Do not replace it
+        // with a subsequently loaded cloud snapshot in the retry loop.
+        return true;
+      }
+      // During repeated offline edits retain the first version, plus the latest.
+      // On login/logout separately version older copies before replacing them.
+      const archiveKey = archivePrevious
+        ? `vplm-unsynced-recovery-archive:${userId}:${recoveryFingerprint(previous)}`
+        : `vplm-unsynced-recovery-baseline:${userId}`;
       if (!window.localStorage.getItem(archiveKey)) window.localStorage.setItem(archiveKey, previous);
     }
     window.localStorage.setItem(key, next);
