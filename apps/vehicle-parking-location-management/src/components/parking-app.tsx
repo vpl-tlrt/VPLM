@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import { format } from 'date-fns';
 import { motion } from 'motion/react';
 import {
-  ArrowDown, ArrowUp, ArchiveRestore, Bell, BellOff, CalendarDays, Camera, CarFront, ChevronDown, ChevronRight, CircleParking,
+  ArrowDown, ArrowUp, ArchiveRestore, Bell, BellOff, CalendarDays, Camera, CarFront, ChevronDown, ChevronLeft, ChevronRight, CircleParking,
   ClipboardList, Crosshair, Download, Fuel, Gauge, GripVertical, History, Home, LayoutGrid, MapPin, Menu, Minus, MoveRight,
   Plus, QrCode, Route, Save, ScanLine, Search, Settings, ShieldCheck, SlidersHorizontal, Trash2, Upload, UserCog, UserRound, Wifi, WifiOff, X, Lightbulb, LightbulbOff, LogOut, DoorOpen,
 } from 'lucide-react';
@@ -1079,11 +1079,11 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
       {!openedParkingZone && <div className="garage-kpi-grid">
         {stats.map(({ label, value, icon: Icon, percent }) => <Card key={label} className={`garage-kpi ${label === 'Vacant' ? vacantColorClass(percent, value) : utilizationColorClass(percent)}`}><CardContent className="flex flex-col p-4"><p className="text-sm font-semibold">{label}</p><div className="flex items-end justify-between"><motion.p key={value} initial={{ opacity: 0, scale: 0.82 }} animate={{ opacity: 1, scale: 1 }} className="text-3xl font-black">{value}</motion.p><div className="garage-kpi-icon"><Icon /></div></div></CardContent></Card>)}
         <Card className={`garage-kpi garage-kpi-utilization ${utilizationColorClass(utilization)}`}><CardContent className="flex flex-col p-4"><p className="text-sm font-semibold">Utilization</p><div className="flex items-end justify-between"><motion.p key={utilization} initial={{ opacity: 0, scale: 0.82 }} animate={{ opacity: 1, scale: 1 }} className="text-3xl font-black">{utilization}%</motion.p><div className="garage-kpi-icon"><Gauge /></div></div></CardContent></Card>
-      </div>
+      </div>}
       <div className="grid gap-3 lg:grid-cols-5">
-        {!openedParkingZone && <Card className="occupancy-shimmer lg:col-span-3"><CardHeader><div className="flex items-end justify-between"><div><CardTitle>Parking utilization</CardTitle><CardDescription>Real-time occupied bays across the facility</CardDescription></div><strong className="text-3xl">{utilization}%</strong></div></CardHeader><CardContent><Progress value={utilization} /><p className="mt-3 text-sm text-muted-foreground">Operational warning at 80% occupancy</p></CardContent></Card>
-        <Card className="lg:col-span-5">
-          <CardHeader className="gap-4">
+        {!openedParkingZone && <Card className="occupancy-shimmer lg:col-span-3"><CardHeader><div className="flex items-end justify-between"><div><CardTitle>Parking utilization</CardTitle><CardDescription>Real-time occupied bays across the facility</CardDescription></div><strong className="text-3xl">{utilization}%</strong></div></CardHeader><CardContent><Progress value={utilization} /><p className="mt-3 text-sm text-muted-foreground">Operational warning at 80% occupancy</p></CardContent></Card>}
+        <Card className="vplm-parking-panel lg:col-span-5">
+          <CardHeader className="gap-2 pb-2">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div><CardTitle className="flex items-center gap-2"><LayoutGrid className="h-5 w-5 text-primary" />Parking Lot</CardTitle><CardDescription>Choose a zone to view its live parking bays.</CardDescription></div>
               <div className="flex flex-wrap items-center gap-2">
@@ -1103,7 +1103,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
               {openedParkingZone && <Button variant="outline" size="sm" onClick={() => { setOpenedParkingZone(null); setGarageZoneFilter('all'); }}><ChevronLeft className="h-4 w-4" /> All zones</Button>}
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-2 px-3 pb-3 sm:px-5">
             {!openedParkingZone && <section className="vplm-zone-showcase" aria-label="Live parking zones">
               <div className="vplm-zone-showcase-header"><h3 className="text-sm font-bold text-foreground">Select a parking zone</h3><span className="text-xs text-muted-foreground">Swipe <ChevronRight className="inline h-3.5 w-3.5" /></span></div>
               <div className="vplm-zone-hero-rail" role="group" aria-label="Parking zones">
@@ -1134,8 +1134,8 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
               </div>
             </section>}
             {openedParkingZone && visibleZones.some((zoneItem: { zone: string }) => zoneItem.zone === openedParkingZone)
-              ? <section id="parking-zone-detail" className="vplm-zone-detail space-y-3 rounded-2xl border bg-card p-3 sm:p-5" aria-label={`${zoneDisplayName(openedParkingZone)} parking bays`}>
-                  <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+              ? <section id="parking-zone-detail" className="vplm-zone-detail space-y-2" aria-label={`${zoneDisplayName(openedParkingZone)} parking bays`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div><p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Selected parking zone</p><h3 className="text-lg font-bold">{zoneDisplayName(openedParkingZone)}</h3></div>
                     <div className="flex flex-wrap gap-1">
                       <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(false)}>Expand all</Button>
@@ -1162,7 +1162,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         const maintenance = bayManagement.maintenance.some((item: BayMaintenance) => item.bayId === slotId && item.status === 'Active');
                         const status = xVehicle ? 'Occupied' : maintenance ? 'Maintenance' : reserved ? 'Reserved' : 'Available';
                         return <button key={`x-parking-${bay.id}`} id={xVehicle ? `garage-vehicle-${xVehicle.id}` : undefined} type="button"
-                          className={`vplm-bay-tile vplm-bay-tile-x ${bayStyle(status)}${isHighlightedBay(bay.id, true) ? ' garage-located-bay' : ''}`}
+                          className={`vplm-bay-chip vplm-bay-chip-x ${bayStyle(status)}${isHighlightedBay(bay.id, true) ? ' garage-located-bay' : ''}`}
                           draggable={Boolean(xVehicle && canTransferVehicle)}
                           onDragStart={() => { if (xVehicle && canTransferVehicle) setDraggedVehicleId(xVehicle.id); }}
                           onDragEnd={() => setDraggedVehicleId(undefined)}
@@ -1179,13 +1179,12 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                           }}
                           title={`X Parking beside ${bay.zone}-${bay.bayNumber}: ${status}`}
                           aria-label={`X Parking beside ${bay.zone}-${bay.bayNumber}: ${status}${xVehicle ? `, vehicle ${xVehicle.plateNumber}` : ''}`}>
-                          <span className="vplm-bay-tile-head"><strong>X · {bay.zone}-{bay.bayNumber}</strong><span className="vplm-bay-status">{status === 'Available' ? 'Vacant' : status}</span></span>
-                          <span className="vplm-bay-tile-art">
-                            {xVehicle
-                              ? <TopViewCar vehicle={xVehicle} roadTest={xVehicleRoadTest} xParked onSelect={() => { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); setOverviewVehicleId(xVehicle.id); }} />
-                              : <span className="vplm-bay-empty-icon"><CarFront className="h-7 w-7" strokeWidth={1.5} aria-hidden="true" /><span>X</span></span>}
+                          <span className="vplm-bay-chip-head"><strong>X · {bay.zone}-{bay.bayNumber}</strong><span className="vplm-bay-chip-state">{status === 'Available' ? 'Vacant' : status}</span></span>
+                          <span className="vplm-bay-chip-visual">
+                            {xVehicle ? <TopViewCar vehicle={xVehicle} roadTest={xVehicleRoadTest} xParked onSelect={() => { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); setOverviewVehicleId(xVehicle.id); }} />
+                              : <span className="vplm-bay-chip-empty">X</span>}
                           </span>
-                          <span className="vplm-bay-tile-foot"><strong>{xVehicle ? xVehicle.plateNumber : 'X Parking'}</strong><span>{xVehicle ? 'View vehicle' : status === 'Available' ? 'Tap for details' : status}</span></span>
+                          <span className="vplm-bay-chip-plate">{xVehicle?.plateNumber ?? 'X Parking'}</span>
                         </button>;
                       })}
                     </div>;
@@ -1205,22 +1204,17 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()}
                         onDrop={() => { if (draggedVehicleId && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(draggedVehicleId, bay.id); setDraggedVehicleId(undefined); }}
                         onClick={() => { setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }}
-                        className={`vplm-bay-tile ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`}
+                        className={`vplm-bay-chip ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`}
                         aria-label={`${isLiveGarageContainer(bay) ? 'Container' : 'Bay ' + bay.bayNumber}, ${zoneDisplayName(bay.zone)}, ${displayStatus}${vehicle ? `, vehicle ${vehicle.plateNumber}` : ''}${xParkingVehicle ? `, X-Parked vehicle ${xParkingVehicle.plateNumber}` : ''}`}>
-                        <span className="vplm-bay-tile-head"><strong>{isLiveGarageContainer(bay) ? bay.zone : `${bay.zone === 'Reception' ? 'R ' : bay.zone === 'Workshop' ? 'W ' : bay.zone}-${bay.bayNumber}`}</strong><span className="vplm-bay-status">{displayStatus === 'Available' ? 'Vacant' : displayStatus}</span></span>
-                        <span className="vplm-bay-tile-art">
-                          {vehicle
-                            ? <TopViewCar vehicle={vehicle} roadTest={vehicleRoadTest} onSelect={() => { setSelectedBayId(undefined); setOverviewVehicleId(vehicle.id); }} />
-                            : <span className="vplm-bay-empty-icon"><CarFront className="h-7 w-7" strokeWidth={1.5} aria-hidden="true" /></span>}
+                        <span className="vplm-bay-chip-head"><strong>{isLiveGarageContainer(bay) ? bay.zone : `${bay.zone === 'Reception' ? 'R ' : bay.zone === 'Workshop' ? 'W ' : bay.zone}-${bay.bayNumber}`}</strong><span className="vplm-bay-chip-state">{displayStatus === 'Available' ? 'Vacant' : displayStatus}</span></span>
+                        <span className="vplm-bay-chip-visual">
+                          {vehicle ? <TopViewCar vehicle={vehicle} roadTest={vehicleRoadTest} onSelect={() => { setSelectedBayId(undefined); setOverviewVehicleId(vehicle.id); }} />
+                            : <CarFront className="h-6 w-6 text-muted-foreground/60" strokeWidth={1.6} aria-hidden="true" />}
                         </span>
-                        <span className="vplm-bay-tile-foot"><strong>{vehicle ? vehicle.plateNumber : displayStatus === 'Available' ? 'Available' : displayStatus}</strong><span>{vehicle ? 'View vehicle' : displayStatus === 'Available' ? 'Tap for details' : 'Bay details'}</span></span>
+                        <span className="vplm-bay-chip-plate">{vehicle?.plateNumber ?? (displayStatus === 'Available' ? 'Empty' : displayStatus)}</span>
                       </motion.button>;
                     };
-                    return <div key={zoneItem.zone} className="mb-5 last:mb-0">
-                      <button type="button" onClick={() => toggleZone(zoneItem.zone)} className="mb-2 flex w-full items-center justify-between rounded-md bg-card px-3 py-2 text-left text-card-foreground" aria-expanded={!isCollapsed}>
-                        <span className="flex items-center gap-2"><ChevronDown className={`h-4 w-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} /><strong>{zoneDisplayName(zoneItem.zone)}</strong><span className="text-sm text-muted-foreground">{lanes.length} {lanes.length === 1 ? 'line' : 'lines'}</span></span>
-                        <span className="text-xs font-semibold">{zoneLocations.length} shown · {zoneItem.available} vacant</span>
-                      </button>
+                    return <div key={zoneItem.zone} className="last:mb-0">
                       {!isCollapsed && (zoneLocations.length > 0 ? <div className="vplm-compact-lanes">
                         {lanes.map((lane: string) => {
                           const laneBays = zoneLocations.filter((location: ParkingLocation) => location.lane.trim() === lane);
@@ -1243,7 +1237,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
           </CardContent>
         </Card>
       </div>
-      <Card><CardHeader><div className="flex items-center justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><CarFront /> Unassigned Bay</CardTitle><CardDescription>Vehicles assigned without a parking bay number.</CardDescription></div><Badge variant="outline">{unassignedVehicles.length}</Badge></div></CardHeader><CardContent>{unassignedVehicles.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{unassignedVehicles.map((vehicle: Vehicle) => <button id={`garage-vehicle-${vehicle.id}`} key={vehicle.id} type="button" onClick={() => onAssignUnassignedVehicle(vehicle)} className={`w-full rounded-xl border bg-background p-4 text-left ${locatedVehicle?.id === vehicle.id ? 'ring-4 ring-primary ring-offset-2' : ''}`}><div className="flex items-start justify-between gap-2"><div><p className="font-bold">{vehicle.plateNumber}</p><p className="text-sm text-muted-foreground">{vehicle.brand} {vehicle.model} · {vehicle.color}</p></div><Badge variant="secondary">Unassigned</Badge></div><div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Info label="Customer" value={vehicle.customerName} /><Info label="Assigned by" value={vehicle.assignedBy} /><Info label="Assigned on" value={vehicle.assignedDate ? format(new Date(vehicle.assignedDate), 'dd MMM yyyy, HH:mm') : undefined} /></div></button>)}</div> : <p className="py-2 text-sm text-muted-foreground">No vehicles are in the Unassigned Bay tray.</p>}</CardContent></Card>
+      {!openedParkingZone && <><Card><CardHeader><div className="flex items-center justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><CarFront /> Unassigned Bay</CardTitle><CardDescription>Vehicles assigned without a parking bay number.</CardDescription></div><Badge variant="outline">{unassignedVehicles.length}</Badge></div></CardHeader><CardContent>{unassignedVehicles.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{unassignedVehicles.map((vehicle: Vehicle) => <button id={`garage-vehicle-${vehicle.id}`} key={vehicle.id} type="button" onClick={() => onAssignUnassignedVehicle(vehicle)} className={`w-full rounded-xl border bg-background p-4 text-left ${locatedVehicle?.id === vehicle.id ? 'ring-4 ring-primary ring-offset-2' : ''}`}><div className="flex items-start justify-between gap-2"><div><p className="font-bold">{vehicle.plateNumber}</p><p className="text-sm text-muted-foreground">{vehicle.brand} {vehicle.model} · {vehicle.color}</p></div><Badge variant="secondary">Unassigned</Badge></div><div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Info label="Customer" value={vehicle.customerName} /><Info label="Assigned by" value={vehicle.assignedBy} /><Info label="Assigned on" value={vehicle.assignedDate ? format(new Date(vehicle.assignedDate), 'dd MMM yyyy, HH:mm') : undefined} /></div></button>)}</div> : <p className="py-2 text-sm text-muted-foreground">No vehicles are in the Unassigned Bay tray.</p>}</CardContent></Card>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(['BP1', 'BP2', 'BP3', 'Washing Area', 'Toyota Reception', 'Lexus Reception', 'Workshop Centre Bay'] as const).map((containerName) => {
           const container = locations.find((location: ParkingLocation) => location.zone === containerName && isLiveGarageContainer(location));
@@ -1273,8 +1267,9 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
           </Card>;
         })}
       </div>
-      <BayInformationDialog key={selectedSlotId ?? 'no-bay'} isXParking={Boolean(selectedXParkingBayId)} bay={selectedBay} open={Boolean(selectedAnchorId)} onOpenChange={(open: boolean) => { if (!open) { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); } }} vehicle={selectedBayVehicle} reservation={selectedReservation} maintenance={selectedMaintenance} history={selectedHistory} actor={actor} role={role} onReserve={reserveBay} onMaintenance={markMaintenance} onCompleteMaintenance={completeMaintenance} assignmentVehicle={assignmentVehicle} onAssignmentVehicleChange={setAssignmentVehicle} canAssignVehicle={canAssignVehicle} onAssignVehicle={() => { if (!selectedBay) return; const form = selectedXParkingBayId ? { ...assignmentVehicle, xParking: 'Yes' as const } : assignmentVehicle; if (assignSelectedBay(selectedBay.id, form)) { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); } }} onRequestRelease={requestRelease} onReleaseDecision={decideRelease} />
-      <VehicleOverviewDialog viewerRole={role} vehicle={activeVehicles.find((item: Vehicle) => item.id === overviewVehicleId)} open={Boolean(overviewVehicleId)} onOpenChange={(open: boolean) => { if (!open) setOverviewVehicleId(undefined); }} locations={locations} vehicles={activeVehicles} movements={movements} roadTest={overviewVehicleId ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === overviewVehicleId) : undefined} canRequestRoadTest={canAccessRoadTests} canEdit={canEditVehicle} canTransfer={canTransferVehicle} canDelete={canManage} onRequestRoadTest={(vehicle: Vehicle) => { setOverviewVehicleId(undefined); onOpenRoadTests(vehicle.id); }} onUpdate={updateVehicle} onTransfer={transferVehicle} onStartWashing={startWashing} onDeliver={deliverVehicle} onDelete={deleteVehicle} />
+      </>}
+      <BayInformationDialog compactSheet key={selectedSlotId ?? 'no-bay'} isXParking={Boolean(selectedXParkingBayId)} bay={selectedBay} open={Boolean(selectedAnchorId)} onOpenChange={(open: boolean) => { if (!open) { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); } }} vehicle={selectedBayVehicle} reservation={selectedReservation} maintenance={selectedMaintenance} history={selectedHistory} actor={actor} role={role} onReserve={reserveBay} onMaintenance={markMaintenance} onCompleteMaintenance={completeMaintenance} assignmentVehicle={assignmentVehicle} onAssignmentVehicleChange={setAssignmentVehicle} canAssignVehicle={canAssignVehicle} onAssignVehicle={() => { if (!selectedBay) return; const form = selectedXParkingBayId ? { ...assignmentVehicle, xParking: 'Yes' as const } : assignmentVehicle; if (assignSelectedBay(selectedBay.id, form)) { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); } }} onRequestRelease={requestRelease} onReleaseDecision={decideRelease} />
+      <VehicleOverviewDialog compactSheet viewerRole={role} vehicle={activeVehicles.find((item: Vehicle) => item.id === overviewVehicleId)} open={Boolean(overviewVehicleId)} onOpenChange={(open: boolean) => { if (!open) setOverviewVehicleId(undefined); }} locations={locations} vehicles={activeVehicles} movements={movements} roadTest={overviewVehicleId ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === overviewVehicleId) : undefined} canRequestRoadTest={canAccessRoadTests} canEdit={canEditVehicle} canTransfer={canTransferVehicle} canDelete={canManage} onRequestRoadTest={(vehicle: Vehicle) => { setOverviewVehicleId(undefined); onOpenRoadTests(vehicle.id); }} onUpdate={updateVehicle} onTransfer={transferVehicle} onStartWashing={startWashing} onDeliver={deliverVehicle} onDelete={deleteVehicle} />
     </div>
   );
 }
