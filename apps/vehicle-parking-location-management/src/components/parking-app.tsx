@@ -518,7 +518,10 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   };
   const handleTransfer = (toXParking = false) => {
     if (!selectedVehicle) return toast.error('Select a parked vehicle and an available destination.');
-    transferVehicleById(selectedVehicle.id, newLocationId, notes, toXParking);
+    if (transferVehicleById(selectedVehicle.id, newLocationId, notes, toXParking)) {
+      setSelectedVehicleId('');
+      setScreen('dashboard');
+    }
   };
   const openAssistantAssignment = (plateNumber: string, vehicle?: Vehicle): boolean => {
     if (!canAssignVehicle) return false;
@@ -1010,7 +1013,10 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     } : item));
     addMovement(vehicleId, previous, destinationId, previous ? 'Transfer' : 'Assign');
     logAudit(previous ? 'Transfer' : 'Assignment', 'Vehicle', `${vehicle.plateNumber} → ${destination.zone}-${destination.bayNumber}`);
-    if (nextOperationalStatus !== 'Washing') setSelectedBayId(destinationId);
+    // Keep the successful action notification without opening a second bay/profile dialog.
+    setSelectedBayId(undefined);
+    setSelectedXParkingBayId(undefined);
+    setOverviewVehicleId(undefined);
     toast.success(`${vehicle.plateNumber} moved to ${destination.zone}-${destination.bayNumber}.`);
   };
   const startWashing = (vehicleId: string) => {
