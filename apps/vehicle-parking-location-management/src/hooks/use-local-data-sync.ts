@@ -40,7 +40,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   const saveRecovery = (draft: ReturnType<typeof readWorkspaceSnapshot>) => {
     // Retain earlier recovery versions when a new offline session is saved.
     // A quota failure leaves the original key untouched for later export.
-    if (userId) preserveWorkspaceRecoveryCopy(userId, draft);
+    if (userId) preserveWorkspaceRecoveryCopy(userId, draft, false);
   };
   const timer = useRef<number | undefined>(undefined);
   const retryTimer = useRef<number | undefined>(undefined);
