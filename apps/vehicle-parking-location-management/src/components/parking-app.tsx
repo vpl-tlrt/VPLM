@@ -219,7 +219,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setAuditEvents(updated.auditEvents);
     setGarageLayout(loadGarageLayout());
   }, [onSyncRecovered]);
-  const { sync, getRevision, conflictDetail, downloadRecovery, downloadOperationJournal, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview, user?.objectId, onWorkspaceMerged);
+  const { sync, getRevision, conflictDetail, downloadRecovery, downloadOperationJournal, keepCloudAfterReview, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview, user?.objectId, onWorkspaceMerged);
   const isOnline = syncState !== 'offline';
   const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline · pending' : syncState === 'error' ? 'Sync needs attention' : pendingChanges ? 'Changes pending' : 'Cloud synced';
 
@@ -638,7 +638,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
             <div className="flex min-w-0 items-center gap-3">
               <Sheet>
                 <SheetTrigger asChild><Button variant="outline" size="icon" className="shrink-0 md:hidden" aria-label="Open navigation"><Menu /></Button></SheetTrigger>
-                <SheetContent side="left">
+                <SheetContent side="left" className="max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto pb-8">
                   <SheetHeader><SheetTitle>Parking control</SheetTitle></SheetHeader>
                   <div className="mt-6 flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold">Navigation</p>
@@ -672,7 +672,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
               <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} onFocus={() => { if (searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-28" aria-label="Global vehicle search" />
             </div>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="vplm-header-actions ml-auto flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain py-1 sm:gap-2 md:overflow-visible">
               {guestPreview && <Badge variant="secondary" className="shrink-0 border border-amber-500/60 bg-amber-100 font-black text-amber-950">GUEST PREVIEW · NO CLOUD SAVES</Badge>}
               <div className="hidden text-right xl:block"><p className="text-sm font-semibold"><LiveClock formatString="EEE, d MMM" /></p><p className="text-xs text-muted-foreground"><LiveClock formatString="HH:mm:ss" /></p></div>
               {otherSessions > 0 && <span className="hidden rounded-lg border px-2 py-1 text-xs text-muted-foreground sm:inline-flex" title="This account is signed in on more than one tab or device. Concurrent changes are checked before saving.">{otherSessions} other session{otherSessions === 1 ? '' : 's'}</span>}
@@ -696,13 +696,13 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
               <Button id="ui-mode-button" type="button" variant={isNeumorphism ? 'default' : 'outline'} size="icon" className="soft-ui-push rounded-full" onClick={() => setIsNeumorphism((current: boolean) => !current)} aria-label={isNeumorphism ? 'Turn Soft UI off' : 'Turn Soft UI on'} aria-pressed={isNeumorphism} title={isNeumorphism ? 'Turn Soft UI off' : 'Turn Soft UI on'}>
                 {isNeumorphism ? <Lightbulb className="h-4 w-4" /> : <LightbulbOff className="h-4 w-4" />}
               </Button>
-              <Sheet><SheetTrigger asChild><Button variant="outline" size="icon" className="rounded-xl" aria-label="Open quick actions"><Plus /></Button></SheetTrigger><SheetContent side="right"><SheetHeader><SheetTitle>Quick actions</SheetTitle></SheetHeader><div className="mt-6 grid gap-2">{visibleNavigation.filter((item) => ['assignment', 'search', 'transfer', 'reservations', 'road-tests', 'pickup-requests'].includes(item.id)).map(({ id, label, icon: Icon }) => <Button key={id} variant="outline" className="justify-start" onClick={() => setScreen(id)}><Icon />{label}</Button>)}</div><div className="mt-6 rounded-2xl bg-muted p-4 text-muted-foreground"><p className="font-semibold text-foreground">{actor}</p><p className="text-sm">{roleLabel(role)}</p></div></SheetContent></Sheet>
+              <Sheet><SheetTrigger asChild><Button variant="outline" size="icon" className="rounded-xl" aria-label="Open quick actions"><Plus /></Button></SheetTrigger><SheetContent side="right" className="max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto pb-8"><SheetHeader><SheetTitle>Quick actions</SheetTitle></SheetHeader><div className="mt-6 grid gap-2">{visibleNavigation.filter((item) => ['assignment', 'search', 'transfer', 'reservations', 'road-tests', 'pickup-requests'].includes(item.id)).map(({ id, label, icon: Icon }) => <Button key={id} variant="outline" className="justify-start" onClick={() => setScreen(id)}><Icon />{label}</Button>)}</div><div className="mt-6 rounded-2xl bg-muted p-4 text-muted-foreground"><p className="font-semibold text-foreground">{actor}</p><p className="text-sm">{roleLabel(role)}</p></div></SheetContent></Sheet>
             </div>
           </div>
           <div className="relative mt-3 overflow-hidden rounded-2xl bg-background lg:hidden"><span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-base font-bold tabular-nums text-muted-foreground" aria-hidden="true"><LiveClock formatString="HH:mm:ss" /></span><Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-24" aria-label="Global vehicle search" /></div>
         </header>
         {conflictDetail && <div role="alert" className="flex flex-wrap items-center gap-2 border-b bg-muted p-3 text-sm">
-          <span>Sync conflict: {conflictDetail}. Local work is available to download.</span>
+          <span>Sync recovery: {conflictDetail} The local backup remains available.</span>
           <Button size="sm" variant="outline" onClick={downloadRecovery}>Download pending changes</Button>
           <Button size="sm" variant="outline" onClick={downloadOperationJournal}>Download operation journal</Button>
           <Button size="sm" variant="outline" onClick={() => setRecoveryReviewOpen(true)}>Review local vs cloud</Button>
@@ -721,7 +721,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
             if (window.confirm('Refresh from the live workspace? Temporary guest changes will be discarded.')) onGuestRefresh?.();
           }}>Refresh live data</Button>
         </div>}
-        <motion.div key={screen} initial={{ opacity: 0, y: 12, scale: 0.995 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] as const }} className="mx-auto max-w-[1600px] p-4 md:p-6 xl:p-8">
+        <motion.div key={screen} initial={{ opacity: 0, y: 12, scale: 0.995 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] as const }} className="vplm-app-screen mx-auto w-full min-w-0 max-w-[1600px] p-3 sm:p-4 md:p-6 xl:p-8">
           {screen === 'pickup-requests' && <PickupRequestManagement getWorkspaceRevision={getRevision} initialRequestId={initialPickupRequestId} onRefreshWorkspace={id => {
             if (pendingChanges || syncState === 'syncing' || syncState === 'error') {
               if (!window.confirm('Reload the workspace and discard unsynced changes on this device?')) return;
@@ -763,7 +763,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 md:hidden" aria-label="Primary navigation">
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
-      <WorkspaceRecoveryReview userId={user?.objectId} open={recoveryReviewOpen} onOpenChange={setRecoveryReviewOpen} />
+      <WorkspaceRecoveryReview userId={user?.objectId} open={recoveryReviewOpen} onOpenChange={setRecoveryReviewOpen} onKeepCloudReviewed={keepCloudAfterReview} />
       {!localGuest && <AiAssistant vehicles={vehicles} movements={movements} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} locationLabel={locationLabel} onAssign={openAssistantAssignment} onTransfer={transferVehicleById} />}
     </div>
   );
@@ -1103,7 +1103,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                 <SelectTrigger className="w-[150px]" aria-label="Filter garage by status"><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="all">All statuses</SelectItem>{(['Available', 'Occupied', 'Reserved', 'Maintenance'] as ParkingLocation['status'][]).filter((status: ParkingLocation['status']) => status).map((status: ParkingLocation['status']) => <SelectItem key={status} value={status}>{status === 'Available' ? 'Vacant' : status}</SelectItem>)}</SelectContent>
               </Select>
-              {openedParkingZone && <Button variant="outline" size="sm" onClick={() => { setOpenedParkingZone(null); }}><ChevronLeft className="h-4 w-4" /> All zones</Button>}
+              {openedParkingZone && <Button variant="default" size="sm" className="border border-primary bg-primary font-bold text-primary-foreground shadow-none hover:bg-primary/90" onClick={() => { setOpenedParkingZone(null); }}><ChevronLeft className="h-4 w-4" /> All zones</Button>}
             </div>
           </div>
           <div className="space-y-2 pb-2">
@@ -1375,19 +1375,19 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
   };
 
   return <>
-    <div className="mx-auto grid max-w-5xl gap-5 lg:grid-cols-5">
-      <div className="lg:col-span-5"><p className="technical-label">Fast check-in</p><h2 className="text-2xl font-bold">Vehicle assignment</h2></div>
-      <Card className="lg:col-span-2">
+    <div className="vplm-assignment-screen mx-auto grid w-full min-w-0 max-w-5xl grid-cols-1 gap-4 lg:grid-cols-5">
+      <div className="min-w-0 lg:col-span-5"><p className="technical-label">Fast check-in</p><h2 className="text-2xl font-bold">Vehicle assignment</h2></div>
+      <Card className="min-w-0 lg:col-span-2">
         <CardHeader><CardTitle>Capture vehicle</CardTitle><CardDescription>Use the device camera to capture the vehicle, then complete its profile manually.</CardDescription></CardHeader>
         <CardContent className="grid gap-3"><Button size="lg" onClick={() => fileRef.current?.click()}><Camera /> Open camera</Button><input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleOcr} /></CardContent>
       </Card>
-      <Card className="lg:col-span-3">
+      <Card className="min-w-0 lg:col-span-3">
         <CardHeader><CardTitle>Vehicle profile</CardTitle><CardDescription>Registration and VIN are checked to prevent duplicate records.</CardDescription></CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="min-w-0 space-y-4">
           <VehicleFormFields value={assignmentVehicle} onChange={setAssignmentVehicle} idPrefix="assignment" assignmentMode />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2"><Label>Parking zone</Label><Select value={zone} onValueChange={(value: string) => { setZone(value); setBayId(''); }}><SelectTrigger className="h-12"><SelectValue /></SelectTrigger><SelectContent>{zoneNames.filter((item: string) => item).map((item: string) => <SelectItem key={item} value={item}>{['Lexus Reception', 'Toyota Reception', 'Washing Area', 'BP1', 'BP2', 'BP3', 'Workshop Centre Bay'].includes(item) ? item : `Zone ${item}`}</SelectItem>)}</SelectContent></Select></div>
-            <div className="space-y-2"><Label>{assignmentVehicle.xParking === 'Yes' ? 'Parking bay / X Parking anchor' : 'Available bay'}</Label><Select value={bayId || 'none'} onValueChange={(value: string) => { const nextBayId = value === 'none' ? '' : value; setBayId(nextBayId); const nextBay = locations.find((item: ParkingLocation) => item.id === nextBayId); if (nextBay && nextBay.zone !== zone) setZone(nextBay.zone); }}><SelectTrigger className="h-12"><SelectValue placeholder="Select bay" /></SelectTrigger><SelectContent><SelectItem value="none">Select a bay</SelectItem>{baysForSelection.filter((item: ParkingLocation) => item.id).map((item: ParkingLocation) => {
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="min-w-0 space-y-2"><Label>Parking zone</Label><Select value={zone} onValueChange={(value: string) => { setZone(value); setBayId(''); }}><SelectTrigger className="h-12 w-full min-w-0"><SelectValue /></SelectTrigger><SelectContent>{zoneNames.filter((item: string) => item).map((item: string) => <SelectItem key={item} value={item}>{['Lexus Reception', 'Toyota Reception', 'Washing Area', 'BP1', 'BP2', 'BP3', 'Workshop Centre Bay'].includes(item) ? item : `Zone ${item}`}</SelectItem>)}</SelectContent></Select></div>
+            <div className="min-w-0 space-y-2"><Label>{assignmentVehicle.xParking === 'Yes' ? 'Parking bay / X Parking anchor' : 'Available bay'}</Label><Select value={bayId || 'none'} onValueChange={(value: string) => { const nextBayId = value === 'none' ? '' : value; setBayId(nextBayId); const nextBay = locations.find((item: ParkingLocation) => item.id === nextBayId); if (nextBay && nextBay.zone !== zone) setZone(nextBay.zone); }}><SelectTrigger className="h-12 w-full min-w-0"><SelectValue placeholder="Select bay" /></SelectTrigger><SelectContent><SelectItem value="none">Select a bay</SelectItem>{baysForSelection.filter((item: ParkingLocation) => item.id).map((item: ParkingLocation) => {
               const occupant = vehicles.find((vehicle: Vehicle) => vehicle.xParking === 'Yes' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(item.id));
               const xReserved = management.reservations.some((record) => record.bayId === xParkingSlotId(item.id) && record.status !== 'Released');
               const xMaintenance = management.maintenance.some((record) => record.bayId === xParkingSlotId(item.id) && record.status === 'Active');
@@ -1395,14 +1395,14 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
               return <SelectItem key={item.id} value={item.id}>{parkingLocationLabel(item)} · {item.section ?? 'Main'} / {item.lane}{assignmentVehicle.xParking === 'Yes' ? ` · ${xStatus}` : ''}</SelectItem>;
             })}</SelectContent></Select></div>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2"><Button size="lg" onClick={openAssignment}><CircleParking /> Assign vehicle</Button><Button size="lg" variant="outline" onClick={handleRelease}><X /> Release vehicle</Button></div>
-          <Button size="lg" variant="secondary" className="w-full" onClick={handleAssignUnassigned} disabled={assignmentVehicle.xParking === 'Yes'}><CircleParking /> Assign to Unassigned Bay</Button>
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2"><Button size="lg" className="h-auto min-h-11 w-full min-w-0 whitespace-normal text-center" onClick={openAssignment}><CircleParking /> Assign vehicle</Button><Button size="lg" variant="outline" className="h-auto min-h-11 w-full min-w-0 whitespace-normal text-center" onClick={handleRelease}><X /> Release vehicle</Button></div>
+          <Button size="lg" variant="secondary" className="h-auto min-h-11 w-full min-w-0 whitespace-normal text-center" onClick={handleAssignUnassigned} disabled={assignmentVehicle.xParking === 'Yes'}><CircleParking /> Assign to Unassigned Bay</Button>
           <p className="-mt-3 text-sm text-muted-foreground">No bay number is required. The vehicle will appear in the dashboard tray.</p>
         </CardContent>
       </Card>
     </div>
     <Dialog open={xParkingConfirmationOpen} onOpenChange={setXParkingConfirmationOpen}>
-      <DialogContent>
+      <DialogContent className="vplm-responsive-dialog">
         <DialogHeader><DialogTitle>Confirm X Parking location</DialogTitle><DialogDescription>{selectedBay ? `${selectedBay.zone}-${selectedBay.bayNumber} X Parking is ${selectedBayOccupied ? `occupied by ${selectedXOccupant?.plateNumber}` : 'vacant'}${selectedOccupant ? `; the adjacent regular bay contains ${selectedOccupant.plateNumber}` : ''}.` : 'Choose a bay to continue.'} {suggestedBay ? `Nearby vacant bay suggestion: ${suggestedBay.zone}-${suggestedBay.bayNumber}.` : 'No nearby vacant bay is available.'}</DialogDescription></DialogHeader>
         <div className="grid gap-3">
           <Button variant="outline" onClick={openOccupantDetails} disabled={selectedBayOccupied}>Record adjacent regular bay vehicle (optional)</Button>
@@ -1412,7 +1412,7 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
       </DialogContent>
     </Dialog>
     <Dialog open={occupantDetailsOpen} onOpenChange={(open: boolean) => { setOccupantDetailsOpen(open); if (!open) setXParkingConfirmationOpen(true); }}>
-      <DialogContent>
+      <DialogContent className="vplm-responsive-dialog">
         <DialogHeader><DialogTitle>Occupied bay vehicle</DialogTitle><DialogDescription>Enter the registration and model of the vehicle occupying {selectedBay ? `${selectedBay.zone}-${selectedBay.bayNumber}` : 'this bay'}.</DialogDescription></DialogHeader>
         <div className="grid gap-4">
           <div className="space-y-2"><Label htmlFor="x-parking-occupant-registration">Vehicle registration</Label><Input id="x-parking-occupant-registration" value={occupantPlateNumber} onChange={(event: ChangeEvent<HTMLInputElement>) => setOccupantPlateNumber(event.target.value.toUpperCase())} /></div>

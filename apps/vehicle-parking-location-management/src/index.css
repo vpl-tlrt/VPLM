@@ -1346,3 +1346,57 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   .vplm-parking-panel .vplm-oriented-slot .vplm-bay-chip { padding-inline: 0.2rem; }
 }
 @media (prefers-reduced-motion: reduce) { .vplm-oriented-horizontal-scroll { scroll-behavior: auto; } }
+
+
+/* Responsive containment: keep every operation screen usable on narrow phones,
+   tablets and desktop side-drawers without changing menu/business behavior. */
+.vplm-app-screen, .vplm-app-screen > * { min-width: 0; max-width: 100%; }
+.vplm-app-screen :is([data-slot="card"], [data-slot="card-header"], [data-slot="card-content"], [data-slot="tabs"], [data-slot="tabs-content"]) {
+  min-width: 0; max-width: 100%;
+}
+.vplm-app-screen :is(input, textarea, [data-slot="select-trigger"]) { min-width: 0; max-width: 100%; }
+.vplm-header-actions { min-width: 0; max-width: calc(100dvw - 7rem); scrollbar-width: none; }
+.vplm-header-actions::-webkit-scrollbar { display: none; }
+.vplm-header-actions > * { flex-shrink: 0; }
+@media (min-width: 768px) {
+  .vplm-header-actions { max-width: none; }
+}
+@media (max-width: 767px) {
+  .vplm-assignment-screen [data-slot="card-header"], .vplm-assignment-screen [data-slot="card-content"] { padding: 0.85rem; }
+  .vplm-assignment-screen button { max-width: 100%; }
+}
+[data-slot="dialog-content"] {
+  box-sizing: border-box;
+  min-inline-size: 0;
+  max-inline-size: calc(100dvw - 1rem);
+  max-block-size: calc(100dvh - 1rem);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+[data-slot="dialog-content"] > * { min-width: 0; max-width: 100%; }
+[data-slot="sheet-content"] { box-sizing: border-box; max-inline-size: calc(100dvw - 0.5rem); min-width: 0; }
+.vplm-responsive-dialog { width: min(64rem, calc(100dvw - 1rem)); max-width: calc(100dvw - 1rem); }
+.vplm-responsive-dialog :is(input, textarea, [data-slot="select-trigger"]) { min-width: 0; max-width: 100%; }
+.vplm-responsive-dialog button, .vplm-parking-detail-sheet button { min-width: 0; overflow-wrap: anywhere; }
+.vplm-parking-detail-sheet { box-sizing: border-box; max-inline-size: 100dvw; min-width: 0; overflow-x: hidden; }
+.vplm-parking-detail-sheet > * { min-width: 0; max-width: 100%; }
+.vplm-parking-detail-sheet :is(input, textarea, [data-slot="select-trigger"]) { min-width: 0; max-width: 100%; }
+:is(.vplm-responsive-dialog, .vplm-parking-detail-sheet) [data-slot="tabs-list"] {
+  justify-content: flex-start; max-width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+}
+:is(.vplm-responsive-dialog, .vplm-parking-detail-sheet) [data-slot="tabs-trigger"] {
+  flex: 0 0 auto; min-width: max-content;
+}
+@media (min-width: 768px) {
+  .vplm-parking-detail-sheet {
+    width: min(620px, calc(100dvw - 1rem));
+    max-width: min(620px, calc(100dvw - 1rem));
+  }
+}
+
+/* Scrollable tab navigation and constrained dropdown portals for other menus
+   (Road Tests, History, Management, Reservations, Profile). */
+[data-slot="tabs-list"] { max-inline-size: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; justify-content: flex-start; }
+[data-slot="tabs-trigger"] { flex-shrink: 0; min-inline-size: max-content; }
+[data-slot="select-content"] { max-inline-size: calc(100dvw - 1rem); }
+[data-slot="dialog-content"]:not(.vplm-responsive-dialog):not(.vplm-parking-detail-sheet) { overflow-x: auto; }

@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { applyWorkspaceSnapshot, readWorkspaceSnapshot, workspaceStorageKeys, type WorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
 import { acknowledgeSyncMutations, exportSyncJournal, listPendingSyncMutations } from '@/lib/sync-queue';
+import { preserveWorkspaceRecoveryCopy, readRecoverySnapshot, recoveryFingerprint, workspaceContentMatches } from '@/lib/workspace-recovery-status';
 
 const hasUncommittedData = (before: WorkspaceSnapshot, current: WorkspaceSnapshot): boolean =>
   workspaceStorageKeys.some(key => {
@@ -34,17 +35,12 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   if (!baseline.current && !localOnly) baseline.current = readWorkspaceSnapshot();
   const recoveryKey = userId ? `vplm-unsynced-recovery:${userId}` : undefined;
   const preservedKey = userId ? `vplm-preserved-unsynced:${userId}` : undefined;
+  const reviewedKey = userId ? `vplm-recovery-verified:${userId}` : undefined;
   const [conflictDetail, setConflictDetail] = useState('');
-  useEffect(() => {
-    if (!recoveryKey || localOnly) return;
-    try {
-      if (window.localStorage.getItem(recoveryKey)) setConflictDetail('A previous session left an unsynced copy');
-    } catch { /* Recovery storage is unavailable in this browser. */ }
-  }, [localOnly, recoveryKey]);
   const saveRecovery = (draft: ReturnType<typeof readWorkspaceSnapshot>) => {
-    if (!recoveryKey) return;
-    try { window.localStorage.setItem(recoveryKey, JSON.stringify(draft)); }
-    catch { /* The in-memory workspace remains available for download. */ }
+    // Retain earlier recovery versions when a new offline session is saved.
+    // A quota failure leaves the original key untouched for later export.
+    if (userId) preserveWorkspaceRecoveryCopy(userId, draft, false);
   };
   const timer = useRef<number | undefined>(undefined);
   const retryTimer = useRef<number | undefined>(undefined);
@@ -54,14 +50,79 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   const rerun = useRef(false);
   const syncBlocked = useRef(false);
   useEffect(() => {
-    if (!preservedKey || localOnly) return;
+    if (localOnly || !userId || !recoveryKey || !preservedKey || !reviewedKey) return;
+    let active = true;
+    let raw: string | null = null;
+    let preserved = false;
     try {
-      if (window.localStorage.getItem(preservedKey)) {
-        syncBlocked.current = true;
-        setConflictDetail('Unsynced records were preserved before cloud reload. Download the local backup and reconcile before uploading.');
+      raw = window.localStorage.getItem(recoveryKey);
+      preserved = Boolean(window.localStorage.getItem(preservedKey));
+      if (!raw && !preserved) return;
+      // A previously reviewed backup stays on this device for audit/recovery.
+      // It should not produce a permanent "sync conflict" warning.
+      if (raw && !preserved && window.localStorage.getItem(reviewedKey) === recoveryFingerprint(raw)) return;
+      syncBlocked.current = preserved;
+      setConflictDetail(preserved
+        ? 'An offline copy was protected before cloud reload. Compare it with the cloud before enabling uploads.'
+        : 'Checking a saved recovery copy against the shared workspace.');
+    } catch { return; }
+    if (!raw) {
+      setConflictDetail('This device has a protected offline state but no readable backup. Do not clear its site storage.');
+      return;
+    }
+    if (!navigator.onLine) {
+      setConflictDetail('Recovery copy saved on this device. Reconnect to verify it against the cloud.');
+      return;
+    }
+    const protectedRaw = raw;
+    void loadWorkspace(userId).then(({ snapshot, isGuest }) => {
+      if (!active) return;
+      if (!snapshot || isGuest) {
+        setConflictDetail('Could not verify the saved local copy against an authorized cloud workspace.');
+        return;
       }
-    } catch { /* Do not remove any local recovery data. */ }
-  }, [preservedKey, localOnly]);
+      // Require *all* workspace collections to match, not just vehicle plates.
+      // The current displayed snapshot must also match to avoid suppressing new edits.
+      const identical = workspaceContentMatches(readRecoverySnapshot(protectedRaw), snapshot)
+        && workspaceContentMatches(readWorkspaceSnapshot(), snapshot);
+      if (identical) {
+        try {
+          if (window.localStorage.getItem(recoveryKey) !== protectedRaw) return;
+          window.localStorage.setItem(reviewedKey, recoveryFingerprint(protectedRaw));
+          window.localStorage.removeItem(preservedKey);
+          syncBlocked.current = false;
+          setConflictDetail('');
+        } catch {
+          setConflictDetail('Matching cloud data was verified, but local recovery status could not be saved.');
+        }
+      } else {
+        setConflictDetail('A preserved local backup differs from current cloud records. Review both copies; nothing will be overwritten automatically.');
+      }
+    }).catch(() => {
+      if (active) setConflictDetail('Could not check this backup against the cloud. Keep local data and try reviewing when online.');
+    });
+    return () => { active = false; };
+  }, [localOnly, userId, recoveryKey, preservedKey, reviewedKey]);
+
+  const keepCloudAfterReview = useCallback((): boolean => {
+    if (!recoveryKey || !reviewedKey || !preservedKey || !baseline.current
+        || hasUncommittedData(baseline.current, readWorkspaceSnapshot())) {
+      toast.error('New local changes are pending. Sync or back them up before resolving an older recovery copy.');
+      return false;
+    }
+    try {
+      const raw = window.localStorage.getItem(recoveryKey);
+      if (!raw || !readRecoverySnapshot(raw)) return false;
+      // Retain the complete recovery copy and journal. Only acknowledge the user's
+      // explicit decision to continue with the displayed cloud state.
+      window.localStorage.setItem(reviewedKey, recoveryFingerprint(raw));
+      window.localStorage.removeItem(preservedKey);
+      syncBlocked.current = false;
+      setConflictDetail('');
+      setState('idle');
+      return true;
+    } catch { return false; }
+  }, [recoveryKey, reviewedKey, preservedKey]);
 
   useEffect(() => {
     if (localOnly) return;
@@ -142,8 +203,15 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
           retryAttempt.current = 0;
           if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
           retryTimer.current = undefined;
-          if (recoveryKey && !conflictDetail) {
-            try { window.localStorage.removeItem(recoveryKey); } catch { /* Synced data is already in the cloud. */ }
+          if (recoveryKey && reviewedKey && preservedKey && !syncBlocked.current) {
+            try {
+              const savedCopy = window.localStorage.getItem(recoveryKey);
+              if (savedCopy && workspaceContentMatches(readRecoverySnapshot(savedCopy), merged)) {
+                window.localStorage.setItem(reviewedKey, recoveryFingerprint(savedCopy));
+                window.localStorage.removeItem(preservedKey);
+                setConflictDetail('');
+              }
+            } catch { /* Keep the recovery copy untouched if verification fails. */ }
           }
           setLastSyncAt(new Date().toISOString());
           setPendingCount(0);
@@ -162,8 +230,15 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       retryAttempt.current = 0;
       if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
       retryTimer.current = undefined;
-      if (recoveryKey && !conflictDetail) {
-        try { window.localStorage.removeItem(recoveryKey); } catch { /* Cloud save already succeeded. */ }
+      if (recoveryKey && reviewedKey && preservedKey && !syncBlocked.current) {
+        try {
+          const savedCopy = window.localStorage.getItem(recoveryKey);
+          if (savedCopy && workspaceContentMatches(readRecoverySnapshot(savedCopy), snapshot)) {
+            window.localStorage.setItem(reviewedKey, recoveryFingerprint(savedCopy));
+            window.localStorage.removeItem(preservedKey);
+            setConflictDetail('');
+          }
+        } catch { /* Keep the recovery copy untouched if verification fails. */ }
       }
       setLastSyncAt(new Date().toISOString());
       setPendingCount(0);
@@ -207,7 +282,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
         window.dispatchEvent(new Event(WORKSPACE_DATA_CHANGED));
       }
     }
-  }, [localOnly, userId, onRecovered, recoveryKey, conflictDetail]);
+  }, [localOnly, userId, onRecovered, recoveryKey, reviewedKey, preservedKey]);
 
   useEffect(() => {
     const scheduleSync = () => {
@@ -295,5 +370,5 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     const link = document.createElement('a');
     link.href = url; link.download = 'vplm-unsynced-recovery.json'; link.click(); URL.revokeObjectURL(url);
   };
-  return { sync, getRevision, conflictDetail, downloadRecovery, downloadOperationJournal, state, lastSyncAt, pendingCount, hasPublishedSnapshot: true };
+  return { sync, getRevision, conflictDetail, downloadRecovery, downloadOperationJournal, keepCloudAfterReview, state, lastSyncAt, pendingCount, hasPublishedSnapshot: true };
 }
