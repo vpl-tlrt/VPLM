@@ -518,7 +518,10 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   };
   const handleTransfer = (toXParking = false) => {
     if (!selectedVehicle) return toast.error('Select a parked vehicle and an available destination.');
-    transferVehicleById(selectedVehicle.id, newLocationId, notes, toXParking);
+    if (transferVehicleById(selectedVehicle.id, newLocationId, notes, toXParking)) {
+      setSelectedVehicleId('');
+      setScreen('dashboard');
+    }
   };
   const openAssistantAssignment = (plateNumber: string, vehicle?: Vehicle): boolean => {
     if (!canAssignVehicle) return false;
@@ -809,6 +812,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const [overviewVehicleId, setOverviewVehicleId] = useState<string>();
   const [draggedVehicleId, setDraggedVehicleId] = useState<string>();
   const [garageZoneFilter, setGarageZoneFilter] = useState('all');
+  const [openedParkingZone, setOpenedParkingZone] = useState<string | null>(null);
   const [garageStatusFilter, setGarageStatusFilter] = useState('all');
   const [bayManagement, setBayManagement] = useState(() => loadBayManagementState());
   const [locatedVehicle, setLocatedVehicle] = useState<{ id: string }>();
@@ -847,6 +851,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
       } : undefined);
       if (currentLocation) {
         setGarageZoneFilter(currentLocation.zone);
+        if (!isLiveGarageContainer(currentLocation)) setOpenedParkingZone(currentLocation.zone);
         setGarageStatusFilter('all');
         setCollapsedZones((current: Set<string>) => {
           if (!current.has(currentLocation.zone)) return current;
@@ -862,7 +867,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     if (!locatedVehicle) return;
     const timer = window.setTimeout(() => document.getElementById(`garage-vehicle-${locatedVehicle.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }), 120);
     return () => window.clearTimeout(timer);
-  }, [collapsedZones, garageZoneFilter, locatedVehicle]);
+  }, [collapsedZones, garageZoneFilter, openedParkingZone, locatedVehicle]);
 
   useEffect(() => {
     if (!bayHighlight) return;
@@ -1008,7 +1013,10 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     } : item));
     addMovement(vehicleId, previous, destinationId, previous ? 'Transfer' : 'Assign');
     logAudit(previous ? 'Transfer' : 'Assignment', 'Vehicle', `${vehicle.plateNumber} → ${destination.zone}-${destination.bayNumber}`);
-    if (nextOperationalStatus !== 'Washing') setSelectedBayId(destinationId);
+    // Keep the successful action notification without opening a second bay/profile dialog.
+    setSelectedBayId(undefined);
+    setSelectedXParkingBayId(undefined);
+    setOverviewVehicleId(undefined);
     toast.success(`${vehicle.plateNumber} moved to ${destination.zone}-${destination.bayNumber}.`);
   };
   const startWashing = (vehicleId: string) => {
@@ -1071,14 +1079,14 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
         <Card className="lg:col-span-5">
           <CardHeader className="gap-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div><CardTitle>Live parking garage</CardTitle><CardDescription>Compact real-time map with collapsible zones and live filters.</CardDescription></div>
+              <div><CardTitle className="flex items-center gap-2"><LayoutGrid className="h-5 w-5 text-primary" />Parking Lot</CardTitle><CardDescription>Choose a zone to view its live parking bays.</CardDescription></div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge>Vacant</Badge><Badge variant="destructive">Occupied</Badge><Badge variant="secondary">Reserved</Badge><Badge variant="outline">Maintenance</Badge>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-              <Select value={garageZoneFilter} onValueChange={setGarageZoneFilter}>
+              <Select value={garageZoneFilter} onValueChange={(value: string) => { setGarageZoneFilter(value); setOpenedParkingZone(value === 'all' ? null : value); }}>
                 <SelectTrigger className="w-[132px]" aria-label="Filter garage by zone"><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="all">All zones</SelectItem>{zoneStats.filter((zoneItem: { zone: string }) => zoneItem.zone).map((zoneItem: { zone: string }) => <SelectItem key={zoneItem.zone} value={zoneItem.zone}>{zoneDisplayName(zoneItem.zone)}</SelectItem>)}</SelectContent>
               </Select>
@@ -1086,14 +1094,48 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                 <SelectTrigger className="w-[150px]" aria-label="Filter garage by status"><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="all">All statuses</SelectItem>{(['Available', 'Occupied', 'Reserved', 'Maintenance'] as ParkingLocation['status'][]).filter((status: ParkingLocation['status']) => status).map((status: ParkingLocation['status']) => <SelectItem key={status} value={status}>{status === 'Available' ? 'Vacant' : status}</SelectItem>)}</SelectContent>
               </Select>
-              <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(false)}>Expand all</Button>
-              <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(true)}>Collapse all</Button>
+              {openedParkingZone && <Button variant="ghost" size="sm" onClick={() => setOpenedParkingZone(null)}>Close zone</Button>}
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="parking-garage live-parking-garage max-h-[620px] overflow-auto p-2">
-              <div className="min-w-[1480px]">
-                  {visibleZones.map((zoneItem: { zone: string; total: number; available: number; percent: number; state: string }) => {
+          <CardContent className="space-y-4">
+            <div className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain px-1 pb-3 pt-1 [scrollbar-width:thin]" role="group" aria-label="Select a parking zone">
+              {visibleZones.map((zoneItem: { zone: string; total: number; available: number; percent: number; state: string }) => {
+                const selected = openedParkingZone === zoneItem.zone;
+                return <button key={zoneItem.zone} type="button"
+                  onClick={() => { setOpenedParkingZone(selected ? null : zoneItem.zone); if (!selected && collapsedZones.has(zoneItem.zone)) toggleZone(zoneItem.zone); }}
+                  aria-expanded={selected} aria-controls="parking-zone-detail"
+                  aria-label={`Open ${zoneDisplayName(zoneItem.zone)} parking: ${zoneItem.available} available of ${zoneItem.total} bays`}
+                  className={`group relative flex min-h-[168px] w-[164px] shrink-0 snap-start flex-col justify-between overflow-hidden rounded-2xl border bg-gradient-to-br from-card via-card to-muted/70 p-3.5 text-left shadow-sm outline-offset-2 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md focus-visible:outline-2 focus-visible:outline-primary active:scale-[0.98] sm:w-[188px] ${selected ? 'border-primary ring-2 ring-primary/30 shadow-md' : 'border-border'}`}>
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary"><CarFront className="h-5 w-5" aria-hidden="true" /></span>
+                    <ChevronRight className={`h-5 w-5 text-muted-foreground transition-transform ${selected ? 'rotate-90 text-primary' : 'group-hover:translate-x-0.5'}`} aria-hidden="true" />
+                  </span>
+                  <span className="mt-3 block">
+                    <span className="block truncate text-base font-black leading-tight text-foreground">{zoneDisplayName(zoneItem.zone)}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">{zoneItem.total} parking bays</span>
+                  </span>
+                  <span className="mt-3 flex items-center justify-between gap-2 text-xs">
+                    <span className="rounded-full bg-primary/10 px-2.5 py-1 font-bold tabular-nums text-primary">{zoneItem.available} vacant</span>
+                    <span className="font-semibold tabular-nums text-muted-foreground">{zoneItem.percent}% used</span>
+                  </span>
+                  <span className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-border/70" aria-hidden="true"><span className="block h-full rounded-full bg-primary transition-[width]" style={{ width: `${zoneItem.percent}%` }} /></span>
+                </button>;
+              })}
+              {visibleZones.length === 0 && <p className="py-5 text-sm text-muted-foreground">No parking zones match this filter.</p>}
+            </div>
+            {openedParkingZone && visibleZones.some((zoneItem: { zone: string }) => zoneItem.zone === openedParkingZone)
+              ? <section id="parking-zone-detail" className="space-y-3 rounded-xl border bg-muted/30 p-2 sm:p-4" aria-label={`${zoneDisplayName(openedParkingZone)} parking bays`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                    <div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Live bay layout</p><h3 className="text-base font-black">{zoneDisplayName(openedParkingZone)}</h3></div>
+                    <div className="flex flex-wrap gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(false)}>Expand all</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(true)}>Collapse all</Button>
+                      <Button variant="outline" size="sm" onClick={() => setOpenedParkingZone(null)} aria-label="Close parking zone details"><X className="h-4 w-4" /> Close</Button>
+                    </div>
+                  </div>
+                  <div className="parking-garage live-parking-garage max-h-[540px] overflow-auto rounded-lg p-2">
+                    <div className="min-w-[1480px]">
+                  {visibleZones.filter((zoneItem: { zone: string }) => zoneItem.zone === openedParkingZone).map((zoneItem: { zone: string; total: number; available: number; percent: number; state: string }) => {
                     const rawZoneLocations = locations.filter((location: ParkingLocation) => location.zone === zoneItem.zone);
                     const zoneLocations = rawZoneLocations.filter((location: ParkingLocation) => {
                       const derivedStatus: ParkingLocation['status'] = activeVehicles.some((item: Vehicle) => parkingRecordKey(item.currentLocationId) === parkingRecordKey(location.id)) ? 'Occupied' : location.status;
@@ -1176,8 +1218,10 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                       </div> : <div className="py-5 text-center text-sm text-muted-foreground">No bays match this status.</div>)}
                     </div>;
                   })}
-                </div>
-            </div>
+                    </div>
+                  </div>
+                </section>
+              : <div className="rounded-xl border border-dashed bg-muted/30 px-4 py-5 text-center text-sm text-muted-foreground" role="status">Tap a zone card to open its live parking bays.</div>}
           </CardContent>
         </Card>
       </div>
