@@ -1393,3 +1393,10 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
     max-width: min(620px, calc(100dvw - 1rem));
   }
 }
+
+/* Scrollable tab navigation and constrained dropdown portals for other menus
+   (Road Tests, History, Management, Reservations, Profile). */
+[data-slot="tabs-list"] { max-inline-size: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; justify-content: flex-start; }
+[data-slot="tabs-trigger"] { flex-shrink: 0; min-inline-size: max-content; }
+[data-slot="select-content"] { max-inline-size: calc(100dvw - 1rem); }
+[data-slot="dialog-content"]:not(.vplm-responsive-dialog):not(.vplm-parking-detail-sheet) { overflow-x: auto; }
