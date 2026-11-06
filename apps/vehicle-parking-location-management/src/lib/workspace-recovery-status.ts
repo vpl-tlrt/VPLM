@@ -46,3 +46,23 @@ export const recoveryFingerprint = (raw: string): string => {
   }
   return `${raw.length}-${(hash >>> 0).toString(36)}`;
 };
+
+/**
+ * Keep historical local copies if a later offline session creates another draft.
+ * Never overwrite the only unsynced snapshot or erase it to free storage.
+ */
+export const preserveWorkspaceRecoveryCopy = (userId: string, snapshot: Partial<WorkspaceSnapshot>): boolean => {
+  if (typeof window === 'undefined' || !userId) return false;
+  const key = `vplm-unsynced-recovery:${userId}`;
+  const next = JSON.stringify(snapshot);
+  try {
+    const previous = window.localStorage.getItem(key);
+    if (previous === next) return true;
+    if (previous) {
+      const archiveKey = `vplm-unsynced-recovery-archive:${userId}:${recoveryFingerprint(previous)}`;
+      if (!window.localStorage.getItem(archiveKey)) window.localStorage.setItem(archiveKey, previous);
+    }
+    window.localStorage.setItem(key, next);
+    return true;
+  } catch { return false; }
+};
