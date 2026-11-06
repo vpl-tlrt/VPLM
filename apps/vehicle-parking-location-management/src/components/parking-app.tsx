@@ -813,6 +813,12 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const [draggedVehicleId, setDraggedVehicleId] = useState<string>();
   const [garageZoneFilter, setGarageZoneFilter] = useState('all');
   const [openedParkingZone, setOpenedParkingZone] = useState<string | null>(null);
+  useEffect(() => {
+    if (!openedParkingZone) return;
+    const timeout = window.setTimeout(() =>
+      document.getElementById('parking-zone-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    return () => window.clearTimeout(timeout);
+  }, [openedParkingZone]);
   const [garageStatusFilter, setGarageStatusFilter] = useState('all');
   const [bayManagement, setBayManagement] = useState(() => loadBayManagementState());
   const [locatedVehicle, setLocatedVehicle] = useState<{ id: string }>();
