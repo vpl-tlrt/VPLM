@@ -1085,8 +1085,8 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
       </div>}
       <div className="grid gap-3 lg:grid-cols-5">
         {!openedParkingZone && <Card className="occupancy-shimmer lg:col-span-3"><CardHeader><div className="flex items-end justify-between"><div><CardTitle>Parking utilization</CardTitle><CardDescription>Real-time occupied bays across the facility</CardDescription></div><strong className="text-3xl">{utilization}%</strong></div></CardHeader><CardContent><Progress value={utilization} /><p className="mt-3 text-sm text-muted-foreground">Operational warning at 80% occupancy</p></CardContent></Card>}
-        <Card className="vplm-parking-panel lg:col-span-5">
-          <CardHeader className="gap-2 pb-2">
+        <section className="vplm-parking-panel lg:col-span-5" aria-label="Parking Lot">
+          <div className="vplm-parking-toolbar space-y-2 pb-2">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div><CardTitle className="flex items-center gap-2"><LayoutGrid className="h-5 w-5 text-primary" />Parking Lot</CardTitle><CardDescription>Choose a zone to view its live parking bays.</CardDescription></div>
               <div className="flex flex-wrap items-center gap-2">
@@ -1105,8 +1105,8 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
               </Select>
               {openedParkingZone && <Button variant="outline" size="sm" onClick={() => { setOpenedParkingZone(null); }}><ChevronLeft className="h-4 w-4" /> All zones</Button>}
             </div>
-          </CardHeader>
-          <CardContent className="space-y-2 px-3 pb-3 sm:px-5">
+          </div>
+          <div className="space-y-2 pb-2">
             {!openedParkingZone && <section className="vplm-zone-showcase" aria-label="Live parking zones">
               <div className="vplm-zone-showcase-header"><h3 className="text-sm font-bold text-foreground">Select a parking zone</h3><span className="text-xs text-muted-foreground">Swipe <ChevronRight className="inline h-3.5 w-3.5" /></span></div>
               <div className="vplm-zone-hero-rail" role="group" aria-label="Parking zones">
@@ -1272,8 +1272,8 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                   </div>
                 </section>
               : <></>}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       </div>
       {!openedParkingZone && <section className="vplm-parking-other-section">
         <button type="button" className="vplm-parking-other-toggle" onClick={() => setShowOtherParkingAreas((current) => !current)} aria-expanded={showOtherParkingAreas}>
