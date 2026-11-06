@@ -1,0 +1,25 @@
+name: VPLM parking carousel UI verification
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/vehicle-parking-location-management/**'
+      - '.github/workflows/vplm-amazon-parking-ui-temp.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/vehicle-parking-location-management/package-lock.json
+      - run: npm ci
+        working-directory: apps/vehicle-parking-location-management
+      - run: npm run build
+        working-directory: apps/vehicle-parking-location-management
+      - run: node scripts/verify-workspace-recovery.mjs
+        working-directory: apps/vehicle-parking-location-management
