@@ -22,6 +22,7 @@ interface VehicleOverviewDialogBaseProps {
   roadTest?: RoadTestRecord;
   movements: Movement[];
   viewerRole?: string;
+  compactSheet?: boolean;
 }
 
 interface InteractiveVehicleOverviewDialogProps extends VehicleOverviewDialogBaseProps {
@@ -196,7 +197,7 @@ export function VehicleOverviewDialog(props: VehicleOverviewDialogProps) {
   if (vehicle.xParking === 'Yes') {
     profileFields.splice(8, 0, ['In front of vehicle', vehicle.xParkingOccupantPlateNumber ? `${vehicle.xParkingOccupantPlateNumber} · ${vehicle.xParkingOccupantModel ?? 'Model not recorded'}` : 'Not recorded']);
   }
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><CarFront /> {vehicle.plateNumber}</DialogTitle><DialogDescription>Complete vehicle profile, location, assignment, and movement record.</DialogDescription></DialogHeader>
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className={props.compactSheet ? "vplm-parking-detail-sheet max-h-[92vh] overflow-y-auto sm:max-w-5xl" : "max-h-[92vh] overflow-y-auto sm:max-w-5xl"}><DialogHeader><DialogTitle className="flex items-center gap-2"><CarFront /> {vehicle.plateNumber}</DialogTitle><DialogDescription>Complete vehicle profile, location, assignment, and movement record.</DialogDescription></DialogHeader>
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
       <div className="space-y-4">{!isLimitedProfile && <><div className="relative min-h-52 overflow-hidden rounded-2xl bg-muted">{vehicle.photoUrls[0] ? <img src={vehicle.photoUrls[0]} alt={`${vehicle.plateNumber} vehicle`} className="h-52 w-full object-cover" /> : <div className="grid h-52 place-items-center text-muted-foreground"><CarFront className="h-16 w-16" /></div>}<Badge className="absolute left-3 top-3">{vehicle.operationalStatus}</Badge></div>{interactive && <><input ref={photoRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={uploadPhoto} /><Button variant="outline" className="w-full" onClick={() => photoRef.current?.click()}><Camera /> Capture or upload photo</Button></>}</>}
         <Tabs defaultValue="profile"><TabsList className="w-full"><TabsTrigger value="profile">Profile</TabsTrigger><TabsTrigger value="history">Parking history</TabsTrigger><TabsTrigger value="gps">GPS map</TabsTrigger></TabsList>
