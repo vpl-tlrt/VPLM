@@ -1132,9 +1132,9 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                   <div className="flex flex-wrap items-center justify-between gap-2 px-1">
                     <div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Selected parking zone</p><h3 className="text-lg font-black">{zoneDisplayName(openedParkingZone)}</h3></div>
                     <div className="flex flex-wrap gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(false)}>Expand all</Button>
-                      <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(true)}>Collapse all</Button>
-                      <Button variant="outline" size="sm" onClick={() => setOpenedParkingZone(null)} aria-label="Close parking zone details"><X className="h-4 w-4" /> Close</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(false)}>Show bays</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(true)}>Hide bays</Button>
+                      <Button variant="outline" size="sm" onClick={() => { setOpenedParkingZone(null); setGarageZoneFilter('all'); }} aria-label="Back to parking zones"><ChevronRight className="h-4 w-4 rotate-180" /> Zones</Button>
                     </div>
                   </div>
                   <div className="vplm-bay-browser">
@@ -1210,11 +1210,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         <span className="vplm-parking-chip-caption">{vehicle ? vehicle.plateNumber : displayStatus === 'Available' ? 'Vacant' : displayStatus}</span>
                       </motion.button>;
                     };
-                    return <div key={zoneItem.zone} className="mb-5 last:mb-0">
-                      <button type="button" onClick={() => toggleZone(zoneItem.zone)} className="mb-2 flex w-full items-center justify-between rounded-md bg-card px-3 py-2 text-left text-card-foreground" aria-expanded={!isCollapsed}>
-                        <span className="flex items-center gap-2"><ChevronDown className={`h-4 w-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} /><strong>{zoneDisplayName(zoneItem.zone)}</strong><span className="text-sm text-muted-foreground">{lanes.length} {lanes.length === 1 ? 'line' : 'lines'}</span></span>
-                        <span className="text-xs font-semibold">{zoneLocations.length} shown · {zoneItem.available} vacant</span>
-                      </button>
+                    return <div key={zoneItem.zone} className="vplm-zone-bays">
                       {!isCollapsed && (zoneLocations.length > 0 ? <div className="vplm-compact-bay-layout">
                         {lanes.map((lane: string) => {
                           const laneBays = zoneLocations.filter((location: ParkingLocation) => location.lane.trim() === lane);
@@ -1228,6 +1224,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                           </section>;
                         })}
                       </div> : <div className="py-5 text-center text-sm text-muted-foreground">No bays match this status.</div>)}
+                      {isCollapsed && <p className="p-3 text-sm text-muted-foreground">Bays hidden. Select Show bays to expand.</p>}
                     </div>;
                   })}
                     </div>
