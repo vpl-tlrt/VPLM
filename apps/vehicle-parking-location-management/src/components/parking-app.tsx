@@ -1128,9 +1128,9 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
               </div>
             </section>}
             {openedParkingZone && visibleZones.some((zoneItem: { zone: string }) => zoneItem.zone === openedParkingZone)
-              ? <section id="parking-zone-detail" className="vplm-zone-detail space-y-3 rounded-2xl border bg-card p-3 sm:p-5" aria-label={`${zoneDisplayName(openedParkingZone)} parking bays`}>
+              ? <section id="parking-zone-detail" className="vplm-zone-detail space-y-2" aria-label={`${zoneDisplayName(openedParkingZone)} parking bays`}>
                   <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-                    <div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Live bay layout</p><h3 className="text-base font-black">{zoneDisplayName(openedParkingZone)}</h3></div>
+                    <div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Selected parking zone</p><h3 className="text-lg font-black">{zoneDisplayName(openedParkingZone)}</h3></div>
                     <div className="flex flex-wrap gap-1">
                       <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(false)}>Expand all</Button>
                       <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(true)}>Collapse all</Button>
@@ -1147,7 +1147,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                     });
                     const isCollapsed = collapsedZones.has(zoneItem.zone);
                     const lanes = Array.from(new Set(zoneLocations.map((location: ParkingLocation) => location.lane.trim()).filter((lane: string) => Boolean(lane))));
-                    const renderXParkingSpaces = (bays: ParkingLocation[]) => <div className="vplm-bay-rail" aria-label="X Parking spaces">
+                    const renderXParkingSpaces = (bays: ParkingLocation[]) => <div className="vplm-parking-chip-grid" aria-label="X Parking spaces">
                       {bays.map((bay: ParkingLocation) => {
                         const xVehicle = showVehiclesOnMap ? vehiclesByLocation.get(parkingRecordKey(bay.id))?.find((item: Vehicle) => item.xParking === 'Yes') : undefined;
                         const xVehicleRoadTest = xVehicle ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === xVehicle.id) : undefined;
@@ -1156,7 +1156,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         const maintenance = bayManagement.maintenance.some((item: BayMaintenance) => item.bayId === slotId && item.status === 'Active');
                         const status = xVehicle ? 'Occupied' : maintenance ? 'Maintenance' : reserved ? 'Reserved' : 'Available';
                         return <button key={`x-parking-${bay.id}`} id={xVehicle ? `garage-vehicle-${xVehicle.id}` : undefined} type="button"
-                          className={`vplm-bay-tile vplm-bay-tile-x ${bayStyle(status)}${isHighlightedBay(bay.id, true) ? ' garage-located-bay' : ''}`}
+                          className={`vplm-parking-chip vplm-parking-chip-x ${bayStyle(status)}${isHighlightedBay(bay.id, true) ? ' garage-located-bay' : ''}`}
                           draggable={Boolean(xVehicle && canTransferVehicle)}
                           onDragStart={() => { if (xVehicle && canTransferVehicle) setDraggedVehicleId(xVehicle.id); }}
                           onDragEnd={() => setDraggedVehicleId(undefined)}
@@ -1173,13 +1173,13 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                           }}
                           title={`X Parking beside ${bay.zone}-${bay.bayNumber}: ${status}`}
                           aria-label={`X Parking beside ${bay.zone}-${bay.bayNumber}: ${status}${xVehicle ? `, vehicle ${xVehicle.plateNumber}` : ''}`}>
-                          <span className="vplm-bay-tile-head"><strong>X · {bay.zone}-{bay.bayNumber}</strong><span className="vplm-bay-status">{status === 'Available' ? 'Vacant' : status}</span></span>
-                          <span className="vplm-bay-tile-art">
+                          <span className="vplm-parking-chip-heading"><strong>X {bay.zone}-{bay.bayNumber}</strong><span className="vplm-parking-chip-dot" data-status={status} title={status} /></span>
+                          <span className="vplm-parking-chip-art">
                             {xVehicle
                               ? <TopViewCar vehicle={xVehicle} roadTest={xVehicleRoadTest} xParked onSelect={() => { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); setOverviewVehicleId(xVehicle.id); }} />
-                              : <span className="vplm-bay-empty-icon"><CarFront className="h-7 w-7" strokeWidth={1.5} aria-hidden="true" /><span>X</span></span>}
+                              : <span className="vplm-parking-chip-empty">X</span>}
                           </span>
-                          <span className="vplm-bay-tile-foot"><strong>{xVehicle ? xVehicle.plateNumber : 'X Parking'}</strong><span>{xVehicle ? 'View vehicle' : status === 'Available' ? 'Tap for details' : status}</span></span>
+                          <span className="vplm-parking-chip-caption">{xVehicle ? xVehicle.plateNumber : status === 'Available' ? 'Vacant' : status}</span>
                         </button>;
                       })}
                     </div>;
@@ -1199,15 +1199,15 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()}
                         onDrop={() => { if (draggedVehicleId && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(draggedVehicleId, bay.id); setDraggedVehicleId(undefined); }}
                         onClick={() => { setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }}
-                        className={`vplm-bay-tile ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`}
+                        className={`vplm-parking-chip ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`}
                         aria-label={`${isLiveGarageContainer(bay) ? 'Container' : 'Bay ' + bay.bayNumber}, ${zoneDisplayName(bay.zone)}, ${displayStatus}${vehicle ? `, vehicle ${vehicle.plateNumber}` : ''}${xParkingVehicle ? `, X-Parked vehicle ${xParkingVehicle.plateNumber}` : ''}`}>
-                        <span className="vplm-bay-tile-head"><strong>{isLiveGarageContainer(bay) ? bay.zone : `${bay.zone === 'Reception' ? 'R ' : bay.zone === 'Workshop' ? 'W ' : bay.zone}-${bay.bayNumber}`}</strong><span className="vplm-bay-status">{displayStatus === 'Available' ? 'Vacant' : displayStatus}</span></span>
-                        <span className="vplm-bay-tile-art">
+                        <span className="vplm-parking-chip-heading"><strong>{isLiveGarageContainer(bay) ? bay.zone : `${bay.zone === 'Reception' ? 'R ' : bay.zone === 'Workshop' ? 'W ' : bay.zone}-${bay.bayNumber}`}</strong><span className="vplm-parking-chip-dot" data-status={displayStatus} title={displayStatus} /></span>
+                        <span className="vplm-parking-chip-art">
                           {vehicle
                             ? <TopViewCar vehicle={vehicle} roadTest={vehicleRoadTest} onSelect={() => { setSelectedBayId(undefined); setOverviewVehicleId(vehicle.id); }} />
-                            : <span className="vplm-bay-empty-icon"><CarFront className="h-7 w-7" strokeWidth={1.5} aria-hidden="true" /></span>}
+                            : <CarFront className="h-6 w-6 text-muted-foreground/50" strokeWidth={1.5} aria-hidden="true" />}
                         </span>
-                        <span className="vplm-bay-tile-foot"><strong>{vehicle ? vehicle.plateNumber : displayStatus === 'Available' ? 'Available' : displayStatus}</strong><span>{vehicle ? 'View vehicle' : displayStatus === 'Available' ? 'Tap for details' : 'Bay details'}</span></span>
+                        <span className="vplm-parking-chip-caption">{vehicle ? vehicle.plateNumber : displayStatus === 'Available' ? 'Vacant' : displayStatus}</span>
                       </motion.button>;
                     };
                     return <div key={zoneItem.zone} className="mb-5 last:mb-0">
@@ -1215,15 +1215,15 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         <span className="flex items-center gap-2"><ChevronDown className={`h-4 w-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} /><strong>{zoneDisplayName(zoneItem.zone)}</strong><span className="text-sm text-muted-foreground">{lanes.length} {lanes.length === 1 ? 'line' : 'lines'}</span></span>
                         <span className="text-xs font-semibold">{zoneLocations.length} shown · {zoneItem.available} vacant</span>
                       </button>
-                      {!isCollapsed && (zoneLocations.length > 0 ? <div className="live-parking-lane rounded-xl border bg-muted p-3">
+                      {!isCollapsed && (zoneLocations.length > 0 ? <div className="vplm-compact-bay-layout">
                         {lanes.map((lane: string) => {
                           const laneBays = zoneLocations.filter((location: ParkingLocation) => location.lane.trim() === lane);
                           const xParkingBays = laneBays.filter(supportsXParkingLocation);
                           const xParkingSpacesAbove = zoneItem.zone === 'C' || (zoneItem.zone === 'B' && xParkingBays.some((bay: ParkingLocation) => Number(bay.bayNumber) <= 69));
-                          return <section key={`${zoneItem.zone}-${lane}`} className="vplm-bay-lane">
-                            <div className="vplm-bay-lane-heading"><strong>{lane}</strong><span>{laneBays.length} bays · swipe to browse</span></div>
+                          return <section key={`${zoneItem.zone}-${lane}`} className="vplm-compact-bay-lane">
+                            <div className="vplm-compact-bay-lane-title"><strong>{lane}</strong><span>{laneBays.length} bays</span></div>
                             {xParkingBays.length > 0 && xParkingSpacesAbove && <><div className="vplm-x-lane-label">X Parking</div>{renderXParkingSpaces(xParkingBays)}</>}
-                            <div className="vplm-bay-rail" aria-label={`${zoneDisplayName(zoneItem.zone)}, ${lane} parking bays`}>{laneBays.map(renderBay)}</div>
+                            <div className="vplm-parking-chip-grid" aria-label={`${zoneDisplayName(zoneItem.zone)}, ${lane} parking bays`}>{laneBays.map(renderBay)}</div>
                             {xParkingBays.length > 0 && !xParkingSpacesAbove && <><div className="vplm-x-lane-label">X Parking</div>{renderXParkingSpaces(xParkingBays)}</>}
                           </section>;
                         })}
@@ -1233,7 +1233,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                     </div>
                   </div>
                 </section>
-              : <div className="rounded-xl border border-dashed bg-muted/30 px-4 py-5 text-center text-sm text-muted-foreground" role="status">Tap a zone card to open its live parking bays.</div>}
+              : null}
           </CardContent>
         </Card>
       </div>
