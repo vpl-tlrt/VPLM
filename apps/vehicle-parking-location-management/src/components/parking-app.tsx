@@ -884,14 +884,6 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     bayHighlight?.locationId === locationId && bayHighlight.xParking === xParking;
 
   useEffect(() => saveBayManagementState(bayManagement), [bayManagement]);
-  const toggleZone = (zoneName: string) => {
-    setCollapsedZones((current: Set<string>) => {
-      const next = new Set(current);
-      if (next.has(zoneName)) next.delete(zoneName);
-      else next.add(zoneName);
-      return next;
-    });
-  };
   const setAllZonesCollapsed = (collapsed: boolean) => {
     setCollapsedZones(collapsed ? new Set(visibleZones.map((zoneItem: { zone: string }) => zoneItem.zone)) : new Set());
   };
@@ -1092,7 +1084,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-              <Select value={garageZoneFilter} onValueChange={(value: string) => { setGarageZoneFilter(value); setOpenedParkingZone(value === 'all' ? null : value); }}>
+              <Select value={garageZoneFilter} onValueChange={(value: string) => { setGarageZoneFilter(value); setOpenedParkingZone(value === 'all' ? null : value); if (value !== 'all') setCollapsedZones(new Set()); }}>
                 <SelectTrigger className="w-[132px]" aria-label="Filter garage by zone"><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="all">All zones</SelectItem>{zoneStats.filter((zoneItem: { zone: string }) => zoneItem.zone).map((zoneItem: { zone: string }) => <SelectItem key={zoneItem.zone} value={zoneItem.zone}>{zoneDisplayName(zoneItem.zone)}</SelectItem>)}</SelectContent>
               </Select>
@@ -1100,7 +1092,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                 <SelectTrigger className="w-[150px]" aria-label="Filter garage by status"><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="all">All statuses</SelectItem>{(['Available', 'Occupied', 'Reserved', 'Maintenance'] as ParkingLocation['status'][]).filter((status: ParkingLocation['status']) => status).map((status: ParkingLocation['status']) => <SelectItem key={status} value={status}>{status === 'Available' ? 'Vacant' : status}</SelectItem>)}</SelectContent>
               </Select>
-              {openedParkingZone && <Button variant="outline" size="sm" onClick={() => { setOpenedParkingZone(null); setGarageZoneFilter('all'); }}><ChevronLeft className="h-4 w-4" /> All zones</Button>}
+              {openedParkingZone && <Button variant="outline" size="sm" onClick={() => { setOpenedParkingZone(null); }}><ChevronLeft className="h-4 w-4" /> All zones</Button>}
             </div>
           </CardHeader>
           <CardContent className="space-y-2 px-3 pb-3 sm:px-5">
@@ -1108,12 +1100,11 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
               <div className="vplm-zone-showcase-header"><h3 className="text-sm font-bold text-foreground">Select a parking zone</h3><span className="text-xs text-muted-foreground">Swipe <ChevronRight className="inline h-3.5 w-3.5" /></span></div>
               <div className="vplm-zone-hero-rail" role="group" aria-label="Parking zones">
                 {visibleZones.map((zoneItem: { zone: string; total: number; available: number; percent: number; state: string }, index: number) => {
-                  const selected = false;
                   return <button key={zoneItem.zone} type="button"
                     onClick={() => { setOpenedParkingZone(zoneItem.zone); setCollapsedZones(new Set()); }}
                     aria-expanded={false} aria-controls="parking-zone-detail"
                     aria-label={`View ${zoneDisplayName(zoneItem.zone)}: ${zoneItem.available} vacant of ${zoneItem.total} parking bays`}
-                    className={`vplm-zone-hero vplm-zone-tone-${index % 5} ${selected ? 'vplm-zone-hero-selected' : ''}`}>
+                    className={`vplm-zone-hero vplm-zone-tone-${index % 5}`}>
                     <span className="vplm-zone-hero-top">
                       <span className="vplm-zone-hero-kicker"><span className="vplm-zone-live-dot" /> LIVE</span>
                       <span className="vplm-zone-hero-chevron"><ChevronRight className="h-5 w-5" aria-hidden="true" /></span>
@@ -1140,7 +1131,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                     <div className="flex flex-wrap gap-1">
                       <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(false)}>Expand all</Button>
                       <Button variant="ghost" size="sm" onClick={() => setAllZonesCollapsed(true)}>Collapse all</Button>
-                      <Button variant="outline" size="sm" onClick={() => { setOpenedParkingZone(null); setGarageZoneFilter('all'); }} aria-label="Back to all parking zones"><ChevronLeft className="h-4 w-4" /> Back</Button>
+                      <Button variant="outline" size="sm" onClick={() => { setOpenedParkingZone(null); }} aria-label="Back to all parking zones"><ChevronLeft className="h-4 w-4" /> Back</Button>
                     </div>
                   </div>
                   <div className="vplm-bay-browser">
