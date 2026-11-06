@@ -20,6 +20,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   vehicle?: Vehicle;
   isXParking?: boolean;
+  compactSheet?: boolean;
 
   reservation?: BayReservation;
   maintenance?: BayMaintenance;
@@ -39,7 +40,7 @@ type Props = {
 
 const nowText = () => format(new Date(), "yyyy-MM-dd HH:mm");
 
-export function BayInformationDialog({ bay, open, onOpenChange, vehicle, isXParking = false, reservation, maintenance, history, actor, role, onReserve, onMaintenance, onCompleteMaintenance, assignmentVehicle, onAssignmentVehicleChange, onAssignVehicle, canAssignVehicle, onRequestRelease, onReleaseDecision }: Props) {
+export function BayInformationDialog({ bay, open, onOpenChange, vehicle, isXParking = false, compactSheet = false, reservation, maintenance, history, actor, role, onReserve, onMaintenance, onCompleteMaintenance, assignmentVehicle, onAssignmentVehicleChange, onAssignVehicle, canAssignVehicle, onRequestRelease, onReleaseDecision }: Props) {
   const [reservedBy, setReservedBy] = useState(actor);
   const [reason, setReason] = useState('');
   const [startAt, setStartAt] = useState(nowText());
@@ -68,7 +69,7 @@ export function BayInformationDialog({ bay, open, onOpenChange, vehicle, isXPark
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+      <DialogContent className={compactSheet ? "vplm-parking-detail-sheet max-h-[90vh] max-w-3xl overflow-y-auto" : "max-h-[90vh] max-w-3xl overflow-y-auto"}>
         <DialogHeader><DialogTitle>{bayLabel}</DialogTitle><DialogDescription>Live bay information, actions, reservation workflow, and immutable history.</DialogDescription></DialogHeader>
         <Tabs defaultValue={bay.status === 'Available' ? 'assignment' : 'summary'} className="space-y-4">
           <TabsList className={`grid w-full ${bay.status === 'Available' ? 'grid-cols-4' : 'grid-cols-3'}`}>{bay.status === 'Available' && <TabsTrigger value="assignment">Assign vehicle</TabsTrigger>}<TabsTrigger value="summary">Summary</TabsTrigger><TabsTrigger value="actions">Actions</TabsTrigger><TabsTrigger value="history">History</TabsTrigger></TabsList>
