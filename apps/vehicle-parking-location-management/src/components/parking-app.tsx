@@ -1155,8 +1155,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                     });
                     const isCollapsed = collapsedZones.has(zoneItem.zone);
                     const lanes = Array.from(new Set(zoneLocations.map((location: ParkingLocation) => location.lane.trim()).filter((lane: string) => Boolean(lane))));
-                    const renderXParkingSpaces = (bays: ParkingLocation[]) => <div className="vplm-bay-chip-grid" aria-label="X Parking spaces">
-                      {bays.map((bay: ParkingLocation) => {
+                    const renderXParkingSpace = (bay: ParkingLocation) => {
                         const xVehicle = showVehiclesOnMap ? vehiclesByLocation.get(parkingRecordKey(bay.id))?.find((item: Vehicle) => item.xParking === 'Yes') : undefined;
                         const xVehicleRoadTest = xVehicle ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === xVehicle.id) : undefined;
                         const slotId = xParkingSlotId(bay.id);
@@ -1181,15 +1180,14 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                           }}
                           title={`X Parking beside ${bay.zone}-${bay.bayNumber}: ${status}`}
                           aria-label={`X Parking beside ${bay.zone}-${bay.bayNumber}: ${status}${xVehicle ? `, vehicle ${xVehicle.plateNumber}` : ''}`}>
-                          <span className="vplm-bay-chip-head"><strong>X · {bay.zone}-{bay.bayNumber}</strong><span className="vplm-bay-chip-state">{status === 'Available' ? 'Vacant' : status}</span></span>
+                          <span className="vplm-bay-chip-head"><strong>X ← {bay.zone}-{bay.bayNumber}</strong><span className="vplm-bay-chip-state">{status === 'Available' ? 'Vacant' : status}</span></span>
                           <span className="vplm-bay-chip-visual">
                             {xVehicle ? <TopViewCar vehicle={xVehicle} roadTest={xVehicleRoadTest} xParked onSelect={() => { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); setOverviewVehicleId(xVehicle.id); }} />
                               : <span className="vplm-bay-chip-empty">X</span>}
                           </span>
                           <span className="vplm-bay-chip-plate">{xVehicle?.plateNumber ?? 'X Parking'}</span>
                         </button>;
-                      })}
-                    </div>;
+                    };
                     const renderBay = (bay: ParkingLocation, index: number) => {
                       const bayVehicles = showVehiclesOnMap ? vehiclesByLocation.get(parkingRecordKey(bay.id)) ?? [] : [];
                       const vehicle = bayVehicles.find((item: Vehicle) => item.xParking !== 'Yes');
@@ -1216,17 +1214,55 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         <span className="vplm-bay-chip-plate">{vehicle?.plateNumber ?? (displayStatus === 'Available' ? 'Empty' : displayStatus)}</span>
                       </motion.button>;
                     };
-                    return <div key={zoneItem.zone} className="last:mb-0">
-                      {!isCollapsed && (zoneLocations.length > 0 ? <div className="vplm-compact-lanes">
-                        {lanes.map((lane: string) => {
-                          const laneBays = zoneLocations.filter((location: ParkingLocation) => location.lane.trim() === lane);
-                          const xParkingBays = laneBays.filter(supportsXParkingLocation);
-                          const xParkingSpacesAbove = zoneItem.zone === 'C' || (zoneItem.zone === 'B' && xParkingBays.some((bay: ParkingLocation) => Number(bay.bayNumber) <= 69));
-                          return <section key={`${zoneItem.zone}-${lane}`} className="vplm-bay-lane">
-                            <div className="vplm-bay-lane-heading"><strong>{lane}</strong><span>{laneBays.length} bays</span></div>
-                            {xParkingBays.length > 0 && xParkingSpacesAbove && <><div className="vplm-x-lane-label">X Parking</div>{renderXParkingSpaces(xParkingBays)}</>}
-                            <div className="vplm-bay-chip-grid" aria-label={`${zoneDisplayName(zoneItem.zone)}, ${lane} parking bays`}>{laneBays.map(renderBay)}</div>
-                            {xParkingBays.length > 0 && !xParkingSpacesAbove && <><div className="vplm-x-lane-label">X Parking</div>{renderXParkingSpaces(xParkingBays)}</>}
+                    const lanePairs = Array.from({ length: Math.ceil(lanes.length / 2) }, (_, pairIndex: number) => lanes.slice(pairIndex * 2, pairIndex * 2 + 2));
+                    const orderedLaneBays = (lane: string): ParkingLocation[] => {
+                      const laneBays = zoneLocations.filter((location: ParkingLocation) => location.lane.trim() === lane);
+                      // Respect the original physical layout: Top 01,02,03... / Bottom 46,45,44...
+                      if (lane === 'Top') return [...laneBays].sort((a, b) => Number(a.bayNumber) - Number(b.bayNumber));
+                      if (lane === 'Bottom') return [...laneBays].sort((a, b) => Number(b.bayNumber) - Number(a.bayNumber));
+                      return laneBays;
+                    };
+                    const laneArrow = (lane: string, bays: ParkingLocation[]): string =>
+                      lane === 'Top' ? '↑' : lane === 'Bottom' ? '↓'
+                        : bays[0]?.direction === 'Two-way' ? '↕' : bays[0]?.direction === 'Reverse' ? '↓' : '↑';
+                    const renderOrientedSlot = (bay: ParkingLocation, index: number, direction: string) =>
+                      <div key={bay.id} className="vplm-oriented-slot" data-facing={direction === '↓' ? 'down' : 'up'}>
+                        {renderBay(bay, index)}
+                        {supportsXParkingLocation(bay) && renderXParkingSpace(bay)}
+                      </div>;
+                    return <div key={zoneItem.zone} className="vplm-oriented-zone">
+                      {!isCollapsed && (zoneLocations.length > 0 ? <div className="vplm-oriented-lanes">
+                        {lanePairs.map((pair: string[], pairIndex: number) => {
+                          const firstLane = pair[0];
+                          const secondLane = pair[1];
+                          const firstBays = orderedLaneBays(firstLane);
+                          const secondBays = secondLane ? orderedLaneBays(secondLane) : [];
+                          const firstArrow = laneArrow(firstLane, firstBays);
+                          const secondArrow = secondLane ? laneArrow(secondLane, secondBays) : '';
+                          const columns = Math.max(1, firstBays.length, secondBays.length);
+                          return <section key={`${zoneItem.zone}-lane-pair-${pairIndex}`} className="vplm-oriented-lane-group"
+                            aria-label={`${zoneDisplayName(zoneItem.zone)} ${firstLane}${secondLane ? ` and ${secondLane}` : ''}`}>
+                            <div className="vplm-oriented-group-heading">
+                              <strong>{firstLane}{secondLane ? ` / ${secondLane}` : ''}</strong>
+                              <span>Swipe horizontally <ChevronRight className="inline h-3.5 w-3.5" aria-hidden="true" /></span>
+                            </div>
+                            <div className="vplm-oriented-horizontal-scroll" role="region" tabIndex={0}
+                              aria-label={`Scroll bays horizontally: ${firstLane}${secondLane ? ` and ${secondLane}` : ''}`}>
+                              <div className="vplm-oriented-track"
+                                style={{ gridTemplateColumns: `repeat(${columns}, minmax(88px, 1fr))`, width: `${columns * 94}px` }}>
+                                <div className="vplm-oriented-lane-label" style={{ gridColumn: '1 / -1', gridRow: 1 }}>{firstLane} <span aria-label="Vehicle direction">{firstArrow}</span></div>
+                                {firstBays.map((bay, index) => <div key={bay.id} style={{ gridColumn: index + 1, gridRow: 2 }}>
+                                  {renderOrientedSlot(bay, index, firstArrow)}
+                                </div>)}
+                                {secondLane && <>
+                                  <div className="vplm-oriented-road" style={{ gridColumn: '1 / -1', gridRow: 3 }} aria-label="Access road between parking rows" />
+                                  <div className="vplm-oriented-lane-label" style={{ gridColumn: '1 / -1', gridRow: 4 }}>{secondLane} <span aria-label="Vehicle direction">{secondArrow}</span></div>
+                                  {secondBays.map((bay, index) => <div key={bay.id} style={{ gridColumn: index + 1, gridRow: 5 }}>
+                                    {renderOrientedSlot(bay, index, secondArrow)}
+                                  </div>)}
+                                </>}
+                              </div>
+                            </div>
                           </section>;
                         })}
                       </div> : <div className="py-5 text-center text-sm text-muted-foreground">No bays match this status.</div>)}
