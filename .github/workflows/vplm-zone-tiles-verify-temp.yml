@@ -1,0 +1,28 @@
+name: VPLM Zone Tiles UI Build
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/vehicle-parking-location-management/**'
+      - '.github/workflows/vplm-zone-tiles-verify-temp.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/vehicle-parking-location-management/package-lock.json
+      - name: Install
+        run: npm ci
+        working-directory: apps/vehicle-parking-location-management
+      - name: Production type-check and build
+        run: npm run build
+        working-directory: apps/vehicle-parking-location-management
+      - name: Vehicle concurrency regression
+        run: node scripts/verify-workspace-recovery.mjs
+        working-directory: apps/vehicle-parking-location-management
