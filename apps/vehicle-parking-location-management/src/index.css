@@ -1294,11 +1294,11 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   transform: none !important;
   animation: none !important;
   box-sizing: border-box;
-  display: block;
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   scrollbar-gutter: stable;
 }
 @media (max-width: 767px) {
