@@ -1314,3 +1314,35 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
 .vplm-parking-other-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .vplm-parking-other-content { display: grid; gap: .75rem; padding-top: .7rem; }
 .vplm-parking-other-content > .grid { gap: .75rem; }
+
+
+/* Selected-zone bay orientation only: paired top/bottom lanes in one horizontal swipe strip,
+   with the X Parking action directly underneath its associated numbered bay. */
+.vplm-parking-panel { min-width: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.vplm-parking-toolbar { min-width: 0; }
+.vplm-oriented-zone, .vplm-oriented-lanes, .vplm-oriented-lane-group { min-width: 0; }
+.vplm-oriented-lanes { display: grid; gap: 0.9rem; }
+.vplm-oriented-lane-group { padding: 0; border: 0; background: transparent; box-shadow: none; }
+.vplm-oriented-group-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding-bottom: 0.3rem; color: var(--foreground); font-size: 0.75rem; }
+.vplm-oriented-group-heading strong { font-size: 0.78rem; font-weight: 850; }
+.vplm-oriented-group-heading > span { white-space: nowrap; color: var(--muted-foreground); font-size: 0.66rem; }
+.vplm-oriented-horizontal-scroll { max-width: 100%; width: 100%; overflow-x: auto; overflow-y: hidden; padding: 0 0.08rem 0.5rem; scroll-snap-type: x proximity; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+.vplm-oriented-horizontal-scroll:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 0.4rem; }
+.vplm-oriented-track { display: grid; align-content: start; align-items: start; column-gap: 0.35rem; row-gap: 0.3rem; min-width: 100%; padding: 0.1rem; }
+.vplm-oriented-lane-label { display: flex; align-items: center; gap: 0.4rem; min-height: 1.45rem; font-size: 0.72rem; font-weight: 850; color: var(--foreground); }
+.vplm-oriented-lane-label span { display: grid; width: 1.2rem; height: 1.2rem; place-items: center; border-radius: 0.25rem; background: color-mix(in oklch, var(--primary) 9%, var(--card)); color: var(--primary); font-size: 0.93rem; line-height: 1; }
+.vplm-oriented-road { height: 0.4rem; min-height: 0.4rem; margin: 0.3rem 0; background: repeating-linear-gradient(90deg, var(--muted-foreground) 0 1.1rem, transparent 1.1rem 1.7rem); mask-image: linear-gradient(to bottom, transparent 0, black 45%, black 55%, transparent 100%); opacity: 0.65; pointer-events: none; }
+.vplm-oriented-slot { display: flex; flex-direction: column; gap: 0.32rem; min-width: 0; scroll-snap-align: start; }
+.vplm-parking-panel .vplm-oriented-slot .vplm-bay-chip { width: 100%; min-height: 99px; padding: 0.34rem 0.3rem; border-radius: 0.45rem; box-shadow: none; }
+.vplm-parking-panel .vplm-oriented-slot .vplm-bay-chip-x { min-height: 83px; border-style: dashed; background: color-mix(in oklch, var(--muted) 25%, var(--card)); }
+.vplm-parking-panel .vplm-oriented-slot .vplm-bay-chip-x .vplm-bay-chip-visual { height: 34px; flex-basis: 34px; }
+.vplm-parking-panel .vplm-oriented-slot .vplm-bay-chip-head strong { font-size: 0.64rem; }
+.vplm-parking-panel .vplm-oriented-slot .vplm-bay-chip-plate { font-size: 0.62rem; }
+.vplm-parking-panel .vplm-oriented-slot[data-facing="down"] .vplm-bay-chip:not(.vplm-bay-chip-x) .top-view-car { transform: translate(-50%, -50%) rotate(180deg) scale(0.6); }
+.vplm-parking-panel .vplm-oriented-slot .vplm-bay-chip-x .top-view-car { transform: translate(-50%, -50%) rotate(-90deg) scale(0.54); }
+.vplm-parking-panel .vplm-oriented-slot .vplm-bay-chip-visual .vehicle-registration { display: none; }
+@media (max-width: 380px) {
+  .vplm-oriented-track { column-gap: 0.22rem; }
+  .vplm-parking-panel .vplm-oriented-slot .vplm-bay-chip { padding-inline: 0.2rem; }
+}
+@media (prefers-reduced-motion: reduce) { .vplm-oriented-horizontal-scroll { scroll-behavior: auto; } }
