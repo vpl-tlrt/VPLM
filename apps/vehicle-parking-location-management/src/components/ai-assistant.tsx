@@ -635,7 +635,7 @@ export default function AiAssistant({
   return (
     <div className="pointer-events-none fixed inset-x-3 bottom-3 top-[142px] z-[100] flex items-end justify-end md:inset-x-auto md:bottom-5 md:right-5 md:top-24">
       {open && (
-        <section
+        <section id="vplm-ai-panel"
           aria-label="VPLM AI assistant"
           className="pointer-events-auto flex h-full max-h-[680px] min-h-0 w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-2xl md:w-[420px]"
         >
