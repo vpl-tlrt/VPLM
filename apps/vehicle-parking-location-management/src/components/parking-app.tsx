@@ -1163,7 +1163,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                     });
                     const isCollapsed = collapsedZones.has(zoneItem.zone);
                     const lanes = Array.from(new Set(zoneLocations.map((location: ParkingLocation) => location.lane.trim()).filter((lane: string) => Boolean(lane))));
-                    const renderXParkingSpaces = (bays: ParkingLocation[]) => <div className="x-parking-spaces" aria-label="X Parking spaces">
+                    const renderXParkingSpaces = (bays: ParkingLocation[]) => <div className="vplm-bay-rail" aria-label="X Parking spaces">
                       {bays.map((bay: ParkingLocation) => {
                         const xVehicle = showVehiclesOnMap ? vehiclesByLocation.get(parkingRecordKey(bay.id))?.find((item: Vehicle) => item.xParking === 'Yes') : undefined;
                         const xVehicleRoadTest = xVehicle ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === xVehicle.id) : undefined;
@@ -1172,7 +1172,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         const maintenance = bayManagement.maintenance.some((item: BayMaintenance) => item.bayId === slotId && item.status === 'Active');
                         const status = xVehicle ? 'Occupied' : maintenance ? 'Maintenance' : reserved ? 'Reserved' : 'Available';
                         return <button key={`x-parking-${bay.id}`} id={xVehicle ? `garage-vehicle-${xVehicle.id}` : undefined} type="button"
-                          className={`x-parking-space ${bayStyle(status)}${isHighlightedBay(bay.id, true) ? ' garage-located-bay' : ''}`}
+                          className={`vplm-bay-tile vplm-bay-tile-x ${bayStyle(status)}${isHighlightedBay(bay.id, true) ? ' garage-located-bay' : ''}`}
                           draggable={Boolean(xVehicle && canTransferVehicle)}
                           onDragStart={() => { if (xVehicle && canTransferVehicle) setDraggedVehicleId(xVehicle.id); }}
                           onDragEnd={() => setDraggedVehicleId(undefined)}
@@ -1189,8 +1189,13 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                           }}
                           title={`X Parking beside ${bay.zone}-${bay.bayNumber}: ${status}`}
                           aria-label={`X Parking beside ${bay.zone}-${bay.bayNumber}: ${status}${xVehicle ? `, vehicle ${xVehicle.plateNumber}` : ''}`}>
-                          {xVehicle ? <TopViewCar vehicle={xVehicle} roadTest={xVehicleRoadTest} xParked onSelect={() => { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); setOverviewVehicleId(xVehicle.id); }} />
-                            : <span className="x-parking-empty-label">X</span>}
+                          <span className="vplm-bay-tile-head"><strong>X · {bay.zone}-{bay.bayNumber}</strong><span className="vplm-bay-status">{status === 'Available' ? 'Vacant' : status}</span></span>
+                          <span className="vplm-bay-tile-art">
+                            {xVehicle
+                              ? <TopViewCar vehicle={xVehicle} roadTest={xVehicleRoadTest} xParked onSelect={() => { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); setOverviewVehicleId(xVehicle.id); }} />
+                              : <span className="vplm-bay-empty-icon"><CarFront className="h-7 w-7" strokeWidth={1.5} aria-hidden="true" /><span>X</span></span>}
+                          </span>
+                          <span className="vplm-bay-tile-foot"><strong>{xVehicle ? xVehicle.plateNumber : 'X Parking'}</strong><span>{xVehicle ? 'View vehicle' : status === 'Available' ? 'Tap for details' : status}</span></span>
                         </button>;
                       })}
                     </div>;
