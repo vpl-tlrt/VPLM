@@ -1,0 +1,42 @@
+name: VPLM dialog viewport and top AI toggle verification
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/vehicle-parking-location-management/**'
+      - '.github/workflows/vplm-viewport-top-ai-verify-temp.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/vehicle-parking-location-management/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: apps/vehicle-parking-location-management
+      - name: TypeScript and production build
+        run: npm run build
+        working-directory: apps/vehicle-parking-location-management
+      - name: Verify component structure and AI toggle
+        run: node scripts/verify-overlay-viewport.mjs
+        working-directory: apps/vehicle-parking-location-management
+      - name: Install temporary headless browser runner
+        run: |
+          npm install --no-save --ignore-scripts --no-package-lock playwright
+          if ! command -v google-chrome && ! command -v chromium; then npx playwright install chromium; fi
+        working-directory: apps/vehicle-parking-location-management
+      - name: Measure real CSS dialog bounds across phone, tablet and desktop
+        run: node scripts/verify-overlay-viewport.mjs --browser
+        working-directory: apps/vehicle-parking-location-management
+      - name: Parking concurrency and X Parking checks
+        run: node scripts/verify-workspace-recovery.mjs
+        working-directory: apps/vehicle-parking-location-management
+      - name: Offline recovery regression
+        run: node scripts/verify-workspace-recovery-status.mjs
+        working-directory: apps/vehicle-parking-location-management
