@@ -1285,13 +1285,36 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   .vplm-parking-panel .vplm-zone-hero { flex-basis: 72vw; }
   .vplm-parking-panel .vplm-bay-chip-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 0.35rem; }
 }
-/* Scoped sheet presentation for dialogs opened from the parking chips only. */
+/* Parking Lot details are Radix dialogs styled as sheets. Radix's default
+   translate-x-[-50%] / translate-y-[-50%] are implemented using the CSS
+   `translate` longhand: `transform:none` alone cannot cancel them. */
+.vplm-parking-detail-sheet[data-slot="dialog-content"] {
+  position: fixed !important;
+  translate: none !important;
+  transform: none !important;
+  animation: none !important;
+  box-sizing: border-box;
+  display: block;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
 @media (max-width: 767px) {
-  .vplm-parking-detail-sheet {
-    position: fixed; inset: auto 0 0 0; left: 0; right: 0; top: auto; bottom: 0;
-    width: 100%; max-width: 100%; max-height: 79dvh; overflow-y: auto;
-    border-radius: 1.15rem 1.15rem 0 0; padding-bottom: calc(1.2rem + env(safe-area-inset-bottom, 0px));
-    transform: none; box-shadow: 0 -7px 25px -14px #0006; animation: none;
+  .vplm-parking-detail-sheet[data-slot="dialog-content"] {
+    inset: auto 0 0 0 !important;
+    top: auto !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    margin: 0 !important;
+    width: 100dvw !important;
+    max-width: 100dvw !important;
+    max-height: min(88dvh, 850px) !important;
+    border-radius: 1.15rem 1.15rem 0 0;
+    padding-bottom: calc(1.2rem + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -7px 25px -14px #0006;
   }
   .vplm-parking-detail-sheet::before {
     content: ''; display: block; width: 2.5rem; height: 0.25rem;
@@ -1299,10 +1322,19 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   }
 }
 @media (min-width: 768px) {
-  .vplm-parking-detail-sheet {
-    position: fixed; left: auto; top: 0; right: 0; bottom: 0;
-    width: min(520px, 48vw); max-width: min(520px, 48vw); max-height: 100dvh;
-    overflow-y: auto; border-radius: 1rem 0 0 1rem; transform: none; animation: none;
+  .vplm-parking-detail-sheet[data-slot="dialog-content"] {
+    inset: 0 0 0 auto !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: auto !important;
+    margin: 0 !important;
+    width: min(620px, 48dvw) !important;
+    max-width: min(620px, 48dvw) !important;
+    height: 100dvh;
+    max-height: 100dvh !important;
+    border-radius: 1rem 0 0 1rem;
+    box-shadow: -7px 0 25px -14px #0006;
   }
 }
 
