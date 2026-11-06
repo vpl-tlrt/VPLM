@@ -5,7 +5,6 @@ import { mapParkingLocationId, supportsXParkingLocation, type Movement, type Par
 import { parseAssistantBay } from '@/lib/assistant-bay';
 import { assistantDisplay, assistantLanguages, isAssistantLanguage, readAssistantLanguage } from '@/lib/assistant-language';
 import { supabase } from '@/lib/supabase';
-import { VplmCodexPet } from '@/components/vplm-codex-pet';
 
 import { AssistantRoadTest, type RoadTestChatHandle } from '@/components/assistant-road-test';
 import { AssistantPickup } from '@/components/assistant-pickup';
@@ -28,6 +27,8 @@ type TransferFlow = {
 };
 
 type AiAssistantProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   vehicles: Vehicle[];
   locations: ParkingLocation[];
   movements: Movement[];
@@ -65,6 +66,8 @@ const shortcutHelp = directory
   .join('\n');
 
 export default function AiAssistant({
+  open,
+  onOpenChange,
   vehicles,
   locations,
   movements,
@@ -99,7 +102,6 @@ export default function AiAssistant({
     }
   };
 
-  const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [activeFunction, setActiveFunction] = useState<AssistantFunction | null>(null);
@@ -631,11 +633,11 @@ export default function AiAssistant({
   };
 
   return (
-    <div className="fixed bottom-5 right-5 z-[100] flex flex-col items-end gap-3">
+    <div className="pointer-events-none fixed inset-x-3 bottom-3 top-[142px] z-[100] flex items-end justify-end md:inset-x-auto md:bottom-5 md:right-5 md:top-24">
       {open && (
-        <section
+        <section id="vplm-ai-panel"
           aria-label="VPLM AI assistant"
-          className="flex h-[min(680px,calc(100dvh-110px))] w-[min(420px,calc(100vw-28px))] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-2xl"
+          className="pointer-events-auto flex h-full max-h-[680px] min-h-0 w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-2xl md:w-[420px]"
         >
           <header className="flex items-center justify-between gap-3 border-b border-border bg-primary px-4 py-3 text-primary-foreground">
             <div className="flex items-center gap-3">
@@ -659,7 +661,7 @@ export default function AiAssistant({
               <button
                 type="button"
                 aria-label={languageText.close}
-                onClick={() => setOpen(false)}
+                onClick={() => onOpenChange(false)}
                 className="rounded-lg p-2 transition hover:bg-primary-foreground/15"
               >
                 <X size={20} />
@@ -821,7 +823,6 @@ export default function AiAssistant({
         </section>
       )}
 
-      <VplmCodexPet awake={open} busy={busy} onToggle={() => setOpen(current => !current)} />
     </div>
   );
 }

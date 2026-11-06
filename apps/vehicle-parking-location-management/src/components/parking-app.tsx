@@ -9,7 +9,7 @@ import { motion } from 'motion/react';
 import {
   ArrowDown, ArrowUp, ArchiveRestore, Bell, BellOff, CalendarDays, Camera, CarFront, ChevronDown, ChevronLeft, ChevronRight, CircleParking,
   ClipboardList, Crosshair, Download, Fuel, Gauge, GripVertical, History, Home, LayoutGrid, MapPin, Menu, Minus, MoveRight,
-  Plus, QrCode, Route, Save, ScanLine, Search, Settings, ShieldCheck, SlidersHorizontal, Trash2, Upload, UserCog, UserRound, Wifi, WifiOff, X, Lightbulb, LightbulbOff, LogOut, DoorOpen,
+  Plus, QrCode, Route, Save, ScanLine, Search, Settings, ShieldCheck, SlidersHorizontal, Trash2, Upload, UserCog, UserRound, Wifi, WifiOff, X, Lightbulb, LightbulbOff, LogOut, DoorOpen, Bot,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUser } from '@/hooks/use-user';
@@ -177,6 +177,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const notificationClickTimer = useRef<number | undefined>(undefined);
   const [screen, setScreen] = useState<Screen>(initialPickupRequestId ? 'pickup-requests' : 'dashboard');
   const [recoveryReviewOpen, setRecoveryReviewOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const [manageTasks, setManageTasks] = useState(false);
   const [isReorderingMobileNavigation, setIsReorderingMobileNavigation] = useState(false);
   const [mobileNavigationOrder, setMobileNavigationOrder] = useState<Screen[]>(() => {
@@ -662,6 +663,17 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
                 </SheetContent>
               </Sheet>
               <button type="button" aria-label="Go to home page" onClick={() => setScreen('dashboard')} className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-md"><CarFront className="h-6 w-6" /></button>
+              {!localGuest && <Button id="vplm-ai-header-toggle" type="button"
+                variant={aiOpen ? 'default' : 'outline'} size="sm"
+                className="h-11 shrink-0 gap-1 rounded-xl px-2 sm:px-3"
+                aria-label={aiOpen ? 'Hide Ask VPLM AI' : 'Show Ask VPLM AI'}
+                aria-controls="vplm-ai-panel" aria-expanded={aiOpen}
+                aria-pressed={aiOpen} title={aiOpen ? 'Hide Ask VPLM AI' : 'Open Ask VPLM AI'}
+                onClick={() => setAiOpen((current) => !current)}>
+                {aiOpen ? <X className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+                <span className="text-xs font-semibold sm:hidden">AI</span>
+                <span className="hidden text-xs font-semibold sm:inline">Ask VPLM AI</span>
+              </Button>}
               <div className="hidden min-w-0 sm:block"><p className="truncate font-bold">Vehicle Parking</p><p className="truncate text-xs text-muted-foreground">Location Management</p></div>
             </div>
 
@@ -764,7 +776,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
       <WorkspaceRecoveryReview userId={user?.objectId} open={recoveryReviewOpen} onOpenChange={setRecoveryReviewOpen} onKeepCloudReviewed={keepCloudAfterReview} />
-      {!localGuest && <AiAssistant vehicles={vehicles} movements={movements} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} locationLabel={locationLabel} onAssign={openAssistantAssignment} onTransfer={transferVehicleById} />}
+      {!localGuest && <AiAssistant open={aiOpen} onOpenChange={setAiOpen} vehicles={vehicles} movements={movements} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} locationLabel={locationLabel} onAssign={openAssistantAssignment} onTransfer={transferVehicleById} />}
     </div>
   );
   return appShell;
