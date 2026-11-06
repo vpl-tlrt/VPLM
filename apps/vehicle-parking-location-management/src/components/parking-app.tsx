@@ -1203,14 +1203,27 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                       const bayVehicles = showVehiclesOnMap ? vehiclesByLocation.get(parkingRecordKey(bay.id)) ?? [] : [];
                       const vehicle = bayVehicles.find((item: Vehicle) => item.xParking !== 'Yes');
                       const xParkingVehicle = bayVehicles.find((item: Vehicle) => item.xParking === 'Yes');
-                      // The adjacent X space has its own hit target and cannot replace the regular bay's vehicle.
+                      // Regular and adjacent X Parking remain independent click targets.
                       const displayVehicle = vehicle;
                       const vehicleRoadTest = displayVehicle ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === displayVehicle.id) : undefined;
                       const displayStatus: ParkingLocation['status'] = vehicle ? 'Occupied' : bay.status === 'Occupied' ? 'Available' : bay.status;
-                      return <motion.button id={vehicle ? `garage-vehicle-${vehicle.id}` : undefined} key={bay.id} type="button" draggable={Boolean(displayVehicle && canTransferVehicle)} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: Math.min(index, 12) * 0.025, ease: 'easeOut' as const }} onDragStart={() => vehicle && setDraggedVehicleId(vehicle.id)} onDragEnd={() => setDraggedVehicleId(undefined)} onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()} onDrop={() => { if (draggedVehicleId && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(draggedVehicleId, bay.id); setDraggedVehicleId(undefined); }} onClick={() => { setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }} className={`parking-space ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`} aria-label={`${isLiveGarageContainer(bay) ? 'Container' : 'Bay ' + bay.bayNumber}, ${zoneDisplayName(bay.zone)}, ${displayStatus}${vehicle ? `, vehicle ${vehicle.plateNumber}` : ''}${xParkingVehicle ? `, X-Parked vehicle ${xParkingVehicle.plateNumber}` : ''}`}>
-                        <span className="absolute bottom-0.5 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap text-xs font-black">{isLiveGarageContainer(bay) ? bay.zone : `${bay.zone === 'Reception' ? 'R ' : bay.zone === 'Workshop' ? 'W ' : bay.zone}-${bay.bayNumber}`}</span>
-                        {vehicle && <TopViewCar vehicle={vehicle} roadTest={vehicleRoadTest} onSelect={() => { setSelectedBayId(undefined); setOverviewVehicleId(vehicle.id); }} />}
-                        {!displayVehicle && bay.status !== 'Available' && bay.status !== 'Occupied' && <Badge className="bay-status-label" variant={bay.status === 'Reserved' ? 'secondary' : 'outline'}>{bay.status}</Badge>}
+                      return <motion.button id={vehicle ? `garage-vehicle-${vehicle.id}` : undefined} key={bay.id} type="button"
+                        draggable={Boolean(displayVehicle && canTransferVehicle)}
+                        initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: Math.min(index, 12) * 0.025, ease: 'easeOut' as const }}
+                        onDragStart={() => vehicle && setDraggedVehicleId(vehicle.id)}
+                        onDragEnd={() => setDraggedVehicleId(undefined)}
+                        onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()}
+                        onDrop={() => { if (draggedVehicleId && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(draggedVehicleId, bay.id); setDraggedVehicleId(undefined); }}
+                        onClick={() => { setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }}
+                        className={`vplm-bay-tile ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`}
+                        aria-label={`${isLiveGarageContainer(bay) ? 'Container' : 'Bay ' + bay.bayNumber}, ${zoneDisplayName(bay.zone)}, ${displayStatus}${vehicle ? `, vehicle ${vehicle.plateNumber}` : ''}${xParkingVehicle ? `, X-Parked vehicle ${xParkingVehicle.plateNumber}` : ''}`}>
+                        <span className="vplm-bay-tile-head"><strong>{isLiveGarageContainer(bay) ? bay.zone : `${bay.zone === 'Reception' ? 'R ' : bay.zone === 'Workshop' ? 'W ' : bay.zone}-${bay.bayNumber}`}</strong><span className="vplm-bay-status">{displayStatus === 'Available' ? 'Vacant' : displayStatus}</span></span>
+                        <span className="vplm-bay-tile-art">
+                          {vehicle
+                            ? <TopViewCar vehicle={vehicle} roadTest={vehicleRoadTest} onSelect={() => { setSelectedBayId(undefined); setOverviewVehicleId(vehicle.id); }} />
+                            : <span className="vplm-bay-empty-icon"><CarFront className="h-7 w-7" strokeWidth={1.5} aria-hidden="true" /></span>}
+                        </span>
+                        <span className="vplm-bay-tile-foot"><strong>{vehicle ? vehicle.plateNumber : displayStatus === 'Available' ? 'Available' : displayStatus}</strong><span>{vehicle ? 'View vehicle' : displayStatus === 'Available' ? 'Tap for details' : 'Bay details'}</span></span>
                       </motion.button>;
                     };
                     return <div key={zoneItem.zone} className="mb-5 last:mb-0">
