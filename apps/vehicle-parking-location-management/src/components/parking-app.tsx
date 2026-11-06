@@ -899,14 +899,6 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     bayHighlight?.locationId === locationId && bayHighlight.xParking === xParking;
 
   useEffect(() => saveBayManagementState(bayManagement), [bayManagement]);
-  const toggleZone = (zoneName: string) => {
-    setCollapsedZones((current: Set<string>) => {
-      const next = new Set(current);
-      if (next.has(zoneName)) next.delete(zoneName);
-      else next.add(zoneName);
-      return next;
-    });
-  };
   const setAllZonesCollapsed = (collapsed: boolean) => {
     setCollapsedZones(collapsed ? new Set(visibleZones.map((zoneItem: { zone: string }) => zoneItem.zone)) : new Set());
   };
