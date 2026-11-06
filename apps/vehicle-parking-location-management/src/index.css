@@ -1213,3 +1213,95 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
 @media (max-width: 380px) { .vplm-zone-hero { flex-basis: 86vw; } .vplm-zone-showcase-header h3 { font-size: 0.95rem; } .vplm-bay-lane-heading span { font-size: 0.6rem; } }
 @media (min-width: 768px) { .vplm-zone-hero { flex-basis: 22rem; } .vplm-bay-tile { flex-basis: 9.3rem; } }
 @media (prefers-reduced-motion: reduce) { .vplm-zone-hero, .vplm-bay-tile, .vplm-zone-hero-track > span { transition: none; } }
+
+/* Single-level Parking Lot UI. Only components within the parking dashboard
+   use these selectors; no global card, navigation or dialog styles change. */
+.vplm-parking-panel { min-width: 0; box-shadow: none; }
+.vplm-parking-panel .vplm-zone-showcase { min-width: 0; }
+.vplm-parking-panel .vplm-zone-showcase-header { margin-bottom: 0.35rem; }
+.vplm-parking-panel .vplm-zone-hero-rail { gap: 0.55rem; padding: 0.15rem 0.1rem 0.35rem; }
+.vplm-parking-panel .vplm-zone-hero {
+  flex: 0 0 min(65vw, 16rem);
+  min-height: 9.3rem; height: 9.3rem; padding: 0.6rem 0.75rem;
+  border-radius: 0.8rem; border-width: 1px; box-shadow: none;
+}
+.vplm-parking-panel .vplm-zone-hero::before,
+.vplm-parking-panel .vplm-zone-hero::after,
+.vplm-parking-panel .vplm-zone-hero-visual { display: none; }
+.vplm-parking-panel .vplm-zone-hero-kicker { font-size: 0.58rem; padding: 0.16rem 0.38rem; }
+.vplm-parking-panel .vplm-zone-hero-chevron { width: 1.55rem; height: 1.55rem; }
+.vplm-parking-panel .vplm-zone-hero-chevron svg { width: 1rem; height: 1rem; }
+.vplm-parking-panel .vplm-zone-hero-main { max-width: 100%; margin-top: 0.28rem; gap: 0.1rem; }
+.vplm-parking-panel .vplm-zone-hero-title { font-size: 1.1rem; line-height: 1.14; }
+.vplm-parking-panel .vplm-zone-hero-subtitle { font-size: 0.65rem; }
+.vplm-parking-panel .vplm-zone-hero-footer { gap: 0.4rem; margin-top: 0.25rem; padding-top: 0.25rem; }
+.vplm-parking-panel .vplm-zone-hero-metric strong { font-size: 1.35rem; }
+.vplm-parking-panel .vplm-zone-hero-metric > span,
+.vplm-parking-panel .vplm-zone-hero-progress,
+.vplm-parking-panel .vplm-zone-hero-cta { font-size: 0.61rem; }
+.vplm-parking-panel .vplm-zone-hero-progress { gap: 0.2rem; }
+.vplm-parking-panel .vplm-zone-hero-cta { margin-top: 0.1rem; }
+.vplm-parking-panel .vplm-zone-detail { border: 0; border-radius: 0; background: transparent; padding: 0; box-shadow: none; }
+.vplm-parking-panel .vplm-bay-browser { min-width: 0; }
+.vplm-parking-panel .vplm-compact-lanes { display: grid; gap: 0.65rem; }
+.vplm-parking-panel .vplm-bay-lane { min-width: 0; padding: 0.2rem 0 0.65rem; margin: 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
+.vplm-parking-panel .vplm-bay-lane-heading { margin-bottom: 0.35rem; }
+.vplm-parking-panel .vplm-bay-lane-heading strong { font-size: 0.75rem; }
+.vplm-parking-panel .vplm-bay-lane-heading span { font-size: 0.65rem; }
+.vplm-parking-panel .vplm-x-lane-label { margin: 0.4rem 0 0.2rem; font-size: 0.61rem; }
+.vplm-parking-panel .vplm-bay-chip-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(94px, 1fr));
+  min-width: 0; gap: 0.45rem; margin-bottom: 0.4rem;
+}
+.vplm-parking-panel .vplm-bay-chip {
+  display: flex; position: relative; min-width: 0; min-height: 105px;
+  flex-direction: column; justify-content: space-between; gap: 0.1rem;
+  border: 1px solid var(--border); border-radius: 0.56rem;
+  padding: 0.32rem 0.34rem; background: var(--card);
+  color: var(--card-foreground); text-align: center; touch-action: manipulation;
+  box-shadow: none; cursor: pointer; transition: border-color 130ms ease;
+}
+.vplm-parking-panel .vplm-bay-chip:hover { border-color: var(--primary); }
+.vplm-parking-panel .vplm-bay-chip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.vplm-parking-panel .vplm-bay-chip-x { border-style: dashed; }
+.vplm-parking-panel .vplm-bay-chip-head { display: flex; justify-content: space-between; align-items: start; gap: 0.16rem; min-width: 0; }
+.vplm-parking-panel .vplm-bay-chip-head strong { overflow: hidden; max-width: 100%; font-size: 0.69rem; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.vplm-parking-panel .vplm-bay-chip-state { width: 0.45rem; min-width: 0.45rem; height: 0.45rem; margin-top: 0.2rem; overflow: hidden; border-radius: 50%; background: #22a36b; text-indent: -100vw; white-space: nowrap; }
+.vplm-parking-panel .vplm-bay-chip.bay-occupied .vplm-bay-chip-state { background: #e14c4c; }
+.vplm-parking-panel .vplm-bay-chip.bay-reserved .vplm-bay-chip-state { background: #f4ae36; }
+.vplm-parking-panel .vplm-bay-chip.bay-maintenance .vplm-bay-chip-state { background: #9196a0; }
+.vplm-parking-panel .vplm-bay-chip-visual { position: relative; display: grid; height: 48px; flex: 0 0 48px; place-items: center; background: transparent; }
+.vplm-parking-panel .vplm-bay-chip-visual .top-view-car {
+  position: absolute; left: 50%; top: 54%; transform: translate(-50%, -50%) scale(0.6);
+  transform-origin: center; pointer-events: auto;
+}
+.vplm-parking-panel .vplm-bay-chip-x .top-view-car,
+.vplm-parking-panel .vplm-bay-chip-visual .x-parked-car { transform: translate(-50%, -50%) rotate(90deg) scale(0.54); }
+.vplm-parking-panel .vplm-bay-chip-visual .vehicle-registration { display: none; }
+.vplm-parking-panel .vplm-bay-chip-visual .vehicle-alerts { transform: translateX(-50%) scale(1.45); transform-origin: bottom center; }
+.vplm-parking-panel .vplm-bay-chip-plate { display: block; max-width: 100%; overflow: hidden; font-size: 0.67rem; line-height: 0.88rem; font-weight: 850; white-space: nowrap; text-overflow: ellipsis; }
+.vplm-parking-panel .vplm-bay-chip-empty { color: var(--muted-foreground); font-weight: 900; font-size: 1.1rem; }
+@media (max-width: 370px) {
+  .vplm-parking-panel .vplm-zone-hero { flex-basis: 72vw; }
+  .vplm-parking-panel .vplm-bay-chip-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 0.35rem; }
+}
+/* Scoped sheet presentation for dialogs opened from the parking chips only. */
+@media (max-width: 767px) {
+  .vplm-parking-detail-sheet {
+    position: fixed; inset: auto 0 0 0; left: 0; right: 0; top: auto; bottom: 0;
+    width: 100%; max-width: 100%; max-height: 79dvh; overflow-y: auto;
+    border-radius: 1.15rem 1.15rem 0 0; padding-bottom: calc(1.2rem + env(safe-area-inset-bottom, 0px));
+    transform: none; box-shadow: 0 -7px 25px -14px #0006; animation: none;
+  }
+  .vplm-parking-detail-sheet::before {
+    content: ''; display: block; width: 2.5rem; height: 0.25rem;
+    margin: -0.55rem auto 0.55rem; border-radius: 1rem; background: var(--border);
+  }
+}
+@media (min-width: 768px) {
+  .vplm-parking-detail-sheet {
+    position: fixed; left: auto; top: 0; right: 0; bottom: 0;
+    width: min(520px, 48vw); max-width: min(520px, 48vw); max-height: 100dvh;
+    overflow-y: auto; border-radius: 1rem 0 0 1rem; transform: none; animation: none;
+  }
+}
