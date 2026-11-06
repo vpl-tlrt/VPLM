@@ -1144,7 +1144,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
               </div>
             </section>
             {openedParkingZone && visibleZones.some((zoneItem: { zone: string }) => zoneItem.zone === openedParkingZone)
-              ? <section id="parking-zone-detail" className="space-y-3 rounded-xl border bg-muted/30 p-2 sm:p-4" aria-label={`${zoneDisplayName(openedParkingZone)} parking bays`}>
+              ? <section id="parking-zone-detail" className="vplm-zone-detail space-y-3 rounded-2xl border bg-card p-3 sm:p-5" aria-label={`${zoneDisplayName(openedParkingZone)} parking bays`}>
                   <div className="flex flex-wrap items-center justify-between gap-2 px-1">
                     <div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Live bay layout</p><h3 className="text-base font-black">{zoneDisplayName(openedParkingZone)}</h3></div>
                     <div className="flex flex-wrap gap-1">
@@ -1153,8 +1153,8 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                       <Button variant="outline" size="sm" onClick={() => setOpenedParkingZone(null)} aria-label="Close parking zone details"><X className="h-4 w-4" /> Close</Button>
                     </div>
                   </div>
-                  <div className="parking-garage live-parking-garage max-h-[540px] overflow-auto rounded-lg p-2">
-                    <div className="min-w-[1480px]">
+                  <div className="vplm-bay-browser">
+                    <div className="min-w-0 space-y-3">
                   {visibleZones.filter((zoneItem: { zone: string }) => zoneItem.zone === openedParkingZone).map((zoneItem: { zone: string; total: number; available: number; percent: number; state: string }) => {
                     const rawZoneLocations = locations.filter((location: ParkingLocation) => location.zone === zoneItem.zone);
                     const zoneLocations = rawZoneLocations.filter((location: ParkingLocation) => {
@@ -1232,26 +1232,16 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         <span className="text-xs font-semibold">{zoneLocations.length} shown · {zoneItem.available} vacant</span>
                       </button>
                       {!isCollapsed && (zoneLocations.length > 0 ? <div className="live-parking-lane rounded-xl border bg-muted p-3">
-                        {lanes.map((lane: string, laneIndex: number) => {
+                        {lanes.map((lane: string) => {
                           const laneBays = zoneLocations.filter((location: ParkingLocation) => location.lane.trim() === lane);
-                          const facesRoad = laneIndex % 2 === 1;
-                          const hasNextLane = laneIndex < lanes.length - 1;
-                          const usesPath = zoneItem.zone === 'Workshop'
-                            ? laneIndex === 0 || laneIndex === 2
-                            : zoneItem.zone === 'Reception'
-                              ? [0, 2, 4, 6].includes(laneIndex)
-                              : false;
                           const xParkingBays = laneBays.filter(supportsXParkingLocation);
                           const xParkingSpacesAbove = zoneItem.zone === 'C' || (zoneItem.zone === 'B' && xParkingBays.some((bay: ParkingLocation) => Number(bay.bayNumber) <= 69));
-                          return <div key={`${zoneItem.zone}-${lane}`}>
-                            <div className="mb-1 px-2 text-xs font-bold text-foreground">{lane}</div>
-                            {xParkingBays.length > 0 && xParkingSpacesAbove && <><div className="x-parking-row-label">X Parking spaces</div>{renderXParkingSpaces(xParkingBays)}</>}
-                            <div className={`parking-row ${facesRoad ? 'parking-row-facing' : ''} ${xParkingBays.length > 0 ? 'parking-row-x-enabled' : ''}`}>{laneBays.map(renderBay)}</div>
-                            {xParkingBays.length > 0 && !xParkingSpacesAbove && <><div className="x-parking-row-label">X Parking spaces</div>{renderXParkingSpaces(xParkingBays)}</>}
-                            {hasNextLane && (usesPath
-                              ? <div className={`parking-road parking-road-${laneBays[0]?.direction === 'Reverse' ? 'reverse' : 'forward'} my-2`} aria-label={`Pathway after ${lane}`} />
-                              : <div className="parking-divider" aria-label={`Division between ${lane} and ${lanes[laneIndex + 1]} in ${zoneDisplayName(zoneItem.zone)}`} />)}
-                          </div>;
+                          return <section key={`${zoneItem.zone}-${lane}`} className="vplm-bay-lane">
+                            <div className="vplm-bay-lane-heading"><strong>{lane}</strong><span>{laneBays.length} bays · swipe to browse</span></div>
+                            {xParkingBays.length > 0 && xParkingSpacesAbove && <><div className="vplm-x-lane-label">X Parking</div>{renderXParkingSpaces(xParkingBays)}</>}
+                            <div className="vplm-bay-rail" aria-label={`${zoneDisplayName(zoneItem.zone)}, ${lane} parking bays`}>{laneBays.map(renderBay)}</div>
+                            {xParkingBays.length > 0 && !xParkingSpacesAbove && <><div className="vplm-x-lane-label">X Parking</div>{renderXParkingSpaces(xParkingBays)}</>}
+                          </section>;
                         })}
                       </div> : <div className="py-5 text-center text-sm text-muted-foreground">No bays match this status.</div>)}
                     </div>;
