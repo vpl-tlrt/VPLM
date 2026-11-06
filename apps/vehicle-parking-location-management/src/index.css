@@ -1305,3 +1305,12 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
     overflow-y: auto; border-radius: 1rem 0 0 1rem; transform: none; animation: none;
   }
 }
+
+/* Parking Lot: keep supplementary location panels out of the initial mobile viewport. */
+.vplm-parking-other-section { min-width: 0; }
+.vplm-parking-other-toggle { display: flex; align-items: center; justify-content: space-between; gap: .55rem; width: 100%; min-height: 3.5rem; padding: .65rem .85rem; border: 1px solid var(--border); border-radius: .75rem; background: var(--card); color: var(--card-foreground); box-shadow: none; }
+.vplm-parking-other-toggle strong { font-size: .83rem; font-weight: 850; }
+.vplm-parking-other-toggle small { color: var(--muted-foreground); font-size: .66rem; }
+.vplm-parking-other-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.vplm-parking-other-content { display: grid; gap: .75rem; padding-top: .7rem; }
+.vplm-parking-other-content > .grid { gap: .75rem; }
