@@ -1,0 +1,35 @@
+name: VPLM responsive menus and safe sync recovery verification
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/vehicle-parking-location-management/**'
+      - '.github/workflows/vplm-responsive-sync-recovery-verify-temp.yml'
+permissions:
+  contents: read
+jobs:
+  safety-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/vehicle-parking-location-management/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: apps/vehicle-parking-location-management
+      - name: TypeScript and production Vite build
+        run: npm run build
+        working-directory: apps/vehicle-parking-location-management
+      - name: Verify parking changes, X occupancy, conflict guards
+        run: node scripts/verify-workspace-recovery.mjs
+        working-directory: apps/vehicle-parking-location-management
+      - name: Verify saved recovery protection and non-destructive duplicate detection
+        run: node scripts/verify-workspace-recovery-status.mjs
+        working-directory: apps/vehicle-parking-location-management
+      - name: Check responsive screen protections and colored zone return
+        working-directory: apps/vehicle-parking-location-management
+        run: |
+          node -e 'const f=require("fs"),a=require("assert");let x=f.readFileSync("src/components/parking-app.tsx","utf8"),v=f.readFileSync("src/components/vehicle-overview-dialog.tsx","utf8"),c=f.readFileSync("src/index.css","utf8");for(let k of ["vplm-assignment-screen","vplm-header-actions","vplm-app-screen","onKeepCloudReviewed={keepCloudAfterReview}","border-primary bg-primary font-bold text-primary-foreground"])a(x.includes(k),k);for(let k of ["props.compactSheet ? \"grid min-w-0 grid-cols-1 gap-4\"","break-words","max-w-full justify-start overflow-x-auto"])a(v.includes(k),k);for(let k of ["[data-slot=\"dialog-content\"]","[data-slot=\"sheet-content\"]","[data-slot=\"tabs-list\"]","vplm-responsive-dialog"])a(c.includes(k),k);console.log("PASS: responsive assignment, profile, menus and colored All zones UI");'
