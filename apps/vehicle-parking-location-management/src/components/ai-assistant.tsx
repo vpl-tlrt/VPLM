@@ -5,6 +5,7 @@ import { mapParkingLocationId, supportsXParkingLocation, type Movement, type Par
 import { parseAssistantBay } from '@/lib/assistant-bay';
 import { assistantDisplay, assistantLanguages, isAssistantLanguage, readAssistantLanguage } from '@/lib/assistant-language';
 import { supabase } from '@/lib/supabase';
+import { VplmCodexPet } from '@/components/vplm-codex-pet';
 
 import { AssistantRoadTest, type RoadTestChatHandle } from '@/components/assistant-road-test';
 import { AssistantPickup } from '@/components/assistant-pickup';
@@ -27,6 +28,7 @@ type TransferFlow = {
 };
 
 type AiAssistantProps = {
+  launcherVisible: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   vehicles: Vehicle[];
@@ -66,6 +68,7 @@ const shortcutHelp = directory
   .join('\n');
 
 export default function AiAssistant({
+  launcherVisible,
   open,
   onOpenChange,
   vehicles,
@@ -822,7 +825,7 @@ export default function AiAssistant({
           </form>
         </section>
       )}
-
+      {launcherVisible && <VplmCodexPet awake={open} busy={busy} onToggle={() => onOpenChange(!open)} />}
     </div>
   );
 }
