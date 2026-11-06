@@ -17,6 +17,7 @@ interface VehicleOverviewDialogBaseProps {
   vehicle?: Vehicle;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  parkingSheet?: boolean;
   locations: ParkingLocation[];
   vehicles?: Vehicle[];
   roadTest?: RoadTestRecord;
@@ -83,7 +84,7 @@ const blobToDataUrl = (blob: Blob): Promise<string> => new Promise((resolve, rej
 });
 
 export function VehicleOverviewDialog(props: VehicleOverviewDialogProps) {
-  const { vehicle, open, onOpenChange, locations, vehicles = [], movements, roadTest } = props;
+  const { vehicle, open, onOpenChange, locations, vehicles = [], movements, roadTest, parkingSheet = false } = props;
   const interactive = props.mode !== 'readonly' ? props : undefined;
   const [targetZone, setTargetZone] = useState('none');
   const [targetBay, setTargetBay] = useState('none');
@@ -196,8 +197,8 @@ export function VehicleOverviewDialog(props: VehicleOverviewDialogProps) {
   if (vehicle.xParking === 'Yes') {
     profileFields.splice(8, 0, ['In front of vehicle', vehicle.xParkingOccupantPlateNumber ? `${vehicle.xParkingOccupantPlateNumber} · ${vehicle.xParkingOccupantModel ?? 'Model not recorded'}` : 'Not recorded']);
   }
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><CarFront /> {vehicle.plateNumber}</DialogTitle><DialogDescription>Complete vehicle profile, location, assignment, and movement record.</DialogDescription></DialogHeader>
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className={parkingSheet ? "vplm-parking-sheet" : "max-h-[92vh] overflow-y-auto sm:max-w-5xl"}><DialogHeader><DialogTitle className="flex items-center gap-2"><CarFront /> {vehicle.plateNumber}</DialogTitle><DialogDescription>Complete vehicle profile, location, assignment, and movement record.</DialogDescription></DialogHeader>
+    <div className={parkingSheet ? "grid grid-cols-1 gap-4" : "grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]"}>
       <div className="space-y-4">{!isLimitedProfile && <><div className="relative min-h-52 overflow-hidden rounded-2xl bg-muted">{vehicle.photoUrls[0] ? <img src={vehicle.photoUrls[0]} alt={`${vehicle.plateNumber} vehicle`} className="h-52 w-full object-cover" /> : <div className="grid h-52 place-items-center text-muted-foreground"><CarFront className="h-16 w-16" /></div>}<Badge className="absolute left-3 top-3">{vehicle.operationalStatus}</Badge></div>{interactive && <><input ref={photoRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={uploadPhoto} /><Button variant="outline" className="w-full" onClick={() => photoRef.current?.click()}><Camera /> Capture or upload photo</Button></>}</>}
         <Tabs defaultValue="profile"><TabsList className="w-full"><TabsTrigger value="profile">Profile</TabsTrigger><TabsTrigger value="history">Parking history</TabsTrigger><TabsTrigger value="gps">GPS map</TabsTrigger></TabsList>
           <TabsContent value="profile" className="space-y-4">{isEditing && draft ? <div className="rounded-2xl border bg-card p-4 text-card-foreground"><VehicleFormFields value={draft} onChange={setDraft} idPrefix="profile" showXParking hiddenFields={isLimitedProfile ? ['brand', 'vin', 'department', 'customerName'] : ['customerName']} allowXParking={vehicle.xParking === 'Yes' || supportsXParkingLocation(location)} /></div> : <div className="grid gap-3 sm:grid-cols-2">{profileFields.filter(([label]) => !isLimitedProfile || !['Make / Brand', 'VIN / Chassis', 'Department', 'Assigned on'].includes(label)).map(([label, value]) => <div key={label} className="rounded-lg bg-muted p-3"><p className="text-xs font-bold text-muted-foreground">{label}</p><p className="font-semibold text-foreground">{value || '—'}</p></div>)}</div>}</TabsContent>
