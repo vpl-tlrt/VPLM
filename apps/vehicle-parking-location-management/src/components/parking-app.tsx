@@ -1098,31 +1098,51 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain px-1 pb-3 pt-1 [scrollbar-width:thin]" role="group" aria-label="Select a parking zone">
-              {visibleZones.map((zoneItem: { zone: string; total: number; available: number; percent: number; state: string }) => {
-                const selected = openedParkingZone === zoneItem.zone;
-                return <button key={zoneItem.zone} type="button"
-                  onClick={() => { setOpenedParkingZone(selected ? null : zoneItem.zone); if (!selected && collapsedZones.has(zoneItem.zone)) toggleZone(zoneItem.zone); }}
-                  aria-expanded={selected} aria-controls="parking-zone-detail"
-                  aria-label={`Open ${zoneDisplayName(zoneItem.zone)} parking: ${zoneItem.available} available of ${zoneItem.total} bays`}
-                  className={`group relative flex min-h-[168px] w-[164px] shrink-0 snap-start flex-col justify-between overflow-hidden rounded-2xl border bg-gradient-to-br from-card via-card to-muted/70 p-3.5 text-left shadow-sm outline-offset-2 transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md focus-visible:outline-2 focus-visible:outline-primary active:scale-[0.98] sm:w-[188px] ${selected ? 'border-primary ring-2 ring-primary/30 shadow-md' : 'border-border'}`}>
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary"><CarFront className="h-5 w-5" aria-hidden="true" /></span>
-                    <ChevronRight className={`h-5 w-5 text-muted-foreground transition-transform ${selected ? 'rotate-90 text-primary' : 'group-hover:translate-x-0.5'}`} aria-hidden="true" />
-                  </span>
-                  <span className="mt-3 block">
-                    <span className="block truncate text-base font-black leading-tight text-foreground">{zoneDisplayName(zoneItem.zone)}</span>
-                    <span className="mt-1 block text-xs text-muted-foreground">{zoneItem.total} parking bays</span>
-                  </span>
-                  <span className="mt-3 flex items-center justify-between gap-2 text-xs">
-                    <span className="rounded-full bg-primary/10 px-2.5 py-1 font-bold tabular-nums text-primary">{zoneItem.available} vacant</span>
-                    <span className="font-semibold tabular-nums text-muted-foreground">{zoneItem.percent}% used</span>
-                  </span>
-                  <span className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-border/70" aria-hidden="true"><span className="block h-full rounded-full bg-primary transition-[width]" style={{ width: `${zoneItem.percent}%` }} /></span>
-                </button>;
-              })}
-              {visibleZones.length === 0 && <p className="py-5 text-sm text-muted-foreground">No parking zones match this filter.</p>}
-            </div>
+            <section className="vplm-zone-showcase" aria-label="Live parking zones">
+              <div className="vplm-zone-showcase-header">
+                <div><p className="vplm-zone-eyebrow">Your parking zones</p><h3 className="text-lg font-black text-foreground">Choose where to park</h3></div>
+                <span className="text-xs font-semibold text-muted-foreground">Swipe to browse <ChevronRight className="inline h-4 w-4" aria-hidden="true" /></span>
+              </div>
+              <div className="vplm-zone-hero-rail" role="group" aria-label="Swipeable parking zone cards">
+                {visibleZones.map((zoneItem: { zone: string; total: number; available: number; percent: number; state: string }, index: number) => {
+                  const selected = openedParkingZone === zoneItem.zone;
+                  return <button key={zoneItem.zone} type="button"
+                    onClick={() => { setOpenedParkingZone(selected ? null : zoneItem.zone); if (!selected && collapsedZones.has(zoneItem.zone)) toggleZone(zoneItem.zone); }}
+                    aria-expanded={selected} aria-controls="parking-zone-detail"
+                    aria-label={`View ${zoneDisplayName(zoneItem.zone)}: ${zoneItem.available} vacant of ${zoneItem.total} parking bays`}
+                    className={`vplm-zone-hero vplm-zone-tone-${index % 5} ${selected ? 'vplm-zone-hero-selected' : ''}`}>
+                    <span className="vplm-zone-hero-top">
+                      <span className="vplm-zone-hero-kicker"><span className="vplm-zone-live-dot" /> LIVE PARKING</span>
+                      <span className="vplm-zone-hero-chevron"><ChevronRight className="h-5 w-5" aria-hidden="true" /></span>
+                    </span>
+                    <span className="vplm-zone-hero-main">
+                      <span className="vplm-zone-hero-title">{zoneDisplayName(zoneItem.zone)}</span>
+                      <span className="vplm-zone-hero-subtitle">{zoneItem.total} bays • {zoneItem.state}</span>
+                    </span>
+                    <span className="vplm-zone-hero-visual" aria-hidden="true"><CarFront className="h-20 w-20" strokeWidth={1.15} /></span>
+                    <span className="vplm-zone-hero-footer">
+                      <span className="vplm-zone-hero-metric"><strong>{zoneItem.available}</strong><span>vacant<br />bays</span></span>
+                      <span className="vplm-zone-hero-progress"><span>Utilization <strong>{zoneItem.percent}%</strong></span><span className="vplm-zone-hero-track"><span style={{ width: `${zoneItem.percent}%` }} /></span></span>
+                      <span className="vplm-zone-hero-cta">View bays <ChevronRight className="h-4 w-4" aria-hidden="true" /></span>
+                    </span>
+                  </button>;
+                })}
+                {!visibleZones.length && <p className="p-5 text-sm text-muted-foreground">No parking zones match this filter.</p>}
+              </div>
+              <div className="vplm-zone-shortcuts" role="group" aria-label="Quick parking zone selection">
+                {visibleZones.map((zoneItem: { zone: string; total: number; available: number; percent: number; state: string }, index: number) => {
+                  const selected = openedParkingZone === zoneItem.zone;
+                  return <button key={zoneItem.zone} type="button"
+                    className={`vplm-zone-shortcut ${selected ? 'vplm-zone-shortcut-selected' : ''}`}
+                    onClick={() => { setOpenedParkingZone(selected ? null : zoneItem.zone); if (!selected && collapsedZones.has(zoneItem.zone)) toggleZone(zoneItem.zone); }}
+                    aria-label={`${zoneDisplayName(zoneItem.zone)}, ${zoneItem.available} vacant bays`}
+                    aria-pressed={selected}>
+                    <span className={`vplm-zone-shortcut-icon vplm-zone-tone-${index % 5}`}><CarFront className="h-6 w-6" aria-hidden="true" /></span>
+                    <span className="vplm-zone-shortcut-name">{zoneDisplayName(zoneItem.zone)}</span>
+                  </button>;
+                })}
+              </div>
+            </section>
             {openedParkingZone && visibleZones.some((zoneItem: { zone: string }) => zoneItem.zone === openedParkingZone)
               ? <section id="parking-zone-detail" className="space-y-3 rounded-xl border bg-muted/30 p-2 sm:p-4" aria-label={`${zoneDisplayName(openedParkingZone)} parking bays`}>
                   <div className="flex flex-wrap items-center justify-between gap-2 px-1">
