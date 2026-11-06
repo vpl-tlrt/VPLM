@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { applyWorkspaceSnapshot, readWorkspaceSnapshot, workspaceStorageKeys, type WorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
 import { acknowledgeSyncMutations, exportSyncJournal, listPendingSyncMutations } from '@/lib/sync-queue';
-import { readRecoverySnapshot, recoveryFingerprint, workspaceContentMatches } from '@/lib/workspace-recovery-status';
+import { preserveWorkspaceRecoveryCopy, readRecoverySnapshot, recoveryFingerprint, workspaceContentMatches } from '@/lib/workspace-recovery-status';
 
 const hasUncommittedData = (before: WorkspaceSnapshot, current: WorkspaceSnapshot): boolean =>
   workspaceStorageKeys.some(key => {
@@ -38,9 +38,9 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   const reviewedKey = userId ? `vplm-recovery-verified:${userId}` : undefined;
   const [conflictDetail, setConflictDetail] = useState('');
   const saveRecovery = (draft: ReturnType<typeof readWorkspaceSnapshot>) => {
-    if (!recoveryKey) return;
-    try { window.localStorage.setItem(recoveryKey, JSON.stringify(draft)); }
-    catch { /* The in-memory workspace remains available for download. */ }
+    // Retain earlier recovery versions when a new offline session is saved.
+    // A quota failure leaves the original key untouched for later export.
+    if (userId) preserveWorkspaceRecoveryCopy(userId, draft);
   };
   const timer = useRef<number | undefined>(undefined);
   const retryTimer = useRef<number | undefined>(undefined);
