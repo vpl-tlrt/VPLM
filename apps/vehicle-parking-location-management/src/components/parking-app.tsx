@@ -178,6 +178,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const [screen, setScreen] = useState<Screen>(initialPickupRequestId ? 'pickup-requests' : 'dashboard');
   const [recoveryReviewOpen, setRecoveryReviewOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [aiLauncherVisible, setAiLauncherVisible] = useState(false);
   const [manageTasks, setManageTasks] = useState(false);
   const [isReorderingMobileNavigation, setIsReorderingMobileNavigation] = useState(false);
   const [mobileNavigationOrder, setMobileNavigationOrder] = useState<Screen[]>(() => {
@@ -664,13 +665,16 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
               </Sheet>
               <button type="button" aria-label="Go to home page" onClick={() => setScreen('dashboard')} className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-md"><CarFront className="h-6 w-6" /></button>
               {!localGuest && <Button id="vplm-ai-header-toggle" type="button"
-                variant={aiOpen ? 'default' : 'outline'} size="sm"
+                variant={aiLauncherVisible ? 'default' : 'outline'} size="sm"
                 className="h-11 shrink-0 gap-1 rounded-xl px-2 sm:px-3"
-                aria-label={aiOpen ? 'Hide Ask VPLM AI' : 'Show Ask VPLM AI'}
-                aria-controls="vplm-ai-panel" aria-expanded={aiOpen}
-                aria-pressed={aiOpen} title={aiOpen ? 'Hide Ask VPLM AI' : 'Open Ask VPLM AI'}
-                onClick={() => setAiOpen((current) => !current)}>
-                {aiOpen ? <X className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+                aria-label={aiLauncherVisible ? 'Hide Supra floating AI launcher' : 'Show Supra floating AI launcher'}
+                aria-controls="vplm-supra-launcher" aria-expanded={aiLauncherVisible}
+                aria-pressed={aiLauncherVisible} title={aiLauncherVisible ? 'Hide Supra launcher' : 'Show Supra floating launcher'}
+                onClick={() => {
+                  if (aiLauncherVisible) setAiOpen(false);
+                  setAiLauncherVisible(!aiLauncherVisible);
+                }}>
+                {aiLauncherVisible ? <X className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                 <span className="text-xs font-semibold sm:hidden">AI</span>
                 <span className="hidden text-xs font-semibold sm:inline">Ask VPLM AI</span>
               </Button>}
@@ -776,7 +780,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
       <WorkspaceRecoveryReview userId={user?.objectId} open={recoveryReviewOpen} onOpenChange={setRecoveryReviewOpen} onKeepCloudReviewed={keepCloudAfterReview} />
-      {!localGuest && <AiAssistant open={aiOpen} onOpenChange={setAiOpen} vehicles={vehicles} movements={movements} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} locationLabel={locationLabel} onAssign={openAssistantAssignment} onTransfer={transferVehicleById} />}
+      {!localGuest && <AiAssistant launcherVisible={aiLauncherVisible} open={aiOpen} onOpenChange={setAiOpen} vehicles={vehicles} movements={movements} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} locationLabel={locationLabel} onAssign={openAssistantAssignment} onTransfer={transferVehicleById} />}
     </div>
   );
   return appShell;

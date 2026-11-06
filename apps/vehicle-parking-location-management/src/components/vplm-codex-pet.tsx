@@ -153,6 +153,7 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
 
   return (
     <button
+      id="vplm-supra-launcher"
       ref={button}
       type="button"
       aria-label={awake ? 'Close Ask VPLM AI' : 'Open Ask VPLM AI'}
@@ -163,7 +164,7 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
       onPointerMove={move}
       onPointerUp={finish}
       onPointerCancel={finish}
-      className="fixed z-[110] flex touch-none select-none flex-col items-center border-0 bg-transparent p-0 text-foreground shadow-none outline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
+      className="pointer-events-auto fixed z-[110] flex touch-none select-none flex-col items-center border-0 bg-transparent p-0 text-foreground shadow-none outline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
       style={{ left: currentPosition.x, top: currentPosition.y, width: WIDTH, cursor: drag.current?.moved ? 'grabbing' : 'grab' }}
     >
       {imageFailed ? (
