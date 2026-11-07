@@ -377,8 +377,10 @@ type KpiPocketProps = { label: string; tests: RoadTestRecord[]; vehicles: Vehicl
 function RoadTestKpiPocket({ label, tests, vehicles, expanded, onToggle, onOpen }: KpiPocketProps) {
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setClockNow(Date.now()), 60000); return () => window.clearInterval(timer); }, []);
   const sortedTests = [...tests].sort((a: RoadTestRecord, b: RoadTestRecord) => new Date(a.assignmentTimestamp).getTime() - new Date(b.assignmentTimestamp).getTime());
-  const visibleTests = sortedTests.slice(0, 5);
+  const visibleTests = sortedTests;
   useEffect(() => {
     if (expanded || isHovered || label === 'Total road tests' || visibleTests.length < 2) return;
     const timer = window.setInterval(() => setCurrentCardIndex((current: number) => (current + 1) % visibleTests.length), 3500);
@@ -392,15 +394,18 @@ function RoadTestKpiPocket({ label, tests, vehicles, expanded, onToggle, onOpen 
       <div className="road-test-pocket-stack">
         {visibleTests.map((test: RoadTestRecord, index: number) => {
           const item = vehicles.find((candidate: Vehicle) => candidate.id === test.vehicleId);
-          const ageHours = Math.max(0, (Date.now() - new Date(test.assignmentTimestamp).getTime()) / 3600000);
+          const ageHours = Math.max(0, (clockNow - new Date(test.assignmentTimestamp).getTime()) / 3600000);
+          const requestedMinutes = Math.max(0, Math.floor(ageHours * 60));
+          const requestAge = !Number.isFinite(requestedMinutes) ? 'Time unavailable' : requestedMinutes < 60 ? `${requestedMinutes}m ago` : requestedMinutes < 1440 ? `${Math.floor(requestedMinutes / 60)}h ${requestedMinutes % 60}m ago` : `${Math.floor(requestedMinutes / 1440)}d ${Math.floor(requestedMinutes % 1440 / 60)}h ago`;
           const ageClass = ageHours >= 168 ? 'age-old' : ageHours >= 48 ? 'age-mid' : 'age-fresh';
-          const offset = ((index - activeIndex + visibleTests.length + center) % visibleTests.length) - center;
+          const offset = ((index - activeIndex + visibleTests.length + Math.floor(visibleTests.length / 2)) % visibleTests.length) - Math.floor(visibleTests.length / 2);
+          const isVisible = Math.abs(offset) <= 2;
           const isCenter = offset === 0;
           const imageUrl = item?.photoUrls.find((url: string) => Boolean(url));
-          return <button key={test.id} type="button" className={`road-test-wallet-card ${ageClass} ${isCenter ? 'is-front' : ''}`} style={{ '--fan-offset': offset, '--fan-depth': Math.abs(offset), zIndex: visibleTests.length - Math.abs(offset) } as React.CSSProperties} onClick={(event: React.MouseEvent<HTMLButtonElement>) => { event.stopPropagation(); if (!expanded && !isCenter) { setCurrentCardIndex(index); return; } onOpen(test); }} aria-label={`${isCenter || expanded ? 'Open' : 'Bring forward'} road test for ${item?.plateNumber ?? 'unknown vehicle'}`}>
+          return <button key={test.id} type="button" className={`road-test-wallet-card ${ageClass} ${isCenter ? 'is-front' : ''}`} style={{ '--fan-offset': Math.max(-2, Math.min(2, offset)), '--fan-depth': Math.min(2, Math.abs(offset)), zIndex: visibleTests.length - Math.abs(offset), visibility: expanded || isVisible ? 'visible' : 'hidden', pointerEvents: expanded || isVisible ? 'auto' : 'none' } as React.CSSProperties} onClick={(event: React.MouseEvent<HTMLButtonElement>) => { event.stopPropagation(); if (!expanded && !isCenter) { setCurrentCardIndex(index); return; } onOpen(test); }} aria-label={`${isCenter || expanded ? 'Open' : 'Bring forward'} road test for ${item?.plateNumber ?? 'unknown vehicle'}`}>
             {imageUrl && <img src={imageUrl} alt="" loading="lazy" />}
             <span className="road-test-number-plate">{item?.plateNumber ?? 'UNKNOWN'}</span>
-            <span className="road-test-wallet-caption">{item?.model || test.testType || 'Road test'}</span>
+            <span className="road-test-wallet-caption">{requestAge}<span className="road-test-card-assignee">Assigned to {test.assignedTo || 'Unassigned'}</span></span>
           </button>;
         })}
         {visibleTests.length === 0 && <span className="road-test-pocket-empty">No road tests</span>}
