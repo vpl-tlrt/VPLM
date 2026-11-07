@@ -229,7 +229,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       const zoneName = location ? parkingZoneLabel(location.zone) : vehicle.status === 'Released' || vehicle.status === 'Delivered' ? 'Not parked' : 'Unassigned Bay';
       return [vehicle.plateNumber, vehicle.vin, vehicle.brand, vehicle.model, vehicle.status, zoneName, location?.bayNumber ?? '', location ? parkingLocationLabel(location) : zoneName, vehicle.assignedDate, vehicle.assignedBy, vehicle.driverOwner].map(quote).join(',');
     });
-    const csv = '\\uFEFF' + [columns.map(quote).join(','), ...rows].join('\\r\\n');
+    const csv = '\uFEFF' + [columns.map(quote).join(','), ...rows].join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
     const link = document.createElement('a'); link.href = url; link.download = 'vplm-all-vehicle-parking.csv'; link.click(); URL.revokeObjectURL(url);
   };
