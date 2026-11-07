@@ -1513,3 +1513,41 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
 .pickup-fan-sized .pickup-glass-plate { font-size: .8rem; line-height: 1.15rem; font-weight: 900; }
 .pickup-fan-sized p { font-size: .62rem; line-height: 1rem; overflow-wrap: anywhere; }
 .pickup-fan-sized > span { font-size: .58rem; }
+
+/* Pickup request card refinement: stronger plate, subtle illustrated glass surface. */
+.pickup-fan-sized {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 90% 12%, rgba(59,130,246,.18), transparent 55%),
+    repeating-linear-gradient(145deg, transparent 0, transparent 17px, rgba(255,255,255,.065) 18px, transparent 19px),
+    linear-gradient(125deg,rgba(255,255,255,.46),rgba(255,255,255,.11) 52%,rgba(255,255,255,.31));
+  border-color: rgba(148,163,184,.35);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 5px 15px rgba(15,23,42,.12);
+}
+.pickup-fan-sized::before {
+  content: '';
+  position: absolute;
+  right: -.75rem; top: -.9rem;
+  width: 4.2rem; height: 4.2rem;
+  border: 1px solid rgba(148,163,184,.17);
+  border-radius: 50%;
+  box-shadow: 0 0 0 .8rem rgba(148,163,184,.055), 0 0 0 1.6rem rgba(148,163,184,.035);
+  pointer-events: none; z-index: -1;
+}
+.pickup-fan-sized .pickup-glass-plate {
+  font-size: clamp(1.02rem, 2vw, 1.25rem);
+  line-height: 1.4rem;
+  letter-spacing: .025em;
+  font-weight: 900;
+  color: var(--foreground);
+}
+.pickup-fan-sized .pickup-request-elapsed {
+  margin-top: .2rem;
+  padding: .12rem .3rem;
+  border-radius: .35rem;
+  background: rgba(59,130,246,.09);
+  color: var(--foreground);
+  font-size: .67rem;
+  font-weight: 750;
+}
