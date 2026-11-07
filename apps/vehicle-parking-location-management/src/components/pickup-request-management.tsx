@@ -44,6 +44,8 @@ const originType = (location: ParkingLocation | undefined) => /reception/i.test(
 
 export function PickupRequestManagement({ readOnly = false, initialRequestId, onRefreshWorkspace, getWorkspaceRevision, vehicles, locations, actor, userId, isAdministrator, canViewFullHistory, onClose, hasUnsyncedChanges }: Props) {
   const [requests, setRequests] = useState<Pickup[]>([]);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setClockNow(Date.now()), 60000); return () => window.clearInterval(timer); }, []);
   const [users, setUsers] = useState<WorkspaceUser[]>([]);
   const [query, setQuery] = useState('');
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
@@ -345,9 +347,10 @@ export function PickupRequestManagement({ readOnly = false, initialRequestId, on
       <Button key={status} variant={view === status ? 'default' : 'outline'} onClick={() => setView(status)}>{status} ({filteredRequests.filter(item => item.status === status).length})</Button>
     )}</div>
     {loading ? <p>Loading pickup requests…</p> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{selected.map(request =>
-      <button key={request.id} type="button" onClick={() => { setOpened(request); setFinalBay(request.requested_bay_id ?? ''); setOtherBay(false); setBayNumber(''); }} className="rounded-xl border bg-card p-4 text-left shadow-md transition hover:border-primary hover:shadow-lg">
+      <button key={request.id} type="button" onClick={() => { setOpened(request); setFinalBay(request.requested_bay_id ?? ''); setOtherBay(false); setBayNumber(''); }} className="pickup-glass-request-card rounded-xl border p-4 text-left shadow-md transition hover:border-primary hover:shadow-lg">
         <span className="text-xs text-muted-foreground">{originType(locationById(request.origin_location_id))} pickup</span>
-        <p className="text-xl font-black">{request.plate_number}</p><p className="text-sm">{request.destination_type}</p>
+        <p className="pickup-glass-plate text-2xl font-black">{request.plate_number}</p><p className="text-sm">{request.destination_type}</p>
+        <p className="text-xs font-semibold">{(() => { const minutes = Math.max(0, Math.floor((clockNow - new Date(request.requested_at).getTime()) / 60000)); return !Number.isFinite(minutes) ? 'Time unavailable' : minutes < 60 ? `${minutes}m ago` : minutes < 1440 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m ago` : `${Math.floor(minutes / 1440)}d ${Math.floor(minutes % 1440 / 60)}h ago`; })()}</p>
         <p className="text-xs text-muted-foreground">Requested by {request.requested_by}</p>
         <p className="text-xs text-muted-foreground">Assigned to {request.assigned_to ?? 'Any driver'}</p>
       </button>
