@@ -1,5 +1,5 @@
 import { createUUID } from '@/lib/secure-uuid';
-import { parkingZoneSort } from '@/lib/parking-data';
+import { parkingZoneSort, parkingZoneLabel } from '@/lib/parking-data';
 import { ReviewWorkspaceAccess } from '@/components/workspace-access-requests';
 import { useActivePickup } from '@/hooks/use-active-pickup';
 import { pickupParkingNotice } from '@/lib/pickup-request-data';
@@ -126,13 +126,7 @@ const statusVariant = (status: string): 'default' | 'secondary' | 'destructive' 
 };
 
 
-const zoneDisplayName = (zone: string): string => {
-  if (['A', 'B', 'C'].includes(zone)) return `Accommodation Parking ${zone}`;
-  if (zone === 'Workshop') return 'Workshop Parking';
-  if (zone === 'Reception') return 'Reception Parking';
-  if (['Lexus Reception', 'Toyota Reception', 'Washing Area', 'BP1', 'BP2', 'BP3', 'Workshop Centre Bay'].includes(zone)) return zone;
-  return `Zone ${zone}`;
-};
+const zoneDisplayName = parkingZoneLabel;
 
 type GarageLayoutItem = {
   id: string;
@@ -227,7 +221,19 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const isOnline = syncState !== 'offline';
   const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline · pending' : syncState === 'error' ? 'Sync needs attention' : pendingChanges ? 'Changes pending' : 'Cloud synced';
 
-  const [zone, setZone] = useState('A');
+  const exportVehicleBayData = () => {
+    const columns = ['Plate Number', 'VIN', 'Brand', 'Model', 'Status', 'Parking Zone', 'Parking Bay', 'Location', 'Assigned Date', 'Assigned By', 'Driver Owner'];
+    const quote = (value: unknown) => '\"' + String(value ?? '').replace(/\"/g, '\"\"') + '\"';
+    const rows = vehicles.map((vehicle: Vehicle) => {
+      const location = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(vehicle.currentLocationId));
+      const zoneName = location ? parkingZoneLabel(location.zone) : vehicle.status === 'Released' || vehicle.status === 'Delivered' ? 'Not parked' : 'Unassigned Bay';
+      return [vehicle.plateNumber, vehicle.vin, vehicle.brand, vehicle.model, vehicle.status, zoneName, location?.bayNumber ?? '', location ? parkingLocationLabel(location) : zoneName, vehicle.assignedDate, vehicle.assignedBy, vehicle.driverOwner].map(quote).join(',');
+    });
+    const csv = '\\uFEFF' + [columns.map(quote).join(','), ...rows].join('\\r\\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'vplm-all-vehicle-parking.csv'; link.click(); URL.revokeObjectURL(url);
+  };
+  const [zone, setZone] = useState('Unassigned Bay');
   const [assignmentVehicle, setAssignmentVehicle] = useState<VehicleFormData>(emptyVehicleForm);
   const [bayId, setBayId] = useState('');
   const [selectedVehicleId, setSelectedVehicleId] = useState('');
@@ -358,7 +364,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const searchResult = normalizedSearch ? activeVehicles.find((item: Vehicle) =>
     item.plateNumber.toLowerCase().includes(normalizedSearch) || item.vin.toLowerCase().includes(normalizedSearch)) : undefined;
 
-  const zoneNames = useMemo(() => Array.from(new Set(locations.map((item: ParkingLocation) => item.zone))).sort(parkingZoneSort), [locations]);
+  const zoneNames = useMemo(() => Array.from(new Set([...locations.map((item: ParkingLocation) => item.zone), 'Unassigned Bay'])).sort(parkingZoneSort), [locations]);
   const zoneStats = useMemo(() => zoneNames.map((zoneName: string) => {
     const bays = locations.filter((item: ParkingLocation) => item.zone === zoneName);
     const used = bays.filter((item: ParkingLocation) => linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
@@ -749,7 +755,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           {screen === 'road-tests' && canAccessRoadTests && <RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} actorRole={role} canCreateAssignment canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} isAdministrator={isAdministrator} initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} /> }
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
           {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage} canEditVehicle={canEditVehicle} canTransferVehicle={canTransferVehicle} canAssignVehicle={canAssignVehicle} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} assignSelectedBay={(selectedBayId?: string, vehicleForm?: VehicleFormData) => handleAssign(selectedBayId, false, undefined, vehicleForm)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
-          {screen === 'assignment' && <Assignment assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} zone={zone} setZone={setZone} bayId={bayId} setBayId={setBayId} availableBays={availableBays} locations={locations} vehicles={activeVehicles} zoneNames={zoneNames} handleAssign={(targetBayId?: string, occupant?: XParkingOccupant) => handleAssign(targetBayId, false, occupant)} handleAssignUnassigned={() => handleAssign(undefined, true)} handleRelease={handleRelease} handleOcr={handleOcr} fileRef={fileRef} />}
+          {screen === 'assignment' && canManage && <div className="mb-3 flex justify-end"><Button variant="outline" onClick={exportVehicleBayData}><Download /> Download all vehicle / bay data</Button></div>}
+          {screen === 'assignment' && <Assignment assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} zone={zone} setZone={setZone} bayId={bayId} setBayId={setBayId} availableBays={availableBays} locations={locations} vehicles={activeVehicles} zoneNames={zoneNames} handleAssign={(targetBayId?: string, occupant?: XParkingOccupant) => handleAssign(targetBayId, zone === 'Unassigned Bay', occupant)} handleAssignUnassigned={() => handleAssign(undefined, true)} handleRelease={handleRelease} handleOcr={handleOcr} fileRef={fileRef} />}
           {screen === 'search' && <SearchScreen onRecoverDeliveredVehicle={canRecoverDeliveredVehicle ? recoverDeliveredVehicle : undefined} archiveOnSearchMiss={role === 'TechnicalLeader' || role === 'TechnicalAdvisor' || role === 'Drivers' || role === 'Technician'} query={searchQuery} setQuery={setSearchQuery} result={searchQuery ? searchResult : undefined} locationLabel={locationLabel} locations={locations} vehicles={vehicles} movements={movements} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} />}
           {screen === 'layout' && <LayoutScreen locations={locations} zoneFilter={zoneFilter} setZoneFilter={setZoneFilter} zoneStats={zoneStats} />}
           {screen === 'transfer' && <Transfer vehicles={vehicles} locations={locations} movements={movements} selectedVehicleId={selectedVehicleId} setSelectedVehicleId={setSelectedVehicleId} selectedVehicle={selectedVehicle} newLocationId={newLocationId} setNewLocationId={setNewLocationId} notes={notes} setNotes={setNotes} handleTransfer={handleTransfer} locationLabel={locationLabel} canAcceptContainer={containerCanAccept} />}
@@ -1363,7 +1370,8 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
   const parkHereBay = selectedBayOccupied ? suggestedBay : selectedBay;
   const openAssignment = () => {
     if (assignmentVehicle.xParking !== 'Yes') {
-      handleAssign();
+      if (zone === 'Unassigned Bay') handleAssignUnassigned();
+      else handleAssign();
       return;
     }
     if (!selectedBay) {
@@ -1404,7 +1412,7 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
         <CardContent className="min-w-0 space-y-4">
           <VehicleFormFields value={assignmentVehicle} onChange={setAssignmentVehicle} idPrefix="assignment" assignmentMode />
           <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="min-w-0 space-y-2"><Label>Parking zone</Label><Select value={zone} onValueChange={(value: string) => { setZone(value); setBayId(''); }}><SelectTrigger className="h-12 w-full min-w-0"><SelectValue /></SelectTrigger><SelectContent>{zoneNames.filter((item: string) => item).map((item: string) => <SelectItem key={item} value={item}>{['Lexus Reception', 'Toyota Reception', 'Washing Area', 'BP1', 'BP2', 'BP3', 'Workshop Centre Bay'].includes(item) ? item : `Zone ${item}`}</SelectItem>)}</SelectContent></Select></div>
+            <div className="min-w-0 space-y-2"><Label>Parking zone</Label><Select value={zone} onValueChange={(value: string) => { setZone(value); setBayId(''); }}><SelectTrigger className="h-12 w-full min-w-0"><SelectValue /></SelectTrigger><SelectContent>{zoneNames.filter((item: string) => item).map((item: string) => <SelectItem key={item} value={item}>{parkingZoneLabel(item)}</SelectItem>)}</SelectContent></Select></div>
             <div className="min-w-0 space-y-2"><Label>{assignmentVehicle.xParking === 'Yes' ? 'Parking bay / X Parking anchor' : 'Available bay'}</Label><Select value={bayId || 'none'} onValueChange={(value: string) => { const nextBayId = value === 'none' ? '' : value; setBayId(nextBayId); const nextBay = locations.find((item: ParkingLocation) => item.id === nextBayId); if (nextBay && nextBay.zone !== zone) setZone(nextBay.zone); }}><SelectTrigger className="h-12 w-full min-w-0"><SelectValue placeholder="Select bay" /></SelectTrigger><SelectContent><SelectItem value="none">Select a bay</SelectItem>{baysForSelection.filter((item: ParkingLocation) => item.id).map((item: ParkingLocation) => {
               const occupant = vehicles.find((vehicle: Vehicle) => vehicle.xParking === 'Yes' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(item.id));
               const xReserved = management.reservations.some((record) => record.bayId === xParkingSlotId(item.id) && record.status !== 'Released');
@@ -2034,7 +2042,7 @@ function Transfer({ vehicles, locations, movements, selectedVehicleId, setSelect
     ? supportsXParkingLocation(item) && !vehicles.some((vehicle: Vehicle) => vehicle.xParking === 'Yes' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(item.id))
     : item.status !== 'Reserved' && item.status !== 'Maintenance'
       && (canAcceptContainer(item) || !vehicles.some((vehicle: Vehicle) => vehicle.xParking !== 'Yes' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(item.id))));
-  const transferZones = Array.from(new Set(transferLocations.map((item: ParkingLocation) => item.zone))).sort();
+  const transferZones = Array.from(new Set(transferLocations.map((item: ParkingLocation) => item.zone))).sort(parkingZoneSort);
   const selectedDestination = locations.find((item: ParkingLocation) => item.id === newLocationId);
   const [transferZone, setTransferZone] = useState(selectedDestination?.zone ?? transferZones[0] ?? '');
   const firstTransferZone = transferZones[0] ?? '';
@@ -2074,7 +2082,7 @@ function Transfer({ vehicles, locations, movements, selectedVehicleId, setSelect
           </div>
           <div className="space-y-2"><Label>Zone</Label>
             <Select value={effectiveTransferZone || 'none'} onValueChange={(value: string) => { setTransferZone(value === 'none' ? '' : value); setNewLocationId(''); }}>
-              <SelectTrigger className="h-14"><SelectValue placeholder="Choose zone" /></SelectTrigger><SelectContent><SelectItem value="none">Choose zone</SelectItem>{transferZones.filter((item: string) => item).map((item: string) => <SelectItem key={item} value={item}>Zone {item}</SelectItem>)}</SelectContent>
+              <SelectTrigger className="h-14"><SelectValue placeholder="Choose zone" /></SelectTrigger><SelectContent><SelectItem value="none">Choose zone</SelectItem>{transferZones.filter((item: string) => item).map((item: string) => <SelectItem key={item} value={item}>{parkingZoneLabel(item)}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div className="space-y-2"><Label>{destinationType === 'xParking' ? 'X Parking space' : 'Bay number'}</Label>
