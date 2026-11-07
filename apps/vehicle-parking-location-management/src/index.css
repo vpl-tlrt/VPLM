@@ -1476,3 +1476,27 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   .road-test-pocket-stage { height: 14rem; }
   .road-test-wallet-card { width: 47%; height: 12.5rem; }
 }
+
+/* Test-only compact frosted-glass road-test fan cards. */
+.road-test-pocket { min-height: 12.5rem; }
+.road-test-pocket-stage { height: 7.7rem; touch-action: pan-y; }
+.road-test-wallet-card {
+  width: clamp(4rem, 23%, 6.5rem); height: 6.5rem;
+  border: 1px solid rgba(255,255,255,.5);
+  border-radius: .8rem;
+  background: linear-gradient(125deg, rgba(255,255,255,.5) 0%, rgba(255,255,255,.12) 28%, rgba(255,255,255,.08) 58%, rgba(255,255,255,.4) 100%);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.55), 0 9px 22px rgba(0,0,0,.2);
+  backdrop-filter: blur(12px) saturate(140%); -webkit-backdrop-filter: blur(12px) saturate(140%);
+}
+.road-test-wallet-card img { opacity: .4; }
+.road-test-wallet-card::before { content: ''; position: absolute; z-index: 1; inset: 0; background: linear-gradient(135deg,rgba(255,255,255,.58),rgba(255,255,255,.04) 42%,rgba(255,255,255,.22) 65%,transparent 75%); pointer-events: none; }
+.road-test-wallet-card::after { background: linear-gradient(transparent,rgba(0,0,0,.3)); }
+.road-test-number-plate {
+  position: absolute; top: .3rem; left: 50%; right: auto; transform: translateX(-50%);
+  border: 0; border-radius: 0; padding: 0; background: transparent; box-shadow: none;
+  color: var(--foreground); text-shadow: 0 1px 5px var(--background);
+  font-size: .57rem; font-weight: 900; text-align: center;
+}
+.road-test-wallet-caption { bottom: .4rem; font-size: .62rem; }
+.road-test-pocket.is-expanded .road-test-wallet-card { width: 100%; height: 7rem; }
+@media(max-width:480px) { .road-test-pocket-stage { height: 7.7rem; } .road-test-wallet-card { width: 25%; height: 6.5rem; } }
