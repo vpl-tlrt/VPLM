@@ -870,7 +870,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const showVehiclesOnMap = true;
 
   const [collapsedZones, setCollapsedZones] = useState<Set<string>>(new Set());
-  const visibleZones = zoneStats.filter((zoneItem: { zone: string }) => !['BP1', 'BP2', 'BP3', 'Washing Area', 'Toyota Reception', 'Lexus Reception', 'Workshop Centre Bay'].includes(zoneItem.zone) && (garageZoneFilter === 'all' || zoneItem.zone === garageZoneFilter));
+  const visibleZones = zoneStats.filter((zoneItem: { zone: string }) => !['BP1', 'BP2', 'BP3', 'Washing Area', 'Toyota Reception', 'Lexus Reception', 'Workshop Centre Bay', 'Manager Parking'].includes(zoneItem.zone) && (garageZoneFilter === 'all' || zoneItem.zone === garageZoneFilter));
   useEffect(() => {
     if (!focusedVehicleId) return;
     const focusedVehicle = vehicles.find((vehicle: Vehicle) => vehicle.id === focusedVehicleId);
@@ -1316,7 +1316,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <div><CardTitle className="flex items-center gap-2"><CarFront /> {containerName}</CardTitle><CardDescription>{containerName === 'Workshop Centre Bay' ? 'Urgent / Top Priority Vehicles Only' : 'Separate vehicle parking container'} · no bay number</CardDescription></div>
-                <Badge variant={occupants.length >= location.capacity ? 'destructive' : 'outline'}>{occupants.length} / {location.capacity} vehicles</Badge>
+                <Badge variant={occupants.length >= container.capacity ? 'destructive' : 'outline'}>{occupants.length} / {container.capacity} vehicles</Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-2">
