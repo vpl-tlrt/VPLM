@@ -1302,7 +1302,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
       </div>
       {!openedParkingZone && <section className="vplm-parking-other-section">
         <button type="button" className="vplm-parking-other-toggle" onClick={() => setShowOtherParkingAreas((current) => !current)} aria-expanded={showOtherParkingAreas}>
-          <span className="flex min-w-0 flex-col gap-0.5 text-left"><strong>Other parking areas</strong><small>Unassigned · Reception · Washing · BP containers</small></span>
+          <span className="flex min-w-0 flex-col gap-0.5 text-left"><strong>Other parking areas</strong><small>Unassigned · Reception · Washing · BP · Manager Parking</small></span>
           <span className="flex shrink-0 items-center gap-2"><Badge variant="outline">{unassignedVehicles.length} unassigned</Badge><ChevronDown className={`h-4 w-4 transition-transform ${showOtherParkingAreas ? 'rotate-180' : ''}`} /></span>
         </button>
         {showOtherParkingAreas && <div className="vplm-parking-other-content">
