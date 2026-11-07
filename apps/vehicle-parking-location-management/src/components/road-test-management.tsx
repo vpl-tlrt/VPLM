@@ -380,15 +380,15 @@ function RoadTestKpiPocket({ label, tests, vehicles, expanded, onToggle, onOpen 
   const sortedTests = [...tests].sort((a: RoadTestRecord, b: RoadTestRecord) => new Date(a.assignmentTimestamp).getTime() - new Date(b.assignmentTimestamp).getTime());
   const visibleTests = sortedTests.slice(0, 5);
   useEffect(() => {
-    if (expanded || isHovered || visibleTests.length < 2) return;
+    if (expanded || isHovered || label === 'Total road tests' || visibleTests.length < 2) return;
     const timer = window.setInterval(() => setCurrentCardIndex((current: number) => (current + 1) % visibleTests.length), 3500);
     return () => window.clearInterval(timer);
-  }, [expanded, isHovered, visibleTests.length]);
+  }, [expanded, isHovered, label, visibleTests.length]);
   const activeIndex = visibleTests.length ? currentCardIndex % visibleTests.length : 0;
   const center = Math.floor(visibleTests.length / 2);
   return <section className={`road-test-pocket ${expanded ? 'is-expanded' : ''}`} aria-label={`${label}: ${tests.length}`} onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)}>
     <button type="button" className="road-test-pocket-heading" onClick={onToggle} aria-expanded={expanded} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} cards`}><span>{label}</span><strong>{tests.length}</strong></button>
-    <div className="road-test-pocket-stage">
+    <div className="road-test-pocket-stage" onTouchStart={(event: React.TouchEvent<HTMLDivElement>) => { event.currentTarget.dataset.touchX = String(event.touches[0]?.clientX ?? 0); }} onTouchEnd={(event: React.TouchEvent<HTMLDivElement>) => { if (expanded || visibleTests.length < 2) return; const start = Number(event.currentTarget.dataset.touchX); const delta = (event.changedTouches[0]?.clientX ?? start) - start; if (Math.abs(delta) > 35) setCurrentCardIndex((current: number) => (current + (delta < 0 ? 1 : visibleTests.length - 1)) % visibleTests.length); }}>
       <div className="road-test-pocket-stack">
         {visibleTests.map((test: RoadTestRecord, index: number) => {
           const item = vehicles.find((candidate: Vehicle) => candidate.id === test.vehicleId);
