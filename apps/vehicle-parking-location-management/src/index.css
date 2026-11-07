@@ -1500,3 +1500,10 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
 .road-test-wallet-caption { bottom: .4rem; font-size: .62rem; }
 .road-test-pocket.is-expanded .road-test-wallet-card { width: 100%; height: 7rem; }
 @media(max-width:480px) { .road-test-pocket-stage { height: 7.7rem; } .road-test-wallet-card { width: 25%; height: 6.5rem; } }
+
+/* Test-only request age, assignee, readable plate and pickup glass finish. */
+.road-test-number-plate { font-size: .78rem; line-height: 1.1rem; max-width: 95%; overflow-wrap: anywhere; }
+.road-test-wallet-caption { bottom: .25rem; left: .15rem; right: .15rem; font-size: .58rem; line-height: 1.2; }
+.road-test-card-assignee { display: block; margin-top: .15rem; font-size: .55rem; font-weight: 600; overflow-wrap: anywhere; }
+.pickup-glass-request-card { background: linear-gradient(135deg, rgba(255,255,255,.35), rgba(255,255,255,.07) 45%, rgba(255,255,255,.25)); backdrop-filter: blur(12px) saturate(140%); -webkit-backdrop-filter: blur(12px) saturate(140%); box-shadow: inset 0 1px rgba(255,255,255,.5), 0 8px 20px rgba(0,0,0,.1); }
+.pickup-glass-plate { text-align: center; overflow-wrap: anywhere; }
