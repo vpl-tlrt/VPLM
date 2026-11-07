@@ -1432,3 +1432,37 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
 [data-slot="tabs-trigger"] { flex-shrink: 0; min-inline-size: max-content; }
 [data-slot="select-content"] { max-inline-size: calc(100dvw - 1rem); }
 [data-slot="dialog-content"]:not(.vplm-responsive-dialog):not(.vplm-parking-detail-sheet) { overflow-x: auto; }
+
+
+/* PR #29 test: reference-style fanned Road Test KPI carousel. */
+.road-test-pocket { min-width: 0; min-height: 16rem; overflow: hidden; }
+.road-test-pocket-heading { display: flex; width: 100%; text-align: left; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.road-test-pocket-stage { width: 100%; height: 11.4rem; margin: .35rem auto 0; perspective: 900px; overflow: hidden; }
+.road-test-pocket-stack { position: relative; inset: auto; width: 100%; height: 100%; transform-style: preserve-3d; }
+.road-test-wallet-card {
+  position: absolute; inset: 0 auto auto 50%; width: clamp(5.8rem, 56%, 9.6rem); height: 10.4rem;
+  padding: 0; overflow: hidden; border-radius: 1rem; border: 1px solid color-mix(in oklch, var(--border) 80%, white 20%);
+  background: linear-gradient(145deg, color-mix(in oklch, var(--primary) 32%, var(--card)), color-mix(in oklch, var(--card) 76%, black 24%));
+  box-shadow: 0 12px 23px color-mix(in oklch, black 32%, transparent);
+  transform-origin: 50% 90%; transform: translateX(calc(-50% + var(--fan-offset) * 38%)) translateY(calc(var(--fan-depth) * .65rem)) rotate(calc(var(--fan-offset) * 9deg)) scale(calc(1 - var(--fan-depth) * .09));
+  transition: transform 550ms cubic-bezier(.22,1,.36,1), box-shadow 550ms ease, filter 550ms ease;
+  animation: none; will-change: transform; cursor: pointer;
+}
+.road-test-wallet-card.is-front { box-shadow: 0 18px 34px color-mix(in oklch, black 44%, transparent); }
+.road-test-wallet-card:not(.is-front) { filter: brightness(.77); }
+.road-test-wallet-card:hover { filter: brightness(1); }
+.road-test-wallet-card img { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; border: 0; border-radius: 0; object-fit: cover; box-shadow: none; }
+.road-test-wallet-card::after { content: ''; position: absolute; inset: 35% 0 0; background: linear-gradient(transparent, color-mix(in oklch, black 80%, transparent)); pointer-events: none; }
+.road-test-number-plate { position: absolute; top: .55rem; right: .35rem; left: auto; z-index: 2; max-width: calc(100% - .7rem); padding: .18rem .42rem; border-radius: 999px; background: white; color: #171717; border: 0; font-size: .57rem; line-height: 1rem; letter-spacing: .045em; }
+.road-test-wallet-caption { position: absolute; z-index: 2; bottom: .8rem; left: .35rem; right: .35rem; color: white; font-size: .8rem; line-height: 1.2; font-weight: 800; text-align: center; text-shadow: 0 2px 6px #000; overflow-wrap: anywhere; }
+.road-test-pocket-lip { display: none; }
+.road-test-pocket-empty { display: grid; place-items: center; height: 100%; color: var(--muted-foreground); font-size: .8rem; }
+.road-test-pocket-controls { display: flex; align-items: center; justify-content: center; gap: .8rem; padding: .1rem .3rem .6rem; color: var(--muted-foreground); font-size: .7rem; }
+.road-test-pocket-controls button { display: grid; place-items: center; width: 2rem; height: 1.6rem; border: 1px solid var(--border); border-radius: .5rem; color: var(--foreground); background: var(--card); font-size: 1.3rem; cursor: pointer; }
+.road-test-pocket.is-expanded { min-height: 18rem; }
+.road-test-pocket.is-expanded .road-test-pocket-stage { width: 100%; height: auto; min-height: 12rem; overflow: visible; }
+.road-test-pocket.is-expanded .road-test-pocket-stack { position: relative; inset: auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; padding: .5rem; }
+.road-test-pocket.is-expanded .road-test-wallet-card { position: relative; inset: auto; left: auto; width: 100%; height: 10rem; transform: none; filter: none; animation: none; }
+.road-test-pocket.is-expanded .road-test-wallet-card img { height: 100%; }
+@media (max-width: 639px) { .road-test-pocket.is-expanded .road-test-pocket-stack { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (prefers-reduced-motion: reduce) { .road-test-wallet-card { transition: none; } }
