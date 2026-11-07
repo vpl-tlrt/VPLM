@@ -339,7 +339,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
 
   const activeVehicles = useMemo(() => vehicles.filter((item: Vehicle) => item.status !== 'Delivered'), [vehicles]);
   const containerVehicleCount = (locationId: string) => activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId)).length;
-  const containerCanAccept = (location: ParkingLocation) => isLiveGarageContainer(location) && location.status !== 'Reserved' && location.status !== 'Maintenance' && containerVehicleCount(location.id) < 15;
+  const containerCanAccept = (location: ParkingLocation) => isLiveGarageContainer(location) && location.status !== 'Reserved' && location.status !== 'Maintenance' && containerVehicleCount(location.id) < location.capacity;
   const linkedVehicleLocationIds = useMemo(() => new Set(activeVehicles.filter((item: Vehicle) => item.xParking !== 'Yes').map((item: Vehicle) => parkingRecordKey(item.currentLocationId)).filter((id: string) => Boolean(id))), [activeVehicles]);
   useEffect(() => {
     setLocations((current: ParkingLocation[]) => {
@@ -1006,7 +1006,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     toast.success(approved ? 'Release approved; bay is now vacant.' : 'Reservation kept; requester notified.');
   };
   const containerVehicleCount = (locationId: string) => activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId)).length;
-  const containerCanAccept = (location: ParkingLocation) => isLiveGarageContainer(location) && location.status !== 'Reserved' && location.status !== 'Maintenance' && containerVehicleCount(location.id) < 15;
+  const containerCanAccept = (location: ParkingLocation) => isLiveGarageContainer(location) && location.status !== 'Reserved' && location.status !== 'Maintenance' && containerVehicleCount(location.id) < location.capacity;
   const transferVehicle = (vehicleId: string, destinationId: string, toXParking = false, nextOperationalStatus: Vehicle['operationalStatus'] = 'Parked') => {
     const vehicle = activeVehicles.find((item: Vehicle) => item.id === vehicleId);
     const destination = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(destinationId));
@@ -1316,7 +1316,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <div><CardTitle className="flex items-center gap-2"><CarFront /> {containerName}</CardTitle><CardDescription>{containerName === 'Workshop Centre Bay' ? 'Urgent / Top Priority Vehicles Only' : 'Separate vehicle parking container'} · no bay number</CardDescription></div>
-                <Badge variant={occupants.length >= 15 ? 'destructive' : 'outline'}>{occupants.length} / 15 vehicles</Badge>
+                <Badge variant={occupants.length >= location.capacity ? 'destructive' : 'outline'}>{occupants.length} / {location.capacity} vehicles</Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-2">
