@@ -350,7 +350,7 @@ export function PickupRequestManagement({ readOnly = false, initialRequestId, on
       <button key={request.id} type="button" onClick={() => { setOpened(request); setFinalBay(request.requested_bay_id ?? ''); setOtherBay(false); setBayNumber(''); }} className="pickup-glass-request-card pickup-fan-sized rounded-xl border p-2 text-left shadow-md transition hover:border-primary hover:shadow-lg">
         <span className="text-xs text-muted-foreground">{originType(locationById(request.origin_location_id))} pickup</span>
         <p className="pickup-glass-plate text-2xl font-black">{request.plate_number}</p><p className="text-sm">{request.destination_type}</p>
-        <p className="text-xs font-semibold">{(() => { const minutes = Math.max(0, Math.floor((clockNow - new Date(request.requested_at).getTime()) / 60000)); return !Number.isFinite(minutes) ? 'Time unavailable' : minutes < 60 ? `${minutes}m ago` : minutes < 1440 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m ago` : `${Math.floor(minutes / 1440)}d ${Math.floor(minutes % 1440 / 60)}h ago`; })()}</p>
+        <p className="pickup-request-elapsed text-xs font-semibold"><span aria-hidden="true">◷</span> Requested {(() => { const minutes = Math.max(0, Math.floor((clockNow - new Date(request.requested_at).getTime()) / 60000)); return !Number.isFinite(minutes) ? 'Time unavailable' : minutes < 60 ? `${minutes}m ago` : minutes < 1440 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m ago` : `${Math.floor(minutes / 1440)}d ${Math.floor(minutes % 1440 / 60)}h ago`; })()}</p>
         <p className="text-xs text-muted-foreground">Requested by {request.requested_by}</p>
         <p className="text-xs text-muted-foreground">Assigned to {request.assigned_to ?? 'Any driver'}</p>
       </button>
