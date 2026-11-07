@@ -381,30 +381,32 @@ function RoadTestKpiPocket({ label, tests, vehicles, expanded, onToggle, onOpen 
   const visibleTests = sortedTests.slice(0, 5);
   useEffect(() => {
     if (expanded || isHovered || visibleTests.length < 2) return;
-    const timer = window.setInterval(() => {
-      setCurrentCardIndex((current: number) => (current + 1) % visibleTests.length);
-    }, 2000);
+    const timer = window.setInterval(() => setCurrentCardIndex((current: number) => (current + 1) % visibleTests.length), 3500);
     return () => window.clearInterval(timer);
   }, [expanded, isHovered, visibleTests.length]);
-  const normalizedIndex = visibleTests.length ? currentCardIndex % visibleTests.length : 0;
-  const renderedTests = expanded || visibleTests.length === 0 ? visibleTests : [...visibleTests.slice(normalizedIndex + 1), ...visibleTests.slice(0, normalizedIndex + 1)];
-  return <section className={`road-test-pocket ${expanded ? 'is-expanded' : ''}`} aria-label={`${label}: ${tests.length}`} onClick={onToggle} onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)}>
-    <div className="road-test-pocket-heading"><span>{label}</span><strong>{tests.length}</strong></div>
+  const activeIndex = visibleTests.length ? currentCardIndex % visibleTests.length : 0;
+  const center = Math.floor(visibleTests.length / 2);
+  return <section className={`road-test-pocket ${expanded ? 'is-expanded' : ''}`} aria-label={`${label}: ${tests.length}`} onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)}>
+    <button type="button" className="road-test-pocket-heading" onClick={onToggle} aria-expanded={expanded} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} cards`}><span>{label}</span><strong>{tests.length}</strong></button>
     <div className="road-test-pocket-stage">
       <div className="road-test-pocket-stack">
-        {renderedTests.map((test: RoadTestRecord, index: number) => {
+        {visibleTests.map((test: RoadTestRecord, index: number) => {
           const item = vehicles.find((candidate: Vehicle) => candidate.id === test.vehicleId);
           const ageHours = Math.max(0, (Date.now() - new Date(test.assignmentTimestamp).getTime()) / 3600000);
           const ageClass = ageHours >= 168 ? 'age-old' : ageHours >= 48 ? 'age-mid' : 'age-fresh';
-          const imageUrl = item?.photoUrls.find((url: string) => Boolean(url)) ?? 'https://cdn.hubblecontent.osi.office.net/m365content/publish/43395122-35f5-4fbf-b0ea-a3224d8ede65/thumbnails/large.jpg';
-          return <button key={test.id} type="button" className={`road-test-wallet-card ${ageClass}`} style={{ '--wallet-index': index } as React.CSSProperties} onClick={(event: React.MouseEvent<HTMLButtonElement>) => { event.stopPropagation(); onOpen(test); }} aria-label={`Open road test for ${item?.plateNumber ?? 'unknown vehicle'}`}>
+          const offset = ((index - activeIndex + visibleTests.length + center) % visibleTests.length) - center;
+          const isCenter = offset === 0;
+          const imageUrl = item?.photoUrls.find((url: string) => Boolean(url));
+          return <button key={test.id} type="button" className={`road-test-wallet-card ${ageClass} ${isCenter ? 'is-front' : ''}`} style={{ '--fan-offset': offset, '--fan-depth': Math.abs(offset), zIndex: visibleTests.length - Math.abs(offset) } as React.CSSProperties} onClick={(event: React.MouseEvent<HTMLButtonElement>) => { event.stopPropagation(); if (!expanded && !isCenter) { setCurrentCardIndex(index); return; } onOpen(test); }} aria-label={`${isCenter || expanded ? 'Open' : 'Bring forward'} road test for ${item?.plateNumber ?? 'unknown vehicle'}`}>
+            {imageUrl && <img src={imageUrl} alt="" loading="lazy" />}
             <span className="road-test-number-plate">{item?.plateNumber ?? 'UNKNOWN'}</span>
-            <img src={imageUrl} alt="" />
+            <span className="road-test-wallet-caption">{item?.model || test.testType || 'Road test'}</span>
           </button>;
         })}
+        {visibleTests.length === 0 && <span className="road-test-pocket-empty">No road tests</span>}
       </div>
-      <div className="road-test-pocket-lip" aria-hidden="true" />
     </div>
+    {visibleTests.length > 1 && !expanded && <div className="road-test-pocket-controls"><button type="button" onClick={() => setCurrentCardIndex((activeIndex - 1 + visibleTests.length) % visibleTests.length)} aria-label={`Previous ${label} card`}>‹</button><span>{activeIndex + 1} / {visibleTests.length}</span><button type="button" onClick={() => setCurrentCardIndex((activeIndex + 1) % visibleTests.length)} aria-label={`Next ${label} card`}>›</button></div>}
   </section>;
 }
 
