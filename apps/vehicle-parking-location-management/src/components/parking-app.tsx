@@ -1,5 +1,5 @@
 import { createUUID } from '@/lib/secure-uuid';
-import { parkingZoneSort, parkingZoneLabel } from '@/lib/parking-data';
+import { parkingZoneSort } from '@/lib/parking-data';
 import { ReviewWorkspaceAccess } from '@/components/workspace-access-requests';
 import { useActivePickup } from '@/hooks/use-active-pickup';
 import { pickupParkingNotice } from '@/lib/pickup-request-data';
