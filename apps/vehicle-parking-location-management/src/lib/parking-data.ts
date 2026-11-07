@@ -86,9 +86,17 @@ const createParkingLayout = (): ParkingLocation[] => {
 export const isLiveGarageContainer = (location?: ParkingLocation): boolean =>
   location?.section === 'Live Parking Garage';
 
+export const parkingZoneLabel = (zone: string): string => ({ A: 'Acc: Zone A', B: 'Acc: Zone B', C: 'Acc: Zone C', Reception: 'Reception Parking', 'Toyota Reception': 'T-Reception', 'Lexus Reception': 'L-Reception', Workshop: 'Workshop Bay' } as Record<string, string>)[zone] ?? zone;
+
+export const PARKING_ZONE_ORDER = ['A', 'B', 'C', 'Reception', 'Toyota Reception', 'Lexus Reception', 'Washing Area', 'Workshop', 'Workshop Centre Bay', 'BP1', 'BP2', 'BP3', 'Unassigned Bay'] as const;
+export const parkingZoneSort = (a: string, b: string): number => {
+  const index = (value: string) => { const i = PARKING_ZONE_ORDER.indexOf(value as typeof PARKING_ZONE_ORDER[number]); return i < 0 ? PARKING_ZONE_ORDER.length : i; };
+  return index(a) - index(b) || a.localeCompare(b);
+};
+
 export const parkingLocationLabel = (location?: ParkingLocation): string => {
   if (!location) return '—';
-  return isLiveGarageContainer(location) ? location.zone : `${location.zone}-${location.bayNumber}`;
+  return isLiveGarageContainer(location) ? parkingZoneLabel(location.zone) : `${parkingZoneLabel(location.zone)}-${location.bayNumber}`;
 };
 
 export const initialLocations: ParkingLocation[] = createParkingLayout();
