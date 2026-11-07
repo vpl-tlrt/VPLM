@@ -1,3 +1,5 @@
+import { createUUID } from '@/lib/secure-uuid';
+import { parkingZoneSort, parkingZoneLabel } from '@/lib/parking-data';
 import { ReviewWorkspaceAccess } from '@/components/workspace-access-requests';
 import { useActivePickup } from '@/hooks/use-active-pickup';
 import { pickupParkingNotice } from '@/lib/pickup-request-data';
@@ -277,9 +279,9 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     const timestamp = new Date().toISOString();
     const snapshotVehicle = vehicle ? { ...vehicle, photoUrls: [], photoUploadedAt: undefined } : undefined;
     const snapshot = snapshotVehicle ? JSON.stringify({ vehicle: snapshotVehicle, locationLabel: locationLabel(toLocationId ?? vehicle?.currentLocationId), fromLocationLabel: locationLabel(fromLocationId), toLocationLabel: locationLabel(toLocationId), assignment: { assignedDate: vehicle?.assignedDate, assignedBy: vehicle?.assignedBy, currentLocationId: toLocationId ?? vehicle?.currentLocationId }, action, fromLocationId, toLocationId }) : undefined;
-    const event: OfflineAuditEvent = { id: `audit-${crypto.randomUUID()}`, action, entity, detail, actor, timestamp, recordId: vehicle?.id, fromLocationId, toLocationId, snapshot };
+    const event: OfflineAuditEvent = { id: `audit-${createUUID()}`, action, entity, detail, actor, timestamp, recordId: vehicle?.id, fromLocationId, toLocationId, snapshot };
     setAuditEvents((current: OfflineAuditEvent[]) => [event, ...current]);
-    enqueueSync({ id: crypto.randomUUID(), ownerId, entity: 'AuditLog', action: 'create', recordId: event.id, payload: { name: `${action} ${entity}`, action, entity, detail, actorId: ownerId, actorName: actor, timestamp, recordId: vehicle?.id ?? event.id, beforeSnapshot: fromLocationId ? JSON.stringify({ vehicle, locationId: fromLocationId, locationLabel: locationLabel(fromLocationId) }) : '', afterSnapshot: JSON.stringify({ detail, snapshot, fromLocationId, toLocationId, fromLocationLabel: locationLabel(fromLocationId), toLocationLabel: locationLabel(toLocationId) }) }, version: 1, createdAt: timestamp });
+    enqueueSync({ id: createUUID(), ownerId, entity: 'AuditLog', action: 'create', recordId: event.id, payload: { name: `${action} ${entity}`, action, entity, detail, actorId: ownerId, actorName: actor, timestamp, recordId: vehicle?.id ?? event.id, beforeSnapshot: fromLocationId ? JSON.stringify({ vehicle, locationId: fromLocationId, locationLabel: locationLabel(fromLocationId) }) : '', afterSnapshot: JSON.stringify({ detail, snapshot, fromLocationId, toLocationId, fromLocationLabel: locationLabel(fromLocationId), toLocationLabel: locationLabel(toLocationId) }) }, version: 1, createdAt: timestamp });
   };
   const [newLocationId, setNewLocationId] = useState('');
   const [notes, setNotes] = useState('');
@@ -356,7 +358,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const searchResult = normalizedSearch ? activeVehicles.find((item: Vehicle) =>
     item.plateNumber.toLowerCase().includes(normalizedSearch) || item.vin.toLowerCase().includes(normalizedSearch)) : undefined;
 
-  const zoneNames = useMemo(() => Array.from(new Set(locations.map((item: ParkingLocation) => item.zone))).sort(), [locations]);
+  const zoneNames = useMemo(() => Array.from(new Set(locations.map((item: ParkingLocation) => item.zone))).sort(parkingZoneSort), [locations]);
   const zoneStats = useMemo(() => zoneNames.map((zoneName: string) => {
     const bays = locations.filter((item: ParkingLocation) => item.zone === zoneName);
     const used = bays.filter((item: ParkingLocation) => linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
@@ -371,9 +373,9 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     const fromLocationLabel = locationLabel(fromLocationId);
     const toLocationLabel = locationLabel(toLocationId);
     const snapshot = snapshotVehicle ? { vehicle: snapshotVehicle, locationLabel: toLocationLabel, fromLocationLabel, toLocationLabel, assignment: { assignedDate: snapshotVehicle.assignedDate, assignedBy: actor, currentLocationId: toLocationId }, action: type, fromLocationId, toLocationId } : undefined;
-    const movement: Movement = { id: `mov-${crypto.randomUUID()}`, vehicleId, fromLocationId, toLocationId, movementType: type, actionDateTime: movementDate, performedBy: actor, notes: movementNotes, snapshot };
+    const movement: Movement = { id: `mov-${createUUID()}`, vehicleId, fromLocationId, toLocationId, movementType: type, actionDateTime: movementDate, performedBy: actor, notes: movementNotes, snapshot };
     setMovements((current: Movement[]) => [movement, ...current]);
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'VehicleMovement', action: 'create', recordId: movement.id, payload: { name: `${type} ${vehicleId}`, vehicleId, vehicleName: vehicle?.vehicleId ?? vehicleId, fromLocationId, toLocationId, fromLocationLabel, toLocationLabel, movementType: type, movementDate, notes: JSON.stringify({ notes: movementNotes, snapshot, fromLocationId, toLocationId, fromLocationLabel, toLocationLabel }), actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: movementDate });
+    enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'VehicleMovement', action: 'create', recordId: movement.id, payload: { name: `${type} ${vehicleId}`, vehicleId, vehicleName: vehicle?.vehicleId ?? vehicleId, fromLocationId, toLocationId, fromLocationLabel, toLocationLabel, movementType: type, movementDate, notes: JSON.stringify({ notes: movementNotes, snapshot, fromLocationId, toLocationId, fromLocationLabel, toLocationLabel }), actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: movementDate });
   };
 
   const handleAssign = (targetBayId?: string, toUnassignedBay = false, xParkingOccupant?: XParkingOccupant, submittedVehicle: VehicleFormData = assignmentVehicle): boolean => {
@@ -401,7 +403,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       return false;
     }
     const normalized = validation.value.plateNumber;
-    const vehicleId = existing?.id ?? `veh-${crypto.randomUUID()}`;
+    const vehicleId = existing?.id ?? `veh-${createUUID()}`;
     if (parkingRecordKey(existing?.currentLocationId)) { toast.error('Vehicle already has an active parking assignment.'); return false; }
     if (toUnassignedBay && existing && !existing.currentLocationId && existing.status !== 'Released' && existing.status !== 'Delivered') { toast.error('Vehicle is already in the Unassigned Bay tray.'); return false; }
     const assignedAt = new Date().toISOString();
@@ -440,7 +442,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       setLocations(nextLocations);
       addMovement(vehicleId, existing?.currentLocationId, location.id, 'Assign');
     }
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: existing ? 'update' : 'create', recordId: vehicleId, payload: { vehicleName: existing?.vehicleId ?? assignedVehicle.vehicleId, plateNumber: normalized, vin: validation.value.vin, brand: validation.value.brand, model: validation.value.model, color: validation.value.color, locationId: location?.id ?? '', ownerId: queueOwnerId, ownerName: validation.value.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
+    enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: existing ? 'update' : 'create', recordId: vehicleId, payload: { vehicleName: existing?.vehicleId ?? assignedVehicle.vehicleId, plateNumber: normalized, vin: validation.value.vin, brand: validation.value.brand, model: validation.value.model, color: validation.value.color, locationId: location?.id ?? '', ownerId: queueOwnerId, ownerName: validation.value.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
     toast.success(`${normalized} assigned to ${destinationLabel}.`);
     playSound('success');
     setBayId(''); setAssignmentVehicle(emptyVehicleForm); setNotes('');
@@ -458,7 +460,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === vehicle.id ? { ...item, status: 'Released', operationalStatus: 'Checked Out', currentLocationId: undefined } : item));
     setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => parkingRecordKey(item.id) === previous ? { ...item, status: activeVehicles.some((candidate: Vehicle) => candidate.id !== vehicle.id && candidate.xParking !== 'Yes' && parkingRecordKey(candidate.currentLocationId) === previous) ? 'Occupied' : 'Available' } : item));
     addMovement(vehicle.id, vehicle.currentLocationId, undefined, 'Release');
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicle.id, payload: { locationId: '', actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: new Date().toISOString() });
+    enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicle.id, payload: { locationId: '', actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: new Date().toISOString() });
     logAudit('Release', 'Vehicle', `${vehicle.plateNumber} from ${locationLabel(previous)}`, { ...vehicle, status: 'Released', operationalStatus: 'Checked Out', currentLocationId: undefined }, vehicle.currentLocationId, undefined);
     toast.success(`${vehicle.plateNumber} released.`);
     if (navigator.onLine) void sync(false);
@@ -509,7 +511,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     }
     setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === vehicle.id ? updatedVehicle : item));
     addMovement(vehicle.id, previous, target.id, 'Transfer', movementNotes);
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicle.id, payload: { locationId: target.id, actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: transferredAt });
+    enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicle.id, payload: { locationId: target.id, actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: transferredAt });
     logAudit('Transfer', 'Vehicle', `${vehicle.plateNumber}: ${locationLabel(previous)} → ${target.zone}-${target.bayNumber}`, updatedVehicle, previous, target.id);
     toast.success('Vehicle transferred.');
     playSound('general');
@@ -550,7 +552,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     if (!vehicle) return toast.error('This vehicle is not in the Delivered Archive.');
     const recoveredVehicle: Vehicle = { ...vehicle, status: 'Released', operationalStatus: 'Checked Out', currentLocationId: undefined, deliveredAt: undefined, deliveredBy: undefined, finalParkingBay: undefined, checkOutAt: undefined };
     setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === vehicleId ? recoveredVehicle : item));
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicleId, payload: { vehicleName: vehicle.vehicleId, plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, locationId: '', ownerId: queueOwnerId, ownerName: vehicle.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
+    enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicleId, payload: { vehicleName: vehicle.vehicleId, plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, locationId: '', ownerId: queueOwnerId, ownerName: vehicle.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
     logAudit('Restore', 'Vehicle', `${vehicle.plateNumber} recovered from Delivered Archive${reason ? ` · ${reason}` : ''}`, recoveredVehicle);
     toast.success(`${vehicle.plateNumber} recovered and is ready for reassignment.`);
     if (navigator.onLine) void sync(false);
@@ -596,9 +598,9 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       && Date.parse(item.reservationDate) < endTime && (item.endDate ? Date.parse(item.endDate) : Date.parse(item.reservationDate) + 3600000) > startTime)) {
       return toast.error('The bay already has a reservation during this time.');
     }
-    const reservation: Reservation = { id: `res-${crypto.randomUUID()}`, reservationId: `RS-${Date.now().toString().slice(-4)}`, vehicleId: selectedVehicleId, locationId: newLocationId, reservationDate: startDate, endDate, reservedBy: actor, status: 'Upcoming' };
+    const reservation: Reservation = { id: `res-${createUUID()}`, reservationId: `RS-${Date.now().toString().slice(-4)}`, vehicleId: selectedVehicleId, locationId: newLocationId, reservationDate: startDate, endDate, reservedBy: actor, status: 'Upcoming' };
     setReservations((current: Reservation[]) => [reservation, ...current]);
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Reservation', action: 'create', recordId: reservation.id, payload: { name: reservation.reservationId, vehicleId: selectedVehicleId, vehicleName: vehicle?.vehicleId ?? selectedVehicleId, locationId: newLocationId, startDate, endDate, actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: new Date().toISOString() });
+    enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'Reservation', action: 'create', recordId: reservation.id, payload: { name: reservation.reservationId, vehicleId: selectedVehicleId, vehicleName: vehicle?.vehicleId ?? selectedVehicleId, locationId: newLocationId, startDate, endDate, actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: new Date().toISOString() });
     if (vehicle) logAudit('Reservation', 'Vehicle', `${vehicle.plateNumber} → ${locationLabel(newLocationId)}`, { ...vehicle, operationalStatus: 'Reserved' }, vehicle.currentLocationId, newLocationId);
     toast.success('Parking bay reservation saved.');
     playSound('assignment');
@@ -949,7 +951,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     ? { ...selectedPhysicalBay, status: (selectedBayVehicle ? 'Occupied' : selectedMaintenance ? 'Maintenance' : selectedReservation ? 'Reserved' : 'Available') as ParkingLocation['status'] }
     : selectedPhysicalBay;
   const appendBayAudit = (bayIdValue: string, action: string, comments: string) => {
-    const entry: BayAuditEntry = { id: `bay-audit-${crypto.randomUUID()}`, bayId: bayIdValue, user: actor, role, timestamp: new Date().toISOString(), action, comments };
+    const entry: BayAuditEntry = { id: `bay-audit-${createUUID()}`, bayId: bayIdValue, user: actor, role, timestamp: new Date().toISOString(), action, comments };
     setBayManagement((current) => ({ ...current, audit: [entry, ...current.audit] }));
     const auditLocation = bayIdValue.startsWith('x-parking:') ? `X Parking beside ${locationLabel(bayIdValue.slice('x-parking:'.length))}` : locationLabel(bayIdValue);
     logAudit(action, 'Parking bay', `${auditLocation} · ${comments} · role ${role}`);
@@ -1080,7 +1082,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
 
     const updated = vehicle ? { ...vehicle, ...changes } : undefined;
     setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === vehicleId ? { ...item, ...changes } : item));
-    if (updated) enqueueSync({ id: crypto.randomUUID(), ownerId: actorId, entity: 'Vehicle', action: 'update', recordId: vehicleId, payload: { vehicleName: updated.vehicleId, plateNumber: updated.plateNumber, vin: updated.vin, brand: updated.brand, model: updated.model, color: updated.color, locationId: updated.currentLocationId ?? '', ownerId: actorId, ownerName: updated.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
+    if (updated) enqueueSync({ id: createUUID(), ownerId: actorId, entity: 'Vehicle', action: 'update', recordId: vehicleId, payload: { vehicleName: updated.vehicleId, plateNumber: updated.plateNumber, vin: updated.vin, brand: updated.brand, model: updated.model, color: updated.color, locationId: updated.currentLocationId ?? '', ownerId: actorId, ownerName: updated.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
     logAudit(auditAction, 'Vehicle', updated?.plateNumber ?? vehicleId);
   };
   const deleteVehicle = (vehicleId: string) => {
@@ -1633,12 +1635,12 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     const existingZone = garageLayout.find((item: GarageLayoutItem) => item.zone === zoneName && item.kind === 'zone');
     const baseOrder = garageLayout.filter((item: GarageLayoutItem) => item.zone !== zoneName).length + 1;
     const items: GarageLayoutItem[] = [
-      { id: existingZone?.id ?? `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'zone', direction: 'forward', facing: 'north', order: baseOrder, name: zoneNameDraft.trim() || `Zone ${zoneName}`, details: zoneDetailsDraft.trim() },
-      { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'bay-row', direction: 'forward', facing: 'north', order: baseOrder + 1 },
-      { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'divider', direction: 'forward', facing: 'north', order: baseOrder + 2 },
-      { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'bay-row', direction: 'forward', facing: 'south', order: baseOrder + 3 },
-      { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'road', direction: 'forward', facing: 'north', order: baseOrder + 4 },
-      { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'direction-marker', direction: 'forward', facing: 'north', order: baseOrder + 5 },
+      { id: existingZone?.id ?? `layout-${createUUID()}`, zone: zoneName, kind: 'zone', direction: 'forward', facing: 'north', order: baseOrder, name: zoneNameDraft.trim() || `Zone ${zoneName}`, details: zoneDetailsDraft.trim() },
+      { id: `layout-${createUUID()}`, zone: zoneName, kind: 'bay-row', direction: 'forward', facing: 'north', order: baseOrder + 1 },
+      { id: `layout-${createUUID()}`, zone: zoneName, kind: 'divider', direction: 'forward', facing: 'north', order: baseOrder + 2 },
+      { id: `layout-${createUUID()}`, zone: zoneName, kind: 'bay-row', direction: 'forward', facing: 'south', order: baseOrder + 3 },
+      { id: `layout-${createUUID()}`, zone: zoneName, kind: 'road', direction: 'forward', facing: 'north', order: baseOrder + 4 },
+      { id: `layout-${createUUID()}`, zone: zoneName, kind: 'direction-marker', direction: 'forward', facing: 'north', order: baseOrder + 5 },
     ];
     setGarageLayout((current: GarageLayoutItem[]) => [...current.filter((item: GarageLayoutItem) => item.zone !== zoneName), ...items]);
     logAudit('Layout', 'Parking map', `${existingZone || locations.some((item: ParkingLocation) => item.zone === zoneName) ? 'Updated' : 'Added'} complete Zone ${zoneName}`);
@@ -1657,7 +1659,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     setGarageLayout((current: GarageLayoutItem[]) => {
       const hasZoneItem = current.some((item: GarageLayoutItem) => item.zone === editingZoneCode && item.kind === 'zone');
       const updated = current.map((item: GarageLayoutItem) => item.zone === editingZoneCode ? { ...item, zone: nextCode, ...(item.kind === 'zone' ? { name: zoneNameDraft.trim(), details: zoneDetailsDraft.trim() } : {}) } : item);
-      return hasZoneItem ? updated : [{ id: `layout-${crypto.randomUUID()}`, zone: nextCode, kind: 'zone', direction: 'forward', facing: 'north', order: 0, name: zoneNameDraft.trim(), details: zoneDetailsDraft.trim() }, ...updated];
+      return hasZoneItem ? updated : [{ id: `layout-${createUUID()}`, zone: nextCode, kind: 'zone', direction: 'forward', facing: 'north', order: 0, name: zoneNameDraft.trim(), details: zoneDetailsDraft.trim() }, ...updated];
     });
     logAudit('Edit', 'Parking zone', `${editingZoneCode} → ${nextCode} · ${zoneNameDraft.trim()}`); setIsZoneEditorOpen(false); toast.success('Zone details updated.');
   };
@@ -1665,9 +1667,9 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     const zoneName = zoneCodeDraft.trim().toUpperCase();
     if (!zoneName || !zoneNameDraft.trim()) return toast.error('Zone code and name are required.');
     if (existingZoneCodes.includes(zoneName)) return toast.error(`Zone ${zoneName} already exists.`);
-    const newBay: ParkingLocation = { id: `loc-${crypto.randomUUID()}`, zone: zoneName, bayNumber: '1', lane: 'Top', section: 'Main', direction: 'Forward', capacity: 1, status: 'Available', remarks: '' };
+    const newBay: ParkingLocation = { id: `loc-${createUUID()}`, zone: zoneName, bayNumber: '1', lane: 'Top', section: 'Main', direction: 'Forward', capacity: 1, status: 'Available', remarks: '' };
     setLocations((current: ParkingLocation[]) => [...current, newBay]);
-    setGarageLayout((current: GarageLayoutItem[]) => [...current, { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'zone', direction: 'forward', facing: 'north', order: current.length + 1, name: zoneNameDraft.trim(), details: zoneDetailsDraft.trim() }, { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'bay-row', direction: 'forward', facing: 'north', order: current.length + 2 }, { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'road', direction: 'forward', facing: 'north', order: current.length + 3 }]);
+    setGarageLayout((current: GarageLayoutItem[]) => [...current, { id: `layout-${createUUID()}`, zone: zoneName, kind: 'zone', direction: 'forward', facing: 'north', order: current.length + 1, name: zoneNameDraft.trim(), details: zoneDetailsDraft.trim() }, { id: `layout-${createUUID()}`, zone: zoneName, kind: 'bay-row', direction: 'forward', facing: 'north', order: current.length + 2 }, { id: `layout-${createUUID()}`, zone: zoneName, kind: 'road', direction: 'forward', facing: 'north', order: current.length + 3 }]);
     logAudit('Create', 'Parking zone', `${zoneName} · ${zoneNameDraft.trim()}`); setIsZoneEditorOpen(false); toast.success(`Zone ${zoneName} added.`);
   };
   const addRowToZone = (zoneCode: string) => {
@@ -1675,8 +1677,8 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     const lane = zoneBays.some((item: ParkingLocation) => item.lane === 'Top') && !zoneBays.some((item: ParkingLocation) => item.lane === 'Bottom') ? 'Bottom' : zoneBays.length ? `Row ${Array.from(new Set(zoneBays.map((item: ParkingLocation) => item.lane))).length + 1}` : 'Top';
     const numericBays = zoneBays.map((item: ParkingLocation) => Number(item.bayNumber)).filter((value: number) => Number.isFinite(value));
     const nextNumber = numericBays.length ? Math.max(...numericBays) + 1 : 1;
-    setLocations((current: ParkingLocation[]) => [...current, { id: `loc-${crypto.randomUUID()}`, zone: zoneCode, bayNumber: String(nextNumber), lane, section: 'Main', direction: 'Forward', capacity: 1, status: 'Available', remarks: '' }]);
-    setGarageLayout((current: GarageLayoutItem[]) => [...current, { id: `layout-${crypto.randomUUID()}`, zone: zoneCode, kind: 'bay-row', direction: 'forward', facing: lane === 'Bottom' ? 'south' : 'north', order: current.length + 1 }]);
+    setLocations((current: ParkingLocation[]) => [...current, { id: `loc-${createUUID()}`, zone: zoneCode, bayNumber: String(nextNumber), lane, section: 'Main', direction: 'Forward', capacity: 1, status: 'Available', remarks: '' }]);
+    setGarageLayout((current: GarageLayoutItem[]) => [...current, { id: `layout-${createUUID()}`, zone: zoneCode, kind: 'bay-row', direction: 'forward', facing: lane === 'Bottom' ? 'south' : 'north', order: current.length + 1 }]);
     logAudit('Layout', 'Parking row', `Added ${lane} to Zone ${zoneCode}`); toast.success(`${lane} added with its first bay.`);
   };
   const removeRowFromZone = (zoneCode: string, lane: string) => {
@@ -1692,7 +1694,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     const zoneBays = locations.filter((item: ParkingLocation) => item.zone === zoneCode);
     const numericBays = zoneBays.map((item: ParkingLocation) => Number(item.bayNumber)).filter((value: number) => Number.isFinite(value));
     const nextNumber = numericBays.length ? Math.max(...numericBays) + 1 : 1;
-    setLocations((current: ParkingLocation[]) => [...current, { id: `loc-${crypto.randomUUID()}`, zone: zoneCode, bayNumber: String(nextNumber), lane, section: 'Main', direction: 'Forward', capacity: 1, status: 'Available', remarks: '' }]);
+    setLocations((current: ParkingLocation[]) => [...current, { id: `loc-${createUUID()}`, zone: zoneCode, bayNumber: String(nextNumber), lane, section: 'Main', direction: 'Forward', capacity: 1, status: 'Available', remarks: '' }]);
     logAudit('Create', 'Parking bay', `${zoneCode}-${nextNumber} · ${lane}`); toast.success(`Bay ${zoneCode}-${nextNumber} added.`);
   };
   const removeZone = (zoneCode: string) => {
@@ -1718,7 +1720,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     const zoneName = layoutZone.trim().toUpperCase();
     if (!zoneName) return toast.error('Choose a zone for this layout item.');
     if (kind === 'divider' && garageLayout.some((item: GarageLayoutItem) => item.zone === zoneName && item.kind === 'divider')) return toast.error(`Zone ${zoneName} already has a divider.`);
-    setGarageLayout((current: GarageLayoutItem[]) => [...current, { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind, direction: 'forward', facing: 'north', order: current.length + 1, name: kind === 'zone' ? zoneNameDraft.trim() || `Zone ${zoneName}` : undefined, details: kind === 'zone' ? zoneDetailsDraft.trim() : undefined }]);
+    setGarageLayout((current: GarageLayoutItem[]) => [...current, { id: `layout-${createUUID()}`, zone: zoneName, kind, direction: 'forward', facing: 'north', order: current.length + 1, name: kind === 'zone' ? zoneNameDraft.trim() || `Zone ${zoneName}` : undefined, details: kind === 'zone' ? zoneDetailsDraft.trim() : undefined }]);
     logAudit('Layout', 'Parking map', `Added ${kind} to Zone ${zoneName}`);
   };
   const updateZoneDetails = (itemId: string, changes: Pick<GarageLayoutItem, 'name' | 'details'>) => {
