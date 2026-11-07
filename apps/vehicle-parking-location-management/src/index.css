@@ -1466,3 +1466,13 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
 .road-test-pocket.is-expanded .road-test-wallet-card img { height: 100%; }
 @media (max-width: 639px) { .road-test-pocket.is-expanded .road-test-pocket-stack { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { .road-test-wallet-card { transition: none; } }
+
+/* Road Test reference fan: keep cards large enough to see on narrow screens. */
+.road-test-pocket { min-height: 19rem; }
+.road-test-pocket-stage { height: 14.5rem; }
+.road-test-wallet-card { width: clamp(8rem, 46%, 13rem); height: 13rem; transform: translateX(calc(-50% + var(--fan-offset) * 62%)) translateY(calc(var(--fan-depth) * .85rem)) rotate(calc(var(--fan-offset) * 10deg)) scale(calc(1 - var(--fan-depth) * .08)); }
+.road-test-pocket.is-expanded .road-test-wallet-card { width: 100%; height: 12rem; transform: none; }
+@media (max-width: 480px) {
+  .road-test-pocket-stage { height: 14rem; }
+  .road-test-wallet-card { width: 47%; height: 12.5rem; }
+}
