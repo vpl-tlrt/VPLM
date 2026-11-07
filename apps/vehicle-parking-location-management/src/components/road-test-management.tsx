@@ -302,7 +302,7 @@ export function RoadTestManagement({ vehicles, locations, actor, actorRole, user
   ];
   return <div className="space-y-6">
     <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="technical-label">Technical leader workspace</p><h2 className="text-2xl font-black">Road Test Management</h2><p className="text-sm text-muted-foreground">Assign, monitor, approve, and report every vehicle road test.</p></div><div className="flex gap-2"><Button variant="outline" onClick={() => download('print')}><Download />PDF</Button><Button onClick={() => download('csv')}><Download />Excel</Button>{isAdministrator && <Button variant="outline" onClick={downloadAdminData}><Download />Download data</Button>}</div></div>
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="grid gap-4 md:grid-cols-2">
       {kpiPockets.map((pocket: { label: string; tests: RoadTestRecord[] }) => <RoadTestKpiPocket key={pocket.label} label={pocket.label} tests={pocket.tests} vehicles={vehicles} expanded={expandedKpi === pocket.label} onToggle={() => setExpandedKpi((current: string | undefined) => current === pocket.label ? undefined : pocket.label)} onOpen={(test: RoadTestRecord) => { setActive(test); setMode('view'); }} />)}
       <Card><CardContent className="flex h-full min-h-40 items-center justify-between p-4"><div><p className="text-sm text-muted-foreground">Average duration</p><p className="text-2xl font-bold">{average}m</p></div><div className="rounded-lg bg-primary p-2 text-primary-foreground"><History /></div></CardContent></Card>
     </div>
