@@ -555,6 +555,17 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setScreen('assignment');
     return true;
   };
+  const assignFromAssistant = (plateNumber: string, targetBayId: string): boolean => {
+    if (!canAssignVehicle) return false;
+    const normalizedPlate = plateNumber.trim().toUpperCase();
+    const existing = activeVehicles.find((item: Vehicle) => item.plateNumber.trim().toUpperCase() === normalizedPlate);
+    if (existing?.currentLocationId) return false;
+    const draft: VehicleFormData = existing
+      ? { plateNumber: existing.plateNumber, vin: existing.vin, brand: existing.brand, model: existing.model, color: existing.color, customerName: existing.customerName, driverOwner: existing.driverOwner, department: existing.department, xParking: existing.xParking ?? 'No' }
+      : { ...emptyVehicleForm, plateNumber: normalizedPlate };
+    // Use the same validation, occupancy checks, audit and persistence as manual Assign.
+    return handleAssign(targetBayId, false, undefined, draft);
+  };
   const handleRoadTestLocationChange = (vehicleId: string, fromId: string | undefined, toId: string | undefined, out: boolean) => {
     const vehicle = vehicles.find((item: Vehicle) => item.id === vehicleId);
     const updatedVehicle = vehicle ? { ...vehicle, currentLocationId: toId, operationalStatus: out ? 'Checked Out' as const : 'Parked' as const, status: out ? 'Released' as const : 'Assigned' as const } : undefined;
@@ -800,7 +811,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
       <WorkspaceRecoveryReview userId={user?.objectId} open={recoveryReviewOpen} onOpenChange={setRecoveryReviewOpen} onKeepCloudReviewed={keepCloudAfterReview} />
-      {!localGuest && <AiAssistant launcherVisible={aiLauncherVisible} open={aiOpen} onOpenChange={setAiOpen} vehicles={vehicles} movements={movements} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} locationLabel={locationLabel} onAssign={openAssistantAssignment} onTransfer={transferVehicleById} />}
+      {!localGuest && <AiAssistant launcherVisible={aiLauncherVisible} open={aiOpen} onOpenChange={setAiOpen} vehicles={vehicles} movements={movements} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} locationLabel={locationLabel} onAssign={openAssistantAssignment} onAssignToBay={assignFromAssistant} onTransfer={transferVehicleById} />}
     </div>
   );
   return appShell;
