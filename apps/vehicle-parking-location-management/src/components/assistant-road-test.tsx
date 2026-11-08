@@ -1,4 +1,4 @@
-import { useImperativeHandle, useState, type Ref } from 'react';
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { Button } from '@/components/ui/button';
 import { parkingRecordKey, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import {
@@ -10,6 +10,7 @@ export type RoadTestChatHandle = { answer: (message: string) => void; assign: ()
 type Props = {
   ref: Ref<RoadTestChatHandle>;
   initialVehicleId?: string;
+  autoAssign?: boolean;
   resumeId?: string;
   canCreate: boolean;
   findOwnRunningTest: (vehicle: Vehicle) => ReturnType<typeof loadRoadTests>[number] | undefined;
@@ -23,7 +24,7 @@ type Props = {
   onClose: (message?: string) => void;
 };
 
-export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, findOwnRunningTest, userId, onMessage, type, vehicles, locations, actor, onLocationChange, onClose }: Props) {
+export function AssistantRoadTest({ ref, initialVehicleId, autoAssign, resumeId, canCreate, findOwnRunningTest, userId, onMessage, type, vehicles, locations, actor, onLocationChange, onClose }: Props) {
   const [selected, setSelected] = useState(initialVehicleId ?? '');
   const [step, setStep] = useState<'select' | 'completed' | 'parking'>(resumeId ? 'completed' : 'select');
   const [zone, setZone] = useState('');
@@ -64,6 +65,12 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
     onClose(`${type} assigned to ${actor} for ${target.plateNumber} with Normal priority. Status: Assigned (not started).`);
   };
 
+  const autoAssigned = useRef(false);
+  useEffect(() => {
+    if (!autoAssign || !initialVehicleId || autoAssigned.current) return;
+    autoAssigned.current = true;
+    assign();
+  }, [autoAssign, initialVehicleId]);
   const save = (finish: boolean) => {
     const tests = loadRoadTests();
     if (!vehicle) return setError('Enter a registered vehicle number.');
