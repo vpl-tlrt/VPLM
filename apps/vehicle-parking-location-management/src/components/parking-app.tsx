@@ -1228,7 +1228,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                             setDraggedVehicleId(undefined);
                           }}
                           onClick={() => {
-                            if (onQuickTap(`x:${bay.id}`, xVehicle?.id)) return;
+                            
                             setSelectedBayId(undefined);
                             if (xVehicle) { setSelectedXParkingBayId(undefined); setOverviewVehicleId(xVehicle.id); }
                             else { setOverviewVehicleId(undefined); setSelectedXParkingBayId(bay.id); }
