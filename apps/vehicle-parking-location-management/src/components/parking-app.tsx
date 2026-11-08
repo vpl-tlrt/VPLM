@@ -754,7 +754,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           }} readOnly={guestPreview} vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} hasUnsyncedChanges={Boolean(pendingChanges || syncState === 'syncing' || syncState === 'error')} />}
           {screen === 'road-tests' && canAccessRoadTests && <RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} actorRole={role} canCreateAssignment canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} isAdministrator={isAdministrator} initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} /> }
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
-          {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage} canEditVehicle={canEditVehicle} canTransferVehicle={canTransferVehicle} canAssignVehicle={canAssignVehicle} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} assignSelectedBay={(selectedBayId?: string, vehicleForm?: VehicleFormData) => handleAssign(selectedBayId, false, undefined, vehicleForm)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
+          {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage} canEditVehicle={canEditVehicle} canTransferVehicle={canTransferVehicle} canAssignVehicle={canAssignVehicle} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onQuickTransfer={(vehicleId: string, destinationId: string) => { setSelectedVehicleId(vehicleId); setNewLocationId(destinationId); setNotes(''); setScreen('transfer'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} assignSelectedBay={(selectedBayId?: string, vehicleForm?: VehicleFormData) => handleAssign(selectedBayId, false, undefined, vehicleForm)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
           {screen === 'assignment' && canManage && <div className="mb-3 flex justify-end"><Button variant="outline" onClick={exportVehicleBayData}><Download /> Download all vehicle / bay data</Button></div>}
           {screen === 'assignment' && <Assignment assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} zone={zone} setZone={setZone} bayId={bayId} setBayId={setBayId} availableBays={availableBays} locations={locations} vehicles={activeVehicles} zoneNames={zoneNames} handleAssign={(targetBayId?: string, occupant?: XParkingOccupant) => handleAssign(targetBayId, zone === 'Unassigned Bay', occupant)} handleAssignUnassigned={() => handleAssign(undefined, true)} handleRelease={handleRelease} handleOcr={handleOcr} fileRef={fileRef} />}
           {screen === 'search' && <SearchScreen onRecoverDeliveredVehicle={canRecoverDeliveredVehicle ? recoverDeliveredVehicle : undefined} archiveOnSearchMiss={role === 'TechnicalLeader' || role === 'TechnicalAdvisor' || role === 'Drivers' || role === 'Technician'} query={searchQuery} setQuery={setSearchQuery} result={searchQuery ? searchResult : undefined} locationLabel={locationLabel} locations={locations} vehicles={vehicles} movements={movements} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} />}
@@ -831,11 +831,45 @@ function TopViewCar({ vehicle, roadTest, xParked = false, onSelect }: { vehicle:
   );
 }
 
-function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, zoneStats, occupied, available, reserved, utilization, locationLabel, actor, actorId, role, addMovement, canManage, canEditVehicle, canTransferVehicle, canAssignVehicle, canAccessRoadTests, logAudit, garageLayout, focusedVehicleId, onFocusedVehicleHandled, onOpenRoadTests, onAssignUnassignedVehicle, assignSelectedBay, assignmentVehicle, setAssignmentVehicle }: { locations: ParkingLocation[]; setLocations: React.Dispatch<React.SetStateAction<ParkingLocation[]>>; movements: Movement[]; vehicles: Vehicle[]; setVehicles: React.Dispatch<React.SetStateAction<Vehicle[]>>; zoneStats: { zone: string; total: number; available: number; percent: number; state: string }[]; occupied: number; available: number; reserved: number; utilization: number; locationLabel: (id?: string) => string; actor: string; actorId: string; role: Role; addMovement: (vehicleId: string, fromLocationId: string | undefined, toLocationId: string | undefined, type: Movement['movementType']) => void; canManage: boolean; canEditVehicle: boolean; canTransferVehicle: boolean; canAssignVehicle: boolean; canAccessRoadTests: boolean; logAudit: (action: string, entity: string, detail: string) => void; garageLayout: GarageLayoutItem[]; focusedVehicleId?: string; onFocusedVehicleHandled: () => void; onOpenRoadTests: (vehicleId?: string) => void; onAssignUnassignedVehicle: (vehicle: Vehicle) => void; assignSelectedBay: (bayId?: string, vehicleForm?: VehicleFormData) => boolean; assignmentVehicle: VehicleFormData; setAssignmentVehicle: React.Dispatch<React.SetStateAction<VehicleFormData>> }) {
+function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, zoneStats, occupied, available, reserved, utilization, locationLabel, actor, actorId, role, addMovement, canManage, canEditVehicle, canTransferVehicle, canAssignVehicle, canAccessRoadTests, logAudit, garageLayout, focusedVehicleId, onFocusedVehicleHandled, onOpenRoadTests, onQuickTransfer, onAssignUnassignedVehicle, assignSelectedBay, assignmentVehicle, setAssignmentVehicle }: { locations: ParkingLocation[]; setLocations: React.Dispatch<React.SetStateAction<ParkingLocation[]>>; movements: Movement[]; vehicles: Vehicle[]; setVehicles: React.Dispatch<React.SetStateAction<Vehicle[]>>; zoneStats: { zone: string; total: number; available: number; percent: number; state: string }[]; occupied: number; available: number; reserved: number; utilization: number; locationLabel: (id?: string) => string; actor: string; actorId: string; role: Role; addMovement: (vehicleId: string, fromLocationId: string | undefined, toLocationId: string | undefined, type: Movement['movementType']) => void; canManage: boolean; canEditVehicle: boolean; canTransferVehicle: boolean; canAssignVehicle: boolean; canAccessRoadTests: boolean; logAudit: (action: string, entity: string, detail: string) => void; garageLayout: GarageLayoutItem[]; focusedVehicleId?: string; onFocusedVehicleHandled: () => void; onOpenRoadTests: (vehicleId?: string) => void; onQuickTransfer: (vehicleId: string, destinationId: string) => void; onAssignUnassignedVehicle: (vehicle: Vehicle) => void; assignSelectedBay: (bayId?: string, vehicleForm?: VehicleFormData) => boolean; assignmentVehicle: VehicleFormData; setAssignmentVehicle: React.Dispatch<React.SetStateAction<VehicleFormData>> }) {
   const [selectedBayId, setSelectedBayId] = useState<string>();
   const [selectedXParkingBayId, setSelectedXParkingBayId] = useState<string>();
   const [overviewVehicleId, setOverviewVehicleId] = useState<string>();
   const [draggedVehicleId, setDraggedVehicleId] = useState<string>();
+  // Triple-tap only stages a transfer. The existing Transfer screen remains
+  // responsible for confirmation, permission checks, and business validation.
+  const [quickTransferVehicleId, setQuickTransferVehicleId] = useState<string>();
+  const quickTap = useRef<{ key: string; count: number; at: number }>({ key: '', count: 0, at: 0 });
+  useEffect(() => {
+    if (!quickTransferVehicleId) return;
+    const timeout = window.setTimeout(() => setQuickTransferVehicleId(undefined), 30_000);
+    return () => window.clearTimeout(timeout);
+  }, [quickTransferVehicleId]);
+  const onQuickTap = (key: string, vehicleId?: string, destinationId?: string) => {
+    if (!canTransferVehicle) return false;
+    const now = Date.now();
+    const previous = quickTap.current;
+    const count = previous.key === key && now - previous.at <= 450 ? previous.count + 1 : 1;
+    quickTap.current = { key, count, at: now };
+    if (count < 3) return false;
+    quickTap.current = { key: '', count: 0, at: 0 };
+    if (vehicleId) {
+      setQuickTransferVehicleId(vehicleId);
+      toast.info('Vehicle selected for Quick Transfer. Triple-tap an available destination within 30 seconds.');
+    } else if (destinationId && quickTransferVehicleId) {
+      const source = vehicles.find(item => item.id === quickTransferVehicleId);
+      const destination = locations.find(item => item.id === destinationId);
+      if (!source || !source.currentLocationId || !destination || source.currentLocationId === destinationId ||
+          destination.status === 'Reserved' || destination.status === 'Maintenance' ||
+          vehicles.some(item => item.status !== 'Delivered' && item.xParking !== 'Yes' && parkingRecordKey(item.currentLocationId) === parkingRecordKey(destinationId))) {
+        toast.error('Destination unavailable. Select another available bay.');
+        return true;
+      }
+      setQuickTransferVehicleId(undefined);
+      onQuickTransfer(source.id, destinationId);
+    }
+    return true;
+  };
   const [garageZoneFilter, setGarageZoneFilter] = useState('all');
   const [openedParkingZone, setOpenedParkingZone] = useState<string | null>(null);
   const [showOtherParkingAreas, setShowOtherParkingAreas] = useState(false);
@@ -1199,6 +1233,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                             setDraggedVehicleId(undefined);
                           }}
                           onClick={() => {
+                            if (onQuickTap(`x:${bay.id}`, xVehicle?.id)) return;
                             setSelectedBayId(undefined);
                             if (xVehicle) { setSelectedXParkingBayId(undefined); setOverviewVehicleId(xVehicle.id); }
                             else { setOverviewVehicleId(undefined); setSelectedXParkingBayId(bay.id); }
@@ -1228,7 +1263,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         onDragEnd={() => setDraggedVehicleId(undefined)}
                         onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()}
                         onDrop={() => { if (draggedVehicleId && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(draggedVehicleId, bay.id); setDraggedVehicleId(undefined); }}
-                        onClick={() => { setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }}
+                        onClick={() => { if (onQuickTap(`bay:${bay.id}`, displayVehicle?.id, displayVehicle ? undefined : bay.id)) return; setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }}
                         className={`vplm-bay-chip ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`}
                         aria-label={`${isLiveGarageContainer(bay) ? 'Container' : 'Bay ' + bay.bayNumber}, ${zoneDisplayName(bay.zone)}, ${displayStatus}${vehicle ? `, vehicle ${vehicle.plateNumber}` : ''}${xParkingVehicle ? `, X-Parked vehicle ${xParkingVehicle.plateNumber}` : ''}`}>
                         <span className="vplm-bay-chip-head"><strong>{isLiveGarageContainer(bay) ? bay.zone : `${bay.zone === 'Reception' ? 'R ' : bay.zone === 'Workshop' ? 'W ' : bay.zone}-${bay.bayNumber}`}</strong><span className="vplm-bay-chip-state">{displayStatus === 'Available' ? 'Vacant' : displayStatus}</span></span>
