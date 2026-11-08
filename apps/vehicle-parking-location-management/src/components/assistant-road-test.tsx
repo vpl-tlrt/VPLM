@@ -28,7 +28,7 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
   const [step, setStep] = useState<'select' | 'completed' | 'parking'>(resumeId ? 'completed' : 'select');
   const [zone, setZone] = useState('');
   const [bay, setBay] = useState('');
-  const [result, setResult] = useState<RoadTestResult>('Pass');
+  const [result, setResult] = useState<RoadTestResult | undefined>('Pass');
   const [error, setError] = useState('');
   const pending = loadRoadTests().filter(test => (test.testType ?? 'Initial Road Test') === type && test.status === 'Assigned');
   const taskVehicles = pending.flatMap(task => {
