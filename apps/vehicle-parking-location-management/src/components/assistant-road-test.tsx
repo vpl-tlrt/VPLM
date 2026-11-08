@@ -186,7 +186,7 @@ export function AssistantRoadTest({ ref, initialVehicleId, autoAssign, resumeId,
     },
   }));
 
-  return <div className="space-y-3 rounded-lg border p-3 text-sm">
+  return <div className="min-w-0 max-w-full space-y-3 overflow-x-hidden rounded-lg border p-3 text-sm">
     <div className="flex items-center justify-between gap-2"><strong>{type}</strong><Button size="sm" variant="ghost" onClick={() => onClose()}>Close</Button></div>
     {step === 'select' && <>
       <p>{pending.length} pending road test {pending.length === 1 ? 'task' : 'tasks'}</p>
@@ -207,13 +207,13 @@ export function AssistantRoadTest({ ref, initialVehicleId, autoAssign, resumeId,
       <div className="flex gap-2"><Button size="sm" onClick={finishPrompt}>Finish RT</Button><Button size="sm" variant="outline" onClick={() => onClose('Road test remains in progress. You can finish it from Road Tests.')}>No</Button></div>
     </>}
     {step === 'parking' && <>
-      <label className="grid gap-1">Final parking zone<select className="rounded border bg-background p-2" value={zone} onChange={event => { setZone(event.target.value); setBay(''); }}>
+      <label className="grid min-w-0 gap-1">Final parking zone<select className="w-full min-w-0 rounded border bg-background p-2" value={zone} onChange={event => { setZone(event.target.value); setBay(''); }}>
         <option value="">Select zone</option>{[...new Set(available.map(item => item.zone))].map(item => <option key={item}>{item}</option>)}
       </select></label>
-      <label className="grid gap-1">Final bay number<select className="rounded border bg-background p-2" disabled={!zone} value={bay} onChange={event => setBay(event.target.value)}>
+      <label className="grid min-w-0 gap-1">Final bay number<select className="w-full min-w-0 rounded border bg-background p-2" disabled={!zone} value={bay} onChange={event => setBay(event.target.value)}>
         <option value="">Select bay</option>{available.filter(item => item.zone === zone).map(item => <option key={item.id} value={item.id}>{item.bayNumber || item.zone}</option>)}
       </select></label>
-      <label className="grid gap-1">Road test result<select className="rounded border bg-background p-2" value={result ?? ''} onChange={event => setResult((event.target.value || undefined) as RoadTestResult | undefined)}>
+      <label className="grid min-w-0 gap-1">Road test result<select className="w-full min-w-0 rounded border bg-background p-2" value={result ?? ''} onChange={event => setResult((event.target.value || undefined) as RoadTestResult | undefined)}>
         <option value="">Select result</option><option>Pass</option><option>Fail</option>
       </select></label>
       <Button size="sm" disabled={!bay || !result} onClick={() => save(true)}>Finish road test</Button>
