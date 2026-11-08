@@ -6,7 +6,7 @@ import {
   roadTestLocationLabel, saveRoadTestData, startRoadTestRecord, type RoadTestResult, type RoadTestType,
 } from '@/lib/road-test-data';
 
-export type RoadTestChatHandle = { answer: (message: string) => void };
+export type RoadTestChatHandle = { answer: (message: string) => void; assign: () => void };
 type Props = {
   ref: Ref<RoadTestChatHandle>;
   initialVehicleId?: string;
@@ -40,6 +40,30 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
   const vehicle = vehicles.find(item => item.id === (test?.vehicleId ?? selected) && item.status !== 'Delivered');
   const available = locations.filter(location => location.status !== 'Reserved' && location.status !== 'Maintenance'
     && !vehicles.some(item => parkingRecordKey(item.currentLocationId) === parkingRecordKey(location.id)));
+  const assign = () => {
+    const target = vehicles.find(item => item.id === selected && item.status !== 'Delivered');
+    if (!target) return setError('Enter a registered active vehicle number.');
+    if (!canCreate) return setError('You do not have permission to assign a road test.');
+    const tests = loadRoadTests();
+    if (tests.some(item => item.vehicleId === target.id && (item.status === 'Assigned' || item.status === 'In Road Test'))) {
+      return setError('This vehicle already has an assigned or ongoing road test. Open the existing task instead.');
+    }
+    const timestamp = new Date().toISOString();
+    const assignment = {
+      id: `rt-${crypto.randomUUID()}`, vehicleId: target.id, jobCardNumber: '',
+      purpose: 'Road test assigned through VPLM AI', assignedBy: actor,
+      assignedTo: actor, priority: 'Normal' as const, testType: type,
+      remarks: '', assignmentTimestamp: timestamp, status: 'Assigned' as const,
+      furtherActionRequired: false, approved: false, immutable: false,
+    };
+    saveRoadTestData([assignment, ...tests], [{
+      id: crypto.randomUUID(), roadTestId: assignment.id, vehicleId: target.id,
+      actor, timestamp, action: 'Assigned', detail: `${type} assigned with default values through VPLM AI.`,
+    }, ...loadRoadTestAudit()], loadRoadTestNotifications());
+    setError('');
+    onClose(`${type} assigned to ${actor} for ${target.plateNumber} with Normal priority. Status: Assigned (not started).`);
+  };
+
   const save = (finish: boolean) => {
     const tests = loadRoadTests();
     if (!vehicle) return setError('Enter a registered vehicle number.');
@@ -99,6 +123,7 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
     onMessage('Where did you park the vehicle? Enter a zone and bay, for example Workshop-12. Result defaults to Pass; type Fail if the test failed. Then type Finish to confirm.');
   };
   useImperativeHandle(ref, () => ({
+    assign,
     answer(message) {
       const value = message.trim();
       const key = value.toLowerCase();
@@ -108,6 +133,7 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
       }
       setError('');
       if (step === 'select') {
+        if (/^(assign|assign task|assign road test)$/.test(key)) return assign();
         if (/^(yes|y|start)$/.test(key)) return save(false);
         const plateKey = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, '');
         const matches = vehicles.filter(item => item.status !== 'Delivered' && plateKey(item.plateNumber) === plateKey(value));
@@ -164,7 +190,7 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
       {vehicle && <>
         <p>Model: {vehicle.model || '—'} · Colour: {vehicle.color || '—'} · Current bay: {roadTestLocationLabel(vehicle.currentLocationId, locations)}</p>
         <p>{pending.some(item => item.vehicleId === vehicle.id) ? 'Are you going for an RT?' : canCreate ? 'Are you going for an RT?' : 'This vehicle has no pending task of this type.'}</p>
-        <div className="flex gap-2"><Button size="sm" disabled={!canCreate && !pending.some(item => item.vehicleId === vehicle.id)} onClick={() => save(false)}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose()}>No</Button></div>
+        <div className="flex flex-wrap gap-2"><Button size="sm" disabled={!canCreate} onClick={assign}>Assign RT</Button><Button size="sm" disabled={!canCreate && !pending.some(item => item.vehicleId === vehicle.id)} onClick={() => save(false)}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose()}>No</Button></div>
       </>}
     </>}
     {step === 'completed' && <>
