@@ -839,37 +839,32 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   // Triple-tap only stages a transfer. The existing Transfer screen remains
   // responsible for confirmation, permission checks, and business validation.
   const [quickTransferVehicleId, setQuickTransferVehicleId] = useState<string>();
-  const quickTap = useRef<{ key: string; count: number; at: number }>({ key: '', count: 0, at: 0 });
-  useEffect(() => {
-    if (!quickTransferVehicleId) return;
-    const timeout = window.setTimeout(() => setQuickTransferVehicleId(undefined), 30_000);
-    return () => window.clearTimeout(timeout);
-  }, [quickTransferVehicleId]);
-  const onQuickTap = (key: string, vehicleId?: string, destinationId?: string) => {
-    if (!canTransferVehicle) return false;
-    const now = Date.now();
-    const previous = quickTap.current;
-    const count = previous.key === key && now - previous.at <= 450 ? previous.count + 1 : 1;
-    quickTap.current = { key, count, at: now };
-    if (count < 3) return false;
-    quickTap.current = { key: '', count: 0, at: 0 };
-    if (vehicleId) {
-      setQuickTransferVehicleId(vehicleId);
-      toast.info('Vehicle selected for Quick Transfer. Triple-tap an available destination within 30 seconds.');
-    } else if (destinationId && quickTransferVehicleId) {
-      const source = vehicles.find(item => item.id === quickTransferVehicleId);
-      const destination = locations.find(item => item.id === destinationId);
-      if (!source || !source.currentLocationId || !destination || source.currentLocationId === destinationId ||
-          destination.status === 'Reserved' || destination.status === 'Maintenance' ||
-          vehicles.some(item => item.status !== 'Delivered' && item.xParking !== 'Yes' && parkingRecordKey(item.currentLocationId) === parkingRecordKey(destinationId))) {
-        toast.error('Destination unavailable. Select another available bay.');
-        return true;
-      }
-      setQuickTransferVehicleId(undefined);
-      onQuickTransfer(source.id, destinationId);
-    }
-    return true;
-  };
+  const holdTimer = useRef<number | undefined>(undefined);
+  const holdOrigin = useRef<{x:number;y:number}>();
+  const holdTriggered = useRef(false);
+  const cancelHold = () => { window.clearTimeout(holdTimer.current); holdTimer.current = undefined; holdOrigin.current = undefined; };
+  useEffect(() => () => cancelHold(), []);
+  useEffect(() => { if (!quickTransferVehicleId) return; const id = window.setTimeout(() => setQuickTransferVehicleId(undefined), 300000); return () => window.clearTimeout(id); }, [quickTransferVehicleId]);
+  const holdProps = (vehicleId?: string, destinationId?: string) => ({
+    onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
+      cancelHold();
+      if (!canTransferVehicle || (!vehicleId && !quickTransferVehicleId) || !e.isPrimary || e.button !== 0) return;
+      holdTriggered.current = false;
+      holdOrigin.current = {x:e.clientX,y:e.clientY};
+      holdTimer.current = window.setTimeout(() => {
+        holdTimer.current = undefined; holdTriggered.current = true;
+        if (vehicleId) { setQuickTransferVehicleId(vehicleId); toast.info('Vehicle selected. Navigate to another zone and hold an empty bay for 20 seconds. Expires in 5 minutes.'); return; }
+        if (!destinationId || !quickTransferVehicleId) return;
+        const source = vehicles.find(v => v.id === quickTransferVehicleId);
+        const dest = locations.find(l => l.id === destinationId);
+        if (!source || !source.currentLocationId || !dest || source.currentLocationId === destinationId || dest.status === 'Reserved' || dest.status === 'Maintenance' || vehicles.some(v => v.status !== 'Delivered' && v.xParking !== 'Yes' && parkingRecordKey(v.currentLocationId) === parkingRecordKey(destinationId))) { toast.error('Destination unavailable.'); return; }
+        setQuickTransferVehicleId(undefined); onQuickTransfer(source.id, destinationId);
+      }, 20000);
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => { if (holdOrigin.current && Math.hypot(e.clientX-holdOrigin.current.x,e.clientY-holdOrigin.current.y)>12) cancelHold(); },
+    onPointerUp: cancelHold, onPointerCancel: cancelHold, onDragStartCapture: cancelHold,
+    onContextMenu: (e: React.MouseEvent<HTMLButtonElement>) => { if (holdTimer.current !== undefined) e.preventDefault(); },
+  });
   const [garageZoneFilter, setGarageZoneFilter] = useState('all');
   const [openedParkingZone, setOpenedParkingZone] = useState<string | null>(null);
   const [showOtherParkingAreas, setShowOtherParkingAreas] = useState(false);
@@ -1263,7 +1258,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         onDragEnd={() => setDraggedVehicleId(undefined)}
                         onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()}
                         onDrop={() => { if (draggedVehicleId && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(draggedVehicleId, bay.id); setDraggedVehicleId(undefined); }}
-                        onClick={() => { if (onQuickTap(`bay:${bay.id}`, displayVehicle?.id, displayVehicle ? undefined : bay.id)) return; setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }}
+                        {...holdProps(displayVehicle?.id, displayVehicle ? undefined : bay.id)}\n                        onClick={() => { if (holdTriggered.current) { holdTriggered.current = false; return; } setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }}
                         className={`vplm-bay-chip ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`}
                         aria-label={`${isLiveGarageContainer(bay) ? 'Container' : 'Bay ' + bay.bayNumber}, ${zoneDisplayName(bay.zone)}, ${displayStatus}${vehicle ? `, vehicle ${vehicle.plateNumber}` : ''}${xParkingVehicle ? `, X-Parked vehicle ${xParkingVehicle.plateNumber}` : ''}`}>
                         <span className="vplm-bay-chip-head"><strong>{isLiveGarageContainer(bay) ? bay.zone : `${bay.zone === 'Reception' ? 'R ' : bay.zone === 'Workshop' ? 'W ' : bay.zone}-${bay.bayNumber}`}</strong><span className="vplm-bay-chip-state">{displayStatus === 'Available' ? 'Vacant' : displayStatus}</span></span>
