@@ -210,7 +210,7 @@ export default function AiAssistant({
       addAssistantMessage(`${parkedDetails}\nRefresh the workspace before transferring this vehicle.`);
       return;
     }
-    if (role === 'TechnicalLeader' && canAccessRoadTests && vehicle.status !== 'Delivered') {
+    if (role === 'TechnicalLeader' && canAccessRoadTests) {
       setTransferFlow(null);
       setActiveFunction(null);
       setRoadTest({ type: 'Initial Road Test', vehicleId: vehicle.id });
