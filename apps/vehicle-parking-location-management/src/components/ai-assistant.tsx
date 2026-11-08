@@ -88,7 +88,7 @@ export default function AiAssistant({
   onTransfer,
 }: AiAssistantProps) {
   // Accept both canonical role IDs and their displayed labels without granting other roles access.
-  const roadTestAssigner = ['technicalleader', 'technicaladvisor', 'technicalserviceadvisor']
+  const roadTestAssigner = ['administrator', 'supervisor', 'technicalleader', 'technicaladvisor', 'technicalserviceadvisor']
     .includes(role.toLowerCase().replace(/[^a-z]/g, ''));
   const replyKey = `vplm-assistant-language:${userId}`;
   const displayKey = `vplm-assistant-display-language:${userId}`;
