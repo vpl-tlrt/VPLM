@@ -686,7 +686,7 @@ export default function AiAssistant({
   };
 
   return (
-    <div className={fullScreenAi && open ? "pointer-events-none fixed inset-0 z-[100] flex items-stretch justify-center" : "pointer-events-none fixed inset-x-3 bottom-3 top-[142px] z-[100] flex items-end justify-end md:inset-x-auto md:bottom-5 md:right-5 md:top-24"}>
+    <div className={fullScreenAi && open ? "pointer-events-none fixed inset-0 z-[100] flex items-stretch justify-center" : "pointer-events-none fixed inset-x-2 bottom-2 top-2 z-[100] flex min-h-0 items-end justify-end sm:inset-x-3 sm:bottom-3 sm:top-3 md:inset-x-auto md:bottom-5 md:right-5 md:top-5"}>
       {open && (
         <section id="vplm-ai-panel"
           aria-label="VPLM AI assistant"
@@ -744,7 +744,7 @@ export default function AiAssistant({
             Workspace data is used for vehicle and bay lookups. Transfers and requests are saved only after you submit their app forms and confirmations. AI answers may be incorrect.
           </div>
 
-          <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
+          <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain p-3 sm:p-4" aria-live="polite">
             {messages.map((message, index) => (
               <div
                 key={`${message.role}-${index}`}
