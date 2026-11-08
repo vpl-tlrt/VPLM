@@ -346,14 +346,17 @@ export default function AiAssistant({
     if (action === 'road-test') {
       setActiveFunction(null);
       if (!canAccessRoadTests) return addAssistantMessage('Your role does not have access to Road Tests.');
-      const type = /\\bfrt\\b|\\bfinal road test\\b/i.test(query.trim()) ? 'Final Road Test' : 'Initial Road Test';
+      const type = /(?:^|\\s)\\/?frt(?:\\s|$)/i.test(query.trim()) ? 'Final Road Test' : 'Initial Road Test';
+      if (registration.duplicates) return addAssistantMessage('More than one vehicle matches. Enter the full registration number.');
       const vehicle = registration.vehicle?.status !== 'Delivered' ? registration.vehicle : undefined;
       const own = vehicle && ownRunningRoadTest(vehicle);
-      const autoAssign = (role === 'TechnicalLeader' || role === 'TechnicalAdvisor') && !!vehicle && /\\b(?:irt|frt)\\b/i.test(query) && !!registration.registration;
+      const autoAssign = Boolean(vehicle && !own && (role === 'TechnicalLeader' || role === 'TechnicalAdvisor')
+        && /\\b(?:irt|frt)\\b/i.test(query));
       setRoadTest(own ? { type: own.testType ?? type, resumeId: own.id } : { type, vehicleId: vehicle?.id, autoAssign });
-      if (autoAssign && !own) return;
-      addAssistantMessage(own ? 'Did you complete the road test? Reply Yes or No.'
-        : vehicle ? 'Reply Yes to start, or No to close.' : 'Enter a vehicle number in chat or select a pending task below.');
+      addAssistantMessage(own ? 'This road test is already in progress. Tap Finish RT to record the return parking location.'
+        : autoAssign ? `Assigning ${type} for ${vehicle?.plateNumber} with default values…`
+        : vehicle ? 'Are you going for an RT? Reply Yes to start or No to close.' : 'Enter a vehicle number and IRT or FRT to assign a task automatically.');
+
     }
   };
 
@@ -539,7 +542,7 @@ export default function AiAssistant({
       setBusy(false);
       return;
     }
-    if (/^\/?(?:irt|frt)\b/i.test(message)) {
+    if (/\b(?:irt|frt)\b/i.test(message) && (role === 'TechnicalLeader' || role === 'TechnicalAdvisor')) {
       setTransferFlow(null);
       setPickupPlate(undefined);
       runFunction('road-test', message);
