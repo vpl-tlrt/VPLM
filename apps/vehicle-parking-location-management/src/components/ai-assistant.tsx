@@ -85,6 +85,9 @@ export default function AiAssistant({
   onAssign,
   onTransfer,
 }: AiAssistantProps) {
+  // Accept both canonical role IDs and their displayed labels without granting other roles access.
+  const roadTestAssigner = ['technicalleader', 'technicaladvisor', 'technicalserviceadvisor']
+    .includes(role.toLowerCase().replace(/[^a-z]/g, ''));
   const replyKey = `vplm-assistant-language:${userId}`;
   const displayKey = `vplm-assistant-display-language:${userId}`;
   const [language, setLanguage] = useState(() => readAssistantLanguage(replyKey));
@@ -169,7 +172,7 @@ export default function AiAssistant({
     return { registration: message.match(/[A-Z0-9-]*\d[A-Z0-9-]*/i)?.[0] };
   };
 
-  const ownRunningRoadTest = (vehicle: Vehicle) => (role === 'TechnicalLeader' || role === 'TechnicalAdvisor') && canAccessRoadTests
+  const ownRunningRoadTest = (vehicle: Vehicle) => roadTestAssigner && canAccessRoadTests
     ? loadRoadTests().find(test => test.vehicleId === vehicle.id && test.status === 'In Road Test'
       && (test.startedById ? test.startedById === userId : test.startedBy?.trim().toLowerCase() === actor.trim().toLowerCase()))
     : undefined;
@@ -350,7 +353,7 @@ export default function AiAssistant({
       if (registration.duplicates) return addAssistantMessage('More than one vehicle matches. Enter the full registration number.');
       const vehicle = registration.vehicle?.status !== 'Delivered' ? registration.vehicle : undefined;
       const own = vehicle && ownRunningRoadTest(vehicle);
-      const autoAssign = Boolean(vehicle && !own && (role === 'TechnicalLeader' || role === 'TechnicalAdvisor')
+      const autoAssign = Boolean(vehicle && !own && roadTestAssigner
         && /\b(?:irt|frt)\b/i.test(query));
       setRoadTest(own ? { type: own.testType ?? type, resumeId: own.id } : { type, vehicleId: vehicle?.id, autoAssign });
       addAssistantMessage(own ? 'This road test is already in progress. Tap Finish RT to record the return parking location.'
@@ -535,14 +538,14 @@ export default function AiAssistant({
     setInput('');
     setBusy(true);
 
-    if ((role === 'TechnicalLeader' || role === 'TechnicalAdvisor') && /\\b(?:irt|frt)\\b/i.test(message) && findVehicle(message).vehicle && canAccessRoadTests) {
+    if (roadTestAssigner && /\\b(?:irt|frt)\\b/i.test(message) && findVehicle(message).vehicle && canAccessRoadTests) {
       setTransferFlow(null);
       setPickupPlate(undefined);
       runFunction('road-test', message);
       setBusy(false);
       return;
     }
-    if (/\b(?:irt|frt)\b/i.test(message) && (role === 'TechnicalLeader' || role === 'TechnicalAdvisor')) {
+    if (/\b(?:irt|frt)\b/i.test(message) && roadTestAssigner) {
       setTransferFlow(null);
       setPickupPlate(undefined);
       runFunction('road-test', message);
@@ -731,7 +734,7 @@ export default function AiAssistant({
 
             {roadTest && canAccessRoadTests && <AssistantRoadTest key={`${roadTest.type}:${roadTest.vehicleId ?? ''}:${roadTest.resumeId ?? ''}`} ref={roadTestChat}
               type={roadTest.type} initialVehicleId={roadTest.vehicleId} autoAssign={roadTest.autoAssign} resumeId={roadTest.resumeId}
-              canCreate={(role === 'TechnicalLeader' || role === 'TechnicalAdvisor')} findOwnRunningTest={ownRunningRoadTest} userId={userId} onMessage={addAssistantMessage} vehicles={vehicles} locations={locations}
+              canCreate={roadTestAssigner && canAccessRoadTests} findOwnRunningTest={ownRunningRoadTest} userId={userId} onMessage={addAssistantMessage} vehicles={vehicles} locations={locations}
               actor={actor} onLocationChange={onRoadTestLocationChange} onClose={message => {
                 setRoadTest(undefined);
                 if (message) addAssistantMessage(message);
