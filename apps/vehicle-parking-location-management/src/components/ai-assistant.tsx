@@ -1,6 +1,6 @@
 import { findActivePickup, loadPickupVehicleLocation, pickupLocationWarning, pickupParkingNotice } from '@/lib/pickup-request-data';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { BookOpen, Bot, CarFront, CircleParking, LoaderCircle, MapPin, MoveRight, Route, Search, Send, Sparkles, X } from 'lucide-react';
+import { BookOpen, Bot, CarFront, CircleParking, Maximize2, Minimize2, LoaderCircle, MapPin, MoveRight, Route, Search, Send, Sparkles, X } from 'lucide-react';
 import { mapParkingLocationId, supportsXParkingLocation, type Movement, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import { parseAssistantBay } from '@/lib/assistant-bay';
 import { assistantDisplay, assistantLanguages, isAssistantLanguage, readAssistantLanguage } from '@/lib/assistant-language';
@@ -107,6 +107,7 @@ export default function AiAssistant({
 
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [fullScreenAi, setFullScreenAi] = useState(false);
   const [activeFunction, setActiveFunction] = useState<AssistantFunction | null>(null);
   const [transferFlow, setTransferFlow] = useState<TransferFlow | null>(null);
   const [roadTest, setRoadTest] = useState<{ type: RoadTestType; vehicleId?: string; resumeId?: string }>();
@@ -207,6 +208,13 @@ export default function AiAssistant({
     const parkedDetails = `${details} Current bay: ${locationLabel(currentLocationId)}.${pickupDetails ? `\n${pickupDetails}` : ''}`;
     if (normalizeLocation(currentLocationId) !== normalizeLocation(vehicle.currentLocationId ?? '')) {
       addAssistantMessage(`${parkedDetails}\nRefresh the workspace before transferring this vehicle.`);
+      return;
+    }
+    if (role === 'TechnicalLeader' && canAccessRoadTests && vehicle.status !== 'Delivered') {
+      setTransferFlow(null);
+      setActiveFunction(null);
+      setRoadTest({ type: 'Initial Road Test', vehicleId: vehicle.id });
+      addAssistantMessage(`${parkedDetails}\nAre you going for an RT? Reply Yes to start a road test with default assignment details, or No to close.`);
       return;
     }
     if (!offerTransfer) {
@@ -636,11 +644,11 @@ export default function AiAssistant({
   };
 
   return (
-    <div className="pointer-events-none fixed inset-x-3 bottom-3 top-[142px] z-[100] flex items-end justify-end md:inset-x-auto md:bottom-5 md:right-5 md:top-24">
+    <div className={fullScreenAi && open ? "pointer-events-none fixed inset-0 z-[100] flex items-stretch justify-center" : "pointer-events-none fixed inset-x-3 bottom-3 top-[142px] z-[100] flex items-end justify-end md:inset-x-auto md:bottom-5 md:right-5 md:top-24"}>
       {open && (
         <section id="vplm-ai-panel"
           aria-label="VPLM AI assistant"
-          className="pointer-events-auto flex h-full max-h-[680px] min-h-0 w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-2xl md:w-[420px]"
+          className={fullScreenAi ? "pointer-events-auto flex h-full min-h-0 w-full flex-col overflow-hidden bg-card text-card-foreground" : "pointer-events-auto flex h-full max-h-[680px] min-h-0 w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-2xl md:w-[420px]"}
         >
           <header className="flex items-center justify-between gap-3 border-b border-border bg-primary px-4 py-3 text-primary-foreground">
             <div className="flex items-center gap-3">
@@ -653,6 +661,11 @@ export default function AiAssistant({
               </div>
             </div>
             <div className="flex items-center gap-1">
+              <button type="button" role="switch" aria-checked={fullScreenAi} aria-label="Full screen AI mode" title={fullScreenAi ? 'Exit full screen AI' : 'Full screen AI mode'}
+                onClick={() => setFullScreenAi(value => !value)}
+                className="rounded-lg p-2 transition hover:bg-primary-foreground/15">
+                {fullScreenAi ? <Minimize2 size={19} /> : <Maximize2 size={19} />}
+              </button>
               <button
                 type="button"
                 aria-label={languageText.help}
