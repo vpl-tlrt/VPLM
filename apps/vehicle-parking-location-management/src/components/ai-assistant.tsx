@@ -43,6 +43,7 @@ type AiAssistantProps = {
   canTransfer: boolean;
   locationLabel: (locationId?: string) => string;
   onAssign: (plateNumber: string, vehicle?: Vehicle) => boolean;
+  onAssignToBay: (plateNumber: string, bayId: string) => boolean;
   onTransfer: (vehicleId: string, destinationId: string, notes: string, toXParking?: boolean) => boolean;
 };
 
@@ -83,6 +84,7 @@ export default function AiAssistant({
   canTransfer,
   locationLabel,
   onAssign,
+  onAssignToBay,
   onTransfer,
 }: AiAssistantProps) {
   // Accept both canonical role IDs and their displayed labels without granting other roles access.
@@ -117,6 +119,7 @@ export default function AiAssistant({
   const roadTestChat = useRef<RoadTestChatHandle>(null);
   const responseVersion = useRef(0);
   const [pickupPlate, setPickupPlate] = useState<string>();
+  const [assignmentDraft, setAssignmentDraft] = useState<{ plate: string; bayId: string; search: string }>();
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
@@ -328,21 +331,23 @@ export default function AiAssistant({
         addAssistantMessage('Your role does not have permission to add or assign vehicles.');
         return;
       }
+      if (registration.duplicates) {
+        addAssistantMessage('More than one vehicle matches. Enter the full vehicle number.');
+        return;
+      }
       if (!registration.registration) {
         setActiveFunction('assign');
-        addAssistantMessage('Enter the vehicle registration number to open the validated Add / Assign form. You can complete the vehicle details and choose a bay there.');
+        addAssistantMessage('Enter the vehicle number to prepare the assignment.');
         return;
       }
       if (registration.vehicle?.status !== 'Delivered' && registration.vehicle?.currentLocationId) {
         setActiveFunction(null);
-        addAssistantMessage(`${registration.vehicle.plateNumber} already has an active bay assignment. Use Transfer to move it instead.`);
+        addAssistantMessage(`${registration.vehicle.plateNumber} already has an active bay assignment. Use Transfer instead.`);
         return;
       }
-      const opened = onAssign(registration.registration, registration.vehicle?.status === 'Delivered' ? undefined : registration.vehicle);
+      setAssignmentDraft({ plate: registration.registration.trim().toUpperCase(), bayId: '', search: '' });
       setActiveFunction(null);
-      addAssistantMessage(opened
-        ? `The Add / Assign form is ready for ${registration.vehicle?.plateNumber ?? registration.registration}. Review or complete the vehicle details and select a bay; nothing is saved until you submit the form.`
-        : 'I could not open Add / Assign. Check your permission and the vehicle’s current assignment.');
+      addAssistantMessage(`Vehicle ${registration.registration.toUpperCase()} prepared with existing profile details or form defaults. Choose an available bay and press Assign. The record will only be saved after confirmation.`);
       return;
     }
 
@@ -360,6 +365,28 @@ export default function AiAssistant({
         : autoAssign ? `Assigning ${type} for ${vehicle?.plateNumber} with default values…`
         : vehicle ? 'Are you going for an RT? Reply Yes to start or No to close.' : 'Enter a vehicle number and IRT or FRT to assign a task automatically.');
 
+    }
+  };
+
+  const assignmentOptions = assignmentDraft ? locations.filter(location =>
+    location.status === 'Available'
+    && !vehicles.some(vehicle => vehicle.status !== 'Delivered' && normalizeLocation(vehicle.currentLocationId ?? '') === normalizeLocation(location.id))
+  ) : [];
+  const assignmentMatches = assignmentOptions.filter(location =>
+    !assignmentDraft?.search || normalize(`${location.zone} ${location.bayNumber} ${location.id}`).includes(normalize(assignmentDraft.search))
+  );
+  const confirmAssistantAssignment = () => {
+    if (!assignmentDraft?.bayId || !canAssign) return;
+    const selected = locations.find(location => location.id === assignmentDraft.bayId);
+    if (!selected || !assignmentOptions.some(location => location.id === selected.id)) {
+      addAssistantMessage('The selected bay is no longer available. Choose another bay.');
+      return;
+    }
+    if (onAssignToBay(assignmentDraft.plate, selected.id)) {
+      addAssistantMessage(`${assignmentDraft.plate} assigned to ${selected.zone}-${selected.bayNumber} successfully.`);
+      setAssignmentDraft(undefined);
+    } else {
+      addAssistantMessage('Assignment could not be saved. Check the vehicle details and bay availability. You can use the full Add / Assign form to correct any missing details.');
     }
   };
 
@@ -732,6 +759,19 @@ export default function AiAssistant({
               </div>
             ))}
 
+            {assignmentDraft && <div className="space-y-2 rounded-xl border bg-card p-3 text-sm">
+              <div className="flex items-center justify-between gap-2"><strong>Add / Assign · {assignmentDraft.plate}</strong><button type="button" onClick={() => setAssignmentDraft(undefined)} aria-label="Close assignment">✕</button></div>
+              <label className="block space-y-1"><span>Bay number (search or select)</span>
+                <input className="w-full rounded border bg-background p-2" value={assignmentDraft.search} onChange={event => setAssignmentDraft(current => current && ({ ...current, search: event.target.value, bayId: '' }))} placeholder="Type zone or bay number" />
+              </label>
+              <select aria-label="Available parking bay" className="w-full rounded border bg-background p-2" value={assignmentDraft.bayId} onChange={event => setAssignmentDraft(current => current && ({ ...current, bayId: event.target.value }))}>
+                <option value="">Select available bay</option>
+                {assignmentMatches.map(location => <option key={location.id} value={location.id}>{location.zone}-{location.bayNumber || location.id}</option>)}
+              </select>
+              <div className="flex flex-wrap gap-2"><button type="button" disabled={!assignmentDraft.bayId || !canAssign} onClick={confirmAssistantAssignment} className="rounded bg-primary px-4 py-2 font-semibold text-primary-foreground disabled:opacity-50">Assign</button>
+                <button type="button" className="rounded border px-3 py-2" onClick={() => { onAssign(assignmentDraft.plate); setAssignmentDraft(undefined); }}>Edit full form</button>
+              </div>
+            </div>}
             {roadTest && canAccessRoadTests && <AssistantRoadTest key={`${roadTest.type}:${roadTest.vehicleId ?? ''}:${roadTest.resumeId ?? ''}`} ref={roadTestChat}
               type={roadTest.type} initialVehicleId={roadTest.vehicleId} autoAssign={roadTest.autoAssign} resumeId={roadTest.resumeId}
               canCreate={roadTestAssigner && canAccessRoadTests} findOwnRunningTest={ownRunningRoadTest} userId={userId} onMessage={addAssistantMessage} vehicles={vehicles} locations={locations}
