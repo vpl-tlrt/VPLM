@@ -839,31 +839,76 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   // Triple-tap only stages a transfer. The existing Transfer screen remains
   // responsible for confirmation, permission checks, and business validation.
   const [quickTransferVehicleId, setQuickTransferVehicleId] = useState<string>();
+  // A short hold selects a vehicle; selection expires after 20 seconds.
+  // Native drag/drop remains available because pointer movement cancels selection.
   const holdTimer = useRef<number | undefined>(undefined);
-  const holdOrigin = useRef<{x:number;y:number}>();
+  const holdOrigin = useRef<{ x: number; y: number }>();
   const holdTriggered = useRef(false);
-  const cancelHold = () => { window.clearTimeout(holdTimer.current); holdTimer.current = undefined; holdOrigin.current = undefined; };
+  const selectedQuickTransfer = useRef<{ vehicleId: string; expiresAt: number } | null>(null);
+  const cancelHold = () => {
+    if (holdTimer.current !== undefined) window.clearTimeout(holdTimer.current);
+    holdTimer.current = undefined;
+    holdOrigin.current = undefined;
+  };
   useEffect(() => () => cancelHold(), []);
-  useEffect(() => { if (!quickTransferVehicleId) return; const id = window.setTimeout(() => setQuickTransferVehicleId(undefined), 300000); return () => window.clearTimeout(id); }, [quickTransferVehicleId]);
-  const holdProps = (vehicleId?: string, destinationId?: string) => ({
+  useEffect(() => {
+    if (!quickTransferVehicleId) { selectedQuickTransfer.current = null; return; }
+    const remaining = Math.max(0, (selectedQuickTransfer.current?.expiresAt ?? 0) - Date.now());
+    const id = window.setTimeout(() => {
+      selectedQuickTransfer.current = null;
+      setQuickTransferVehicleId(undefined);
+      toast.info('Quick Transfer selection expired. Vehicle remains in its original bay.');
+    }, remaining);
+    return () => window.clearTimeout(id);
+  }, [quickTransferVehicleId]);
+  const selectQuickVehicle = (vehicleId: string) => {
+    selectedQuickTransfer.current = { vehicleId, expiresAt: Date.now() + 20_000 };
+    setQuickTransferVehicleId(vehicleId);
+    toast.info('Vehicle selected for 20 seconds. Navigate to another zone and tap an empty bay to choose the destination.');
+  };
+  const selectQuickDestination = (destinationId: string): boolean => {
+    const selection = selectedQuickTransfer.current;
+    if (!canTransferVehicle || !selection) return false;
+    if (Date.now() >= selection.expiresAt) {
+      selectedQuickTransfer.current = null;
+      setQuickTransferVehicleId(undefined);
+      toast.error('Quick Transfer selection expired. Select the vehicle again.');
+      return true;
+    }
+    const source = vehicles.find(v => v.id === selection.vehicleId);
+    const dest = locations.find(l => l.id === destinationId);
+    if (!source || !source.currentLocationId || !dest || source.currentLocationId === destinationId ||
+        dest.status === 'Reserved' || dest.status === 'Maintenance' ||
+        vehicles.some(v => v.status !== 'Delivered' && v.xParking !== 'Yes' && parkingRecordKey(v.currentLocationId) === parkingRecordKey(destinationId))) {
+      toast.error('Destination unavailable. Choose another empty bay.');
+      return true;
+    }
+    selectedQuickTransfer.current = null;
+    setQuickTransferVehicleId(undefined);
+    onQuickTransfer(source.id, destinationId);
+    return true;
+  };
+  const holdProps = (vehicleId?: string) => ({
     onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
       cancelHold();
-      if (!canTransferVehicle || (!vehicleId && !quickTransferVehicleId) || !e.isPrimary || e.button !== 0) return;
+      if (!canTransferVehicle || !vehicleId || !e.isPrimary || e.button !== 0) return;
       holdTriggered.current = false;
-      holdOrigin.current = {x:e.clientX,y:e.clientY};
+      holdOrigin.current = { x: e.clientX, y: e.clientY };
       holdTimer.current = window.setTimeout(() => {
-        holdTimer.current = undefined; holdTriggered.current = true;
-        if (vehicleId) { setQuickTransferVehicleId(vehicleId); toast.info('Vehicle selected. Navigate to another zone and hold an empty bay for 20 seconds. Expires in 5 minutes.'); return; }
-        if (!destinationId || !quickTransferVehicleId) return;
-        const source = vehicles.find(v => v.id === quickTransferVehicleId);
-        const dest = locations.find(l => l.id === destinationId);
-        if (!source || !source.currentLocationId || !dest || source.currentLocationId === destinationId || dest.status === 'Reserved' || dest.status === 'Maintenance' || vehicles.some(v => v.status !== 'Delivered' && v.xParking !== 'Yes' && parkingRecordKey(v.currentLocationId) === parkingRecordKey(destinationId))) { toast.error('Destination unavailable.'); return; }
-        setQuickTransferVehicleId(undefined); onQuickTransfer(source.id, destinationId);
-      }, 20000);
+        holdTimer.current = undefined;
+        holdTriggered.current = true;
+        selectQuickVehicle(vehicleId);
+      }, 650);
     },
-    onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => { if (holdOrigin.current && Math.hypot(e.clientX-holdOrigin.current.x,e.clientY-holdOrigin.current.y)>12) cancelHold(); },
-    onPointerUp: cancelHold, onPointerCancel: cancelHold, onDragStartCapture: cancelHold,
-    onContextMenu: (e: React.MouseEvent<HTMLButtonElement>) => { if (holdTimer.current !== undefined) e.preventDefault(); },
+    onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (holdOrigin.current && Math.hypot(e.clientX - holdOrigin.current.x, e.clientY - holdOrigin.current.y) > 12) cancelHold();
+    },
+    onPointerUp: cancelHold,
+    onPointerCancel: cancelHold,
+    onDragStartCapture: cancelHold,
+    onContextMenu: (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (holdTimer.current !== undefined || holdTriggered.current) e.preventDefault();
+    },
   });
   const [garageZoneFilter, setGarageZoneFilter] = useState('all');
   const [openedParkingZone, setOpenedParkingZone] = useState<string | null>(null);
@@ -1258,7 +1303,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         onDragEnd={() => setDraggedVehicleId(undefined)}
                         onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()}
                         onDrop={() => { if (draggedVehicleId && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(draggedVehicleId, bay.id); setDraggedVehicleId(undefined); }}
-                        {...holdProps(displayVehicle?.id, displayVehicle ? undefined : bay.id)}\n                        onClick={() => { if (holdTriggered.current) { holdTriggered.current = false; return; } setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }}
+                        {...holdProps(displayVehicle?.id)}\n                        onClick={() => { if (holdTriggered.current) { holdTriggered.current = false; return; } if (!displayVehicle && selectQuickDestination(bay.id)) return; setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }}
                         className={`vplm-bay-chip ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`}
                         aria-label={`${isLiveGarageContainer(bay) ? 'Container' : 'Bay ' + bay.bayNumber}, ${zoneDisplayName(bay.zone)}, ${displayStatus}${vehicle ? `, vehicle ${vehicle.plateNumber}` : ''}${xParkingVehicle ? `, X-Parked vehicle ${xParkingVehicle.plateNumber}` : ''}`}>
                         <span className="vplm-bay-chip-head"><strong>{isLiveGarageContainer(bay) ? bay.zone : `${bay.zone === 'Reception' ? 'R ' : bay.zone === 'Workshop' ? 'W ' : bay.zone}-${bay.bayNumber}`}</strong><span className="vplm-bay-chip-state">{displayStatus === 'Available' ? 'Vacant' : displayStatus}</span></span>
