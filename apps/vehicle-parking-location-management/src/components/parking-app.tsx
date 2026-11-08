@@ -203,15 +203,6 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const skipNextPersist = useRef(false);
   const [roadTestVehicleId, setRoadTestVehicleId] = useState<string>();
   const [lockedRoadTestId, setLockedRoadTestId] = useState<string>();
-  useEffect(() => {
-    if (!user?.objectId || !canAccessRoadTests) return;
-    const ownActive = loadRoadTests().find((test: RoadTestRecord) => test.status === 'In Road Test' && test.startedById === user.objectId);
-    if (ownActive) { setLockedRoadTestId(ownActive.id); setScreen('road-tests'); }
-  }, [user?.objectId, canAccessRoadTests]);
-  useEffect(() => {
-    if (lockedRoadTestId && screen !== 'road-tests') setScreen('road-tests');
-  }, [lockedRoadTestId, screen]);
-
   const [dashboardVehicleId, setDashboardVehicleId] = useState<string>();
   const [pullDistance, setPullDistance] = useState(0);
   const pullStartY = useRef<number | undefined>(undefined);
@@ -254,6 +245,16 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const canRecoverDeliveredVehicle = role === 'Administrator' || role === 'Supervisor' || role === 'TechnicalLeader' || role === 'TechnicalAdvisor';
   const isAdministrator = role === 'Administrator' && (access.data?.can('ApplicationSettings', 'ManageSetting') ?? false);
   const canAccessRoadTests = Boolean(access.data && !rolesWithoutRoadTests.includes(role));
+  useEffect(() => {
+    if (!user?.objectId || !canAccessRoadTests) return;
+    const ownActive = loadRoadTests().find((test: RoadTestRecord) => test.status === 'In Road Test' && test.startedById === user.objectId);
+    if (ownActive) { setLockedRoadTestId(ownActive.id); setScreen('road-tests'); }
+  }, [user?.objectId, canAccessRoadTests]);
+  useEffect(() => {
+    if (lockedRoadTestId && screen !== 'road-tests') setScreen('road-tests');
+  }, [lockedRoadTestId, screen]);
+
+
   const visibleNavigation = access.data ? navigation.filter((item) => (role !== 'Technician' || technicianScreens.includes(item.id)) && item.id !== 'layout' && (!localGuest || item.id !== 'pickup-requests') && (item.id !== 'road-tests' || canAccessRoadTests) && (item.id !== 'backup-playback' || isAdministrator) && roleRank[role] >= roleRank[item.minimumRole as Role]) : navigation.filter((item) => item.id === 'profile');
   const mobileNavigation = [...visibleNavigation].sort((a, b) => mobileNavigationOrder.indexOf(a.id) - mobileNavigationOrder.indexOf(b.id));
   const moveMobileNavigationItem = (id: Screen, direction: -1 | 1) => {
