@@ -11,6 +11,7 @@ type Props = {
   ref: Ref<RoadTestChatHandle>;
   initialVehicleId?: string;
   autoAssign?: boolean;
+  autoAssign?: boolean;
   resumeId?: string;
   canCreate: boolean;
   findOwnRunningTest: (vehicle: Vehicle) => ReturnType<typeof loadRoadTests>[number] | undefined;
@@ -26,6 +27,7 @@ type Props = {
 
 export function AssistantRoadTest({ ref, initialVehicleId, autoAssign, resumeId, canCreate, findOwnRunningTest, userId, onMessage, type, vehicles, locations, actor, onLocationChange, onClose }: Props) {
   const [selected, setSelected] = useState(initialVehicleId ?? '');
+  const autoAssignAttempted = useRef(false);
   const [step, setStep] = useState<'select' | 'completed' | 'parking'>(resumeId ? 'completed' : 'select');
   const [zone, setZone] = useState('');
   const [bay, setBay] = useState('');
@@ -71,6 +73,14 @@ export function AssistantRoadTest({ ref, initialVehicleId, autoAssign, resumeId,
     autoAssigned.current = true;
     assign();
   }, [autoAssign, initialVehicleId]);
+  useEffect(() => {
+    if (!autoAssign || !initialVehicleId || autoAssignAttempted.current) return;
+    autoAssignAttempted.current = true;
+    assign();
+  // Only run once for the explicitly selected vehicle; assign validates duplicates and permissions.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAssign, initialVehicleId]);
+
   const save = (finish: boolean) => {
     const tests = loadRoadTests();
     if (!vehicle) return setError('Enter a registered vehicle number.');
