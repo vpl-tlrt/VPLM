@@ -110,7 +110,7 @@ export default function AiAssistant({
   const [fullScreenAi, setFullScreenAi] = useState(false);
   const [activeFunction, setActiveFunction] = useState<AssistantFunction | null>(null);
   const [transferFlow, setTransferFlow] = useState<TransferFlow | null>(null);
-  const [roadTest, setRoadTest] = useState<{ type: RoadTestType; vehicleId?: string; resumeId?: string }>();
+  const [roadTest, setRoadTest] = useState<{ type: RoadTestType; vehicleId?: string; resumeId?: string; autoAssign?: boolean }>();
   const roadTestChat = useRef<RoadTestChatHandle>(null);
   const responseVersion = useRef(0);
   const [pickupPlate, setPickupPlate] = useState<string>();
@@ -346,10 +346,12 @@ export default function AiAssistant({
     if (action === 'road-test') {
       setActiveFunction(null);
       if (!canAccessRoadTests) return addAssistantMessage('Your role does not have access to Road Tests.');
-      const type = /^\/?frt\b/i.test(query.trim()) ? 'Final Road Test' : 'Initial Road Test';
+      const type = /\\bfrt\\b|\\bfinal road test\\b/i.test(query.trim()) ? 'Final Road Test' : 'Initial Road Test';
       const vehicle = registration.vehicle?.status !== 'Delivered' ? registration.vehicle : undefined;
       const own = vehicle && ownRunningRoadTest(vehicle);
-      setRoadTest(own ? { type: own.testType ?? type, resumeId: own.id } : { type, vehicleId: vehicle?.id });
+      const autoAssign = (role === 'TechnicalLeader' || role === 'TechnicalAdvisor') && !!vehicle && /\\b(?:irt|frt)\\b/i.test(query) && !!registration.registration;
+      setRoadTest(own ? { type: own.testType ?? type, resumeId: own.id } : { type, vehicleId: vehicle?.id, autoAssign });
+      if (autoAssign && !own) return;
       addAssistantMessage(own ? 'Did you complete the road test? Reply Yes or No.'
         : vehicle ? 'Reply Yes to start, or No to close.' : 'Enter a vehicle number in chat or select a pending task below.');
     }
@@ -530,6 +532,13 @@ export default function AiAssistant({
     setInput('');
     setBusy(true);
 
+    if ((role === 'TechnicalLeader' || role === 'TechnicalAdvisor') && /\\b(?:irt|frt)\\b/i.test(message) && findVehicle(message).vehicle && canAccessRoadTests) {
+      setTransferFlow(null);
+      setPickupPlate(undefined);
+      runFunction('road-test', message);
+      setBusy(false);
+      return;
+    }
     if (/^\/?(?:irt|frt)\b/i.test(message)) {
       setTransferFlow(null);
       setPickupPlate(undefined);
@@ -718,7 +727,7 @@ export default function AiAssistant({
             ))}
 
             {roadTest && canAccessRoadTests && <AssistantRoadTest key={`${roadTest.type}:${roadTest.vehicleId ?? ''}:${roadTest.resumeId ?? ''}`} ref={roadTestChat}
-              type={roadTest.type} initialVehicleId={roadTest.vehicleId} resumeId={roadTest.resumeId}
+              type={roadTest.type} initialVehicleId={roadTest.vehicleId} autoAssign={roadTest.autoAssign} resumeId={roadTest.resumeId}
               canCreate={(role === 'TechnicalLeader' || role === 'TechnicalAdvisor')} findOwnRunningTest={ownRunningRoadTest} userId={userId} onMessage={addAssistantMessage} vehicles={vehicles} locations={locations}
               actor={actor} onLocationChange={onRoadTestLocationChange} onClose={message => {
                 setRoadTest(undefined);
