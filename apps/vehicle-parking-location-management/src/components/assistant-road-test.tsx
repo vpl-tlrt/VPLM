@@ -31,6 +31,7 @@ export function AssistantRoadTest({ ref, initialVehicleId, autoAssign, resumeId,
   const [bay, setBay] = useState('');
   const [result, setResult] = useState<RoadTestResult | undefined>('Pass');
   const [error, setError] = useState('');
+  const [justAssigned, setJustAssigned] = useState(false);
   const pending = loadRoadTests().filter(test => (test.testType ?? 'Initial Road Test') === type && test.status === 'Assigned');
   const taskVehicles = pending.flatMap(task => {
     const vehicle = vehicles.find(item => item.id === task.vehicleId);
@@ -62,7 +63,8 @@ export function AssistantRoadTest({ ref, initialVehicleId, autoAssign, resumeId,
       actor, timestamp, action: 'Assigned', detail: `${type} assigned with default values through VPLM AI.`,
     }, ...loadRoadTestAudit()], loadRoadTestNotifications());
     setError('');
-    onClose(`${type} assigned to ${actor} for ${target.plateNumber} with Normal priority. Status: Assigned (not started).`);
+    setJustAssigned(true);
+    onMessage(`${type} assigned to ${actor} for ${target.plateNumber} with Normal priority. Are you taking the vehicle for the road test? Select Yes to start or No to leave it assigned.`);
   };
 
   const autoAssigned = useRef(false);
@@ -196,8 +198,8 @@ export function AssistantRoadTest({ ref, initialVehicleId, autoAssign, resumeId,
       </label>}
       {vehicle && <>
         <p>Model: {vehicle.model || '—'} · Colour: {vehicle.color || '—'} · Current bay: {roadTestLocationLabel(vehicle.currentLocationId, locations)}</p>
-        <p>{pending.some(item => item.vehicleId === vehicle.id) ? 'Are you going for an RT?' : canCreate ? 'Are you going for an RT?' : 'No pending task exists. Your account cannot create road test assignments; ask an administrator to review your role and Road Tests access.'}</p>
-        <div className="flex flex-wrap gap-2"><Button size="sm" disabled={!canCreate || !vehicle} onClick={assign}>Assign RT</Button><Button size="sm" disabled={!canCreate && !pending.some(item => item.vehicleId === vehicle.id)} onClick={() => save(false)}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose()}>No</Button></div>
+        <p>{(justAssigned || pending.some(item => item.vehicleId === vehicle.id)) ? 'Are you taking the vehicle for the road test?' : canCreate ? 'Are you taking the vehicle for the road test?' : 'No pending task exists. Your account cannot create road test assignments; ask an administrator to review your role and Road Tests access.'}</p>
+        <div className="flex flex-wrap gap-2"><Button size="sm" disabled={!canCreate || !vehicle || justAssigned || pending.some(item => item.vehicleId === vehicle.id)} onClick={assign}>Assign RT</Button><Button size="sm" disabled={!canCreate && !justAssigned && !pending.some(item => item.vehicleId === vehicle.id)} onClick={() => save(false)}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose(justAssigned ? 'Road test remains Assigned and has not been started.' : undefined)}>No</Button></div>
       </>}
     </>}
     {step === 'completed' && <>
