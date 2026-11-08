@@ -155,7 +155,7 @@ export function AssistantRoadTest({ ref, initialVehicleId, autoAssign, resumeId,
         }
         setSelected(match.id);
         const pendingTask = pending.some(item => item.vehicleId === match.id);
-        onMessage(`${match.plateNumber} · ${match.model || '—'} · ${match.color || '—'} · Current bay: ${roadTestLocationLabel(match.currentLocationId, locations)}. ${pendingTask || canCreate ? 'Are you going for an RT? Reply Yes to start or No to close.' : 'This vehicle has no pending task of this type.'}`);
+        onMessage(`${match.plateNumber} · ${match.model || '—'} · ${match.color || '—'} · Current bay: ${roadTestLocationLabel(match.currentLocationId, locations)}. ${pendingTask || canCreate ? 'Are you going for an RT? Reply Yes to start or No to close.' : 'No pending task exists. Your account cannot create road test assignments; ask an administrator to review your role and Road Tests access.'}`);
         return;
       }
       if (step === 'completed') {
@@ -196,8 +196,8 @@ export function AssistantRoadTest({ ref, initialVehicleId, autoAssign, resumeId,
       </label>}
       {vehicle && <>
         <p>Model: {vehicle.model || '—'} · Colour: {vehicle.color || '—'} · Current bay: {roadTestLocationLabel(vehicle.currentLocationId, locations)}</p>
-        <p>{pending.some(item => item.vehicleId === vehicle.id) ? 'Are you going for an RT?' : canCreate ? 'Are you going for an RT?' : 'This vehicle has no pending task of this type.'}</p>
-        <div className="flex flex-wrap gap-2"><Button size="sm" disabled={!canCreate} onClick={assign}>Assign RT</Button><Button size="sm" disabled={!canCreate && !pending.some(item => item.vehicleId === vehicle.id)} onClick={() => save(false)}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose()}>No</Button></div>
+        <p>{pending.some(item => item.vehicleId === vehicle.id) ? 'Are you going for an RT?' : canCreate ? 'Are you going for an RT?' : 'No pending task exists. Your account cannot create road test assignments; ask an administrator to review your role and Road Tests access.'}</p>
+        <div className="flex flex-wrap gap-2"><Button size="sm" disabled={!canCreate || !vehicle} onClick={assign}>Assign RT</Button><Button size="sm" disabled={!canCreate && !pending.some(item => item.vehicleId === vehicle.id)} onClick={() => save(false)}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose()}>No</Button></div>
       </>}
     </>}
     {step === 'completed' && <>
