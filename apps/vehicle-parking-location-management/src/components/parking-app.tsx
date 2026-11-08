@@ -1272,8 +1272,9 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                             if (draggedVehicleId && status === 'Available' && canTransferVehicle) transferVehicle(draggedVehicleId, bay.id, true);
                             setDraggedVehicleId(undefined);
                           }}
+                          {...holdProps(xVehicle?.id)}
                           onClick={() => {
-                            
+                            if (holdTriggered.current) { holdTriggered.current = false; return; }
                             setSelectedBayId(undefined);
                             if (xVehicle) { setSelectedXParkingBayId(undefined); setOverviewVehicleId(xVehicle.id); }
                             else { setOverviewVehicleId(undefined); setSelectedXParkingBayId(bay.id); }
@@ -2123,7 +2124,7 @@ function Transfer({ vehicles, locations, movements, selectedVehicleId, setSelect
   const [transferZone, setTransferZone] = useState(selectedDestination?.zone ?? transferZones[0] ?? '');
   const firstTransferZone = transferZones[0] ?? '';
   const transferZoneAvailable = transferZones.includes(transferZone);
-  const effectiveTransferZone = transferZoneAvailable ? transferZone : firstTransferZone;
+  const effectiveTransferZone = selectedDestination && transferZones.includes(selectedDestination.zone) ? selectedDestination.zone : transferZoneAvailable ? transferZone : firstTransferZone;
   const destinationBays = transferLocations.filter((item: ParkingLocation) => item.zone === effectiveTransferZone);
   useEffect(() => {
     if (!transferZoneAvailable) {
