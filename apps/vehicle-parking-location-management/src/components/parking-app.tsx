@@ -842,7 +842,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   // A short hold selects a vehicle; selection expires after 20 seconds.
   // Native drag/drop remains available because pointer movement cancels selection.
   const holdTimer = useRef<number | undefined>(undefined);
-  const holdOrigin = useRef<{ x: number; y: number }>();
+  const holdOrigin = useRef<{ x: number; y: number } | undefined>(undefined);
   const holdTriggered = useRef(false);
   const selectedQuickTransfer = useRef<{ vehicleId: string; expiresAt: number } | null>(null);
   const cancelHold = () => {
