@@ -13,8 +13,11 @@ export const workspaceStorageKeys = [
 export type WorkspaceSnapshot = Record<(typeof workspaceStorageKeys)[number], string | null>;
 
 export function readWorkspaceSnapshot(): WorkspaceSnapshot {
+  // Read through the same scoped storage adapter used by writes. This prevents
+  // guest previews from accidentally capturing the signed-in user's data.
+  const storage = workspaceDataStorage();
   return Object.fromEntries(
-    workspaceStorageKeys.map((key) => [key, window.localStorage.getItem(key)]),
+    workspaceStorageKeys.map((key) => [key, storage.getItem(appStorageKey(key))]),
   ) as WorkspaceSnapshot;
 }
 

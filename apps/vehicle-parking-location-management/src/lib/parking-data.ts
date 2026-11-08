@@ -68,6 +68,7 @@ const createParkingLayout = (): ParkingLocation[] => {
     'BP2',
     'BP3',
     'Workshop Centre Bay',
+    'Manager Parking',
   ].map((name) => ({
     id: `loc-container-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     zone: name,
@@ -75,9 +76,9 @@ const createParkingLayout = (): ParkingLocation[] => {
     lane: 'Container',
     section: 'Live Parking Garage',
     direction: 'Two-way',
-    capacity: 15,
+    capacity: name === 'Manager Parking' ? 10 : 15,
     status: 'Available',
-    remarks: name === 'Workshop Centre Bay' ? 'Urgent / Top Priority Vehicles Only; no bay number.' : 'Live Parking Garage container; no bay number.',
+    remarks: name === 'Workshop Centre Bay' ? 'Urgent / Top Priority Vehicles Only; no bay number.' : name === 'Manager Parking' ? 'Manager Parking · 10 spaces; no bay numbers.' : 'Live Parking Garage container; no bay number.',
   }));
 
   return [...zoneA, ...zoneB, ...zoneC, ...workshop, ...reception, ...liveGarageContainers];
@@ -86,9 +87,17 @@ const createParkingLayout = (): ParkingLocation[] => {
 export const isLiveGarageContainer = (location?: ParkingLocation): boolean =>
   location?.section === 'Live Parking Garage';
 
+export const parkingZoneLabel = (zone: string): string => ({ A: 'Acc: Zone A', B: 'Acc: Zone B', C: 'Acc: Zone C', Reception: 'Reception Parking', 'Toyota Reception': 'T-Reception', 'Lexus Reception': 'L-Reception', 'Manager Parking': 'Manager Parking', Workshop: 'Workshop Bay' } as Record<string, string>)[zone] ?? zone;
+
+export const PARKING_ZONE_ORDER = ['A', 'B', 'C', 'Reception', 'Toyota Reception', 'Lexus Reception', 'Washing Area', 'Workshop', 'Workshop Centre Bay', 'BP1', 'BP2', 'BP3', 'Manager Parking', 'Unassigned Bay'] as const;
+export const parkingZoneSort = (a: string, b: string): number => {
+  const index = (value: string) => { const i = PARKING_ZONE_ORDER.indexOf(value as typeof PARKING_ZONE_ORDER[number]); return i < 0 ? PARKING_ZONE_ORDER.length : i; };
+  return index(a) - index(b) || a.localeCompare(b);
+};
+
 export const parkingLocationLabel = (location?: ParkingLocation): string => {
   if (!location) return '—';
-  return isLiveGarageContainer(location) ? location.zone : `${location.zone}-${location.bayNumber}`;
+  return isLiveGarageContainer(location) ? parkingZoneLabel(location.zone) : `${parkingZoneLabel(location.zone)}-${location.bayNumber}`;
 };
 
 export const initialLocations: ParkingLocation[] = createParkingLayout();
@@ -111,7 +120,7 @@ export const reconcileParkingLayout = (savedLocations?: ParkingLocation[]): Park
   const defaultBayKeys = new Set(initialLocations.map(bayKey));
   const restoredDefaults = initialLocations.map((location: ParkingLocation) => {
     const saved = savedById.get(location.id) ?? savedByBay.get(bayKey(location));
-    return saved ? { ...location, ...saved, id: location.id, zone: location.zone, bayNumber: location.bayNumber, lane: location.lane, section: location.section, direction: location.direction, capacity: isLiveGarageContainer(location) ? 15 : saved.capacity } : location;
+    return saved ? { ...location, ...saved, id: location.id, zone: location.zone, bayNumber: location.bayNumber, lane: location.lane, section: location.section, direction: location.direction, capacity: isLiveGarageContainer(location) ? location.capacity : saved.capacity } : location;
   });
   const customLocations = savedLocations
     .map((location: ParkingLocation) => ({ ...location, id: mapParkingLocationId(location.id) ?? location.id }))

@@ -1,3 +1,5 @@
+import { createUUID } from '@/lib/secure-uuid';
+import { parkingZoneSort, parkingZoneLabel } from '@/lib/parking-data';
 import { ReviewWorkspaceAccess } from '@/components/workspace-access-requests';
 import { useActivePickup } from '@/hooks/use-active-pickup';
 import { pickupParkingNotice } from '@/lib/pickup-request-data';
@@ -124,13 +126,7 @@ const statusVariant = (status: string): 'default' | 'secondary' | 'destructive' 
 };
 
 
-const zoneDisplayName = (zone: string): string => {
-  if (['A', 'B', 'C'].includes(zone)) return `Accommodation Parking ${zone}`;
-  if (zone === 'Workshop') return 'Workshop Parking';
-  if (zone === 'Reception') return 'Reception Parking';
-  if (['Lexus Reception', 'Toyota Reception', 'Washing Area', 'BP1', 'BP2', 'BP3', 'Workshop Centre Bay'].includes(zone)) return zone;
-  return `Zone ${zone}`;
-};
+const zoneDisplayName = parkingZoneLabel;
 
 type GarageLayoutItem = {
   id: string;
@@ -206,6 +202,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const hasMounted = useRef(false);
   const skipNextPersist = useRef(false);
   const [roadTestVehicleId, setRoadTestVehicleId] = useState<string>();
+  const [lockedRoadTestId, setLockedRoadTestId] = useState<string>();
   const [dashboardVehicleId, setDashboardVehicleId] = useState<string>();
   const [pullDistance, setPullDistance] = useState(0);
   const pullStartY = useRef<number | undefined>(undefined);
@@ -225,7 +222,19 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const isOnline = syncState !== 'offline';
   const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline · pending' : syncState === 'error' ? 'Sync needs attention' : pendingChanges ? 'Changes pending' : 'Cloud synced';
 
-  const [zone, setZone] = useState('A');
+  const exportVehicleBayData = () => {
+    const columns = ['Plate Number', 'VIN', 'Brand', 'Model', 'Status', 'Parking Zone', 'Parking Bay', 'Location', 'Assigned Date', 'Assigned By', 'Driver Owner'];
+    const quote = (value: unknown) => '\"' + String(value ?? '').replace(/\"/g, '\"\"') + '\"';
+    const rows = vehicles.map((vehicle: Vehicle) => {
+      const location = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(vehicle.currentLocationId));
+      const zoneName = location ? parkingZoneLabel(location.zone) : vehicle.status === 'Released' || vehicle.status === 'Delivered' ? 'Not parked' : 'Unassigned Bay';
+      return [vehicle.plateNumber, vehicle.vin, vehicle.brand, vehicle.model, vehicle.status, zoneName, location?.bayNumber ?? '', location ? parkingLocationLabel(location) : zoneName, vehicle.assignedDate, vehicle.assignedBy, vehicle.driverOwner].map(quote).join(',');
+    });
+    const csv = '\uFEFF' + [columns.map(quote).join(','), ...rows].join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'vplm-all-vehicle-parking.csv'; link.click(); URL.revokeObjectURL(url);
+  };
+  const [zone, setZone] = useState('Unassigned Bay');
   const [assignmentVehicle, setAssignmentVehicle] = useState<VehicleFormData>(emptyVehicleForm);
   const [bayId, setBayId] = useState('');
   const [selectedVehicleId, setSelectedVehicleId] = useState('');
@@ -236,6 +245,16 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const canRecoverDeliveredVehicle = role === 'Administrator' || role === 'Supervisor' || role === 'TechnicalLeader' || role === 'TechnicalAdvisor';
   const isAdministrator = role === 'Administrator' && (access.data?.can('ApplicationSettings', 'ManageSetting') ?? false);
   const canAccessRoadTests = Boolean(access.data && !rolesWithoutRoadTests.includes(role));
+  useEffect(() => {
+    if (!user?.objectId || !canAccessRoadTests) return;
+    const ownActive = loadRoadTests().find((test: RoadTestRecord) => test.status === 'In Road Test' && test.startedById === user.objectId);
+    if (ownActive) { setLockedRoadTestId(ownActive.id); setScreen('road-tests'); }
+  }, [user?.objectId, canAccessRoadTests]);
+  useEffect(() => {
+    if (lockedRoadTestId && screen !== 'road-tests') setScreen('road-tests');
+  }, [lockedRoadTestId, screen]);
+
+
   const visibleNavigation = access.data ? navigation.filter((item) => (role !== 'Technician' || technicianScreens.includes(item.id)) && item.id !== 'layout' && (!localGuest || item.id !== 'pickup-requests') && (item.id !== 'road-tests' || canAccessRoadTests) && (item.id !== 'backup-playback' || isAdministrator) && roleRank[role] >= roleRank[item.minimumRole as Role]) : navigation.filter((item) => item.id === 'profile');
   const mobileNavigation = [...visibleNavigation].sort((a, b) => mobileNavigationOrder.indexOf(a.id) - mobileNavigationOrder.indexOf(b.id));
   const moveMobileNavigationItem = (id: Screen, direction: -1 | 1) => {
@@ -277,9 +296,9 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     const timestamp = new Date().toISOString();
     const snapshotVehicle = vehicle ? { ...vehicle, photoUrls: [], photoUploadedAt: undefined } : undefined;
     const snapshot = snapshotVehicle ? JSON.stringify({ vehicle: snapshotVehicle, locationLabel: locationLabel(toLocationId ?? vehicle?.currentLocationId), fromLocationLabel: locationLabel(fromLocationId), toLocationLabel: locationLabel(toLocationId), assignment: { assignedDate: vehicle?.assignedDate, assignedBy: vehicle?.assignedBy, currentLocationId: toLocationId ?? vehicle?.currentLocationId }, action, fromLocationId, toLocationId }) : undefined;
-    const event: OfflineAuditEvent = { id: `audit-${crypto.randomUUID()}`, action, entity, detail, actor, timestamp, recordId: vehicle?.id, fromLocationId, toLocationId, snapshot };
+    const event: OfflineAuditEvent = { id: `audit-${createUUID()}`, action, entity, detail, actor, timestamp, recordId: vehicle?.id, fromLocationId, toLocationId, snapshot };
     setAuditEvents((current: OfflineAuditEvent[]) => [event, ...current]);
-    enqueueSync({ id: crypto.randomUUID(), ownerId, entity: 'AuditLog', action: 'create', recordId: event.id, payload: { name: `${action} ${entity}`, action, entity, detail, actorId: ownerId, actorName: actor, timestamp, recordId: vehicle?.id ?? event.id, beforeSnapshot: fromLocationId ? JSON.stringify({ vehicle, locationId: fromLocationId, locationLabel: locationLabel(fromLocationId) }) : '', afterSnapshot: JSON.stringify({ detail, snapshot, fromLocationId, toLocationId, fromLocationLabel: locationLabel(fromLocationId), toLocationLabel: locationLabel(toLocationId) }) }, version: 1, createdAt: timestamp });
+    enqueueSync({ id: createUUID(), ownerId, entity: 'AuditLog', action: 'create', recordId: event.id, payload: { name: `${action} ${entity}`, action, entity, detail, actorId: ownerId, actorName: actor, timestamp, recordId: vehicle?.id ?? event.id, beforeSnapshot: fromLocationId ? JSON.stringify({ vehicle, locationId: fromLocationId, locationLabel: locationLabel(fromLocationId) }) : '', afterSnapshot: JSON.stringify({ detail, snapshot, fromLocationId, toLocationId, fromLocationLabel: locationLabel(fromLocationId), toLocationLabel: locationLabel(toLocationId) }) }, version: 1, createdAt: timestamp });
   };
   const [newLocationId, setNewLocationId] = useState('');
   const [notes, setNotes] = useState('');
@@ -331,7 +350,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
 
   const activeVehicles = useMemo(() => vehicles.filter((item: Vehicle) => item.status !== 'Delivered'), [vehicles]);
   const containerVehicleCount = (locationId: string) => activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId)).length;
-  const containerCanAccept = (location: ParkingLocation) => isLiveGarageContainer(location) && location.status !== 'Reserved' && location.status !== 'Maintenance' && containerVehicleCount(location.id) < 15;
+  const containerCanAccept = (location: ParkingLocation) => isLiveGarageContainer(location) && location.status !== 'Reserved' && location.status !== 'Maintenance' && containerVehicleCount(location.id) < location.capacity;
   const linkedVehicleLocationIds = useMemo(() => new Set(activeVehicles.filter((item: Vehicle) => item.xParking !== 'Yes').map((item: Vehicle) => parkingRecordKey(item.currentLocationId)).filter((id: string) => Boolean(id))), [activeVehicles]);
   useEffect(() => {
     setLocations((current: ParkingLocation[]) => {
@@ -356,7 +375,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const searchResult = normalizedSearch ? activeVehicles.find((item: Vehicle) =>
     item.plateNumber.toLowerCase().includes(normalizedSearch) || item.vin.toLowerCase().includes(normalizedSearch)) : undefined;
 
-  const zoneNames = useMemo(() => Array.from(new Set(locations.map((item: ParkingLocation) => item.zone))).sort(), [locations]);
+  const zoneNames = useMemo(() => Array.from(new Set([...locations.map((item: ParkingLocation) => item.zone), 'Unassigned Bay'])).sort(parkingZoneSort), [locations]);
   const zoneStats = useMemo(() => zoneNames.map((zoneName: string) => {
     const bays = locations.filter((item: ParkingLocation) => item.zone === zoneName);
     const used = bays.filter((item: ParkingLocation) => linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
@@ -371,9 +390,9 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     const fromLocationLabel = locationLabel(fromLocationId);
     const toLocationLabel = locationLabel(toLocationId);
     const snapshot = snapshotVehicle ? { vehicle: snapshotVehicle, locationLabel: toLocationLabel, fromLocationLabel, toLocationLabel, assignment: { assignedDate: snapshotVehicle.assignedDate, assignedBy: actor, currentLocationId: toLocationId }, action: type, fromLocationId, toLocationId } : undefined;
-    const movement: Movement = { id: `mov-${crypto.randomUUID()}`, vehicleId, fromLocationId, toLocationId, movementType: type, actionDateTime: movementDate, performedBy: actor, notes: movementNotes, snapshot };
+    const movement: Movement = { id: `mov-${createUUID()}`, vehicleId, fromLocationId, toLocationId, movementType: type, actionDateTime: movementDate, performedBy: actor, notes: movementNotes, snapshot };
     setMovements((current: Movement[]) => [movement, ...current]);
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'VehicleMovement', action: 'create', recordId: movement.id, payload: { name: `${type} ${vehicleId}`, vehicleId, vehicleName: vehicle?.vehicleId ?? vehicleId, fromLocationId, toLocationId, fromLocationLabel, toLocationLabel, movementType: type, movementDate, notes: JSON.stringify({ notes: movementNotes, snapshot, fromLocationId, toLocationId, fromLocationLabel, toLocationLabel }), actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: movementDate });
+    enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'VehicleMovement', action: 'create', recordId: movement.id, payload: { name: `${type} ${vehicleId}`, vehicleId, vehicleName: vehicle?.vehicleId ?? vehicleId, fromLocationId, toLocationId, fromLocationLabel, toLocationLabel, movementType: type, movementDate, notes: JSON.stringify({ notes: movementNotes, snapshot, fromLocationId, toLocationId, fromLocationLabel, toLocationLabel }), actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: movementDate });
   };
 
   const handleAssign = (targetBayId?: string, toUnassignedBay = false, xParkingOccupant?: XParkingOccupant, submittedVehicle: VehicleFormData = assignmentVehicle): boolean => {
@@ -401,7 +420,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       return false;
     }
     const normalized = validation.value.plateNumber;
-    const vehicleId = existing?.id ?? `veh-${crypto.randomUUID()}`;
+    const vehicleId = existing?.id ?? `veh-${createUUID()}`;
     if (parkingRecordKey(existing?.currentLocationId)) { toast.error('Vehicle already has an active parking assignment.'); return false; }
     if (toUnassignedBay && existing && !existing.currentLocationId && existing.status !== 'Released' && existing.status !== 'Delivered') { toast.error('Vehicle is already in the Unassigned Bay tray.'); return false; }
     const assignedAt = new Date().toISOString();
@@ -440,7 +459,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       setLocations(nextLocations);
       addMovement(vehicleId, existing?.currentLocationId, location.id, 'Assign');
     }
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: existing ? 'update' : 'create', recordId: vehicleId, payload: { vehicleName: existing?.vehicleId ?? assignedVehicle.vehicleId, plateNumber: normalized, vin: validation.value.vin, brand: validation.value.brand, model: validation.value.model, color: validation.value.color, locationId: location?.id ?? '', ownerId: queueOwnerId, ownerName: validation.value.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
+    enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: existing ? 'update' : 'create', recordId: vehicleId, payload: { vehicleName: existing?.vehicleId ?? assignedVehicle.vehicleId, plateNumber: normalized, vin: validation.value.vin, brand: validation.value.brand, model: validation.value.model, color: validation.value.color, locationId: location?.id ?? '', ownerId: queueOwnerId, ownerName: validation.value.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
     toast.success(`${normalized} assigned to ${destinationLabel}.`);
     playSound('success');
     setBayId(''); setAssignmentVehicle(emptyVehicleForm); setNotes('');
@@ -458,7 +477,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === vehicle.id ? { ...item, status: 'Released', operationalStatus: 'Checked Out', currentLocationId: undefined } : item));
     setLocations((current: ParkingLocation[]) => current.map((item: ParkingLocation) => parkingRecordKey(item.id) === previous ? { ...item, status: activeVehicles.some((candidate: Vehicle) => candidate.id !== vehicle.id && candidate.xParking !== 'Yes' && parkingRecordKey(candidate.currentLocationId) === previous) ? 'Occupied' : 'Available' } : item));
     addMovement(vehicle.id, vehicle.currentLocationId, undefined, 'Release');
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicle.id, payload: { locationId: '', actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: new Date().toISOString() });
+    enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicle.id, payload: { locationId: '', actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: new Date().toISOString() });
     logAudit('Release', 'Vehicle', `${vehicle.plateNumber} from ${locationLabel(previous)}`, { ...vehicle, status: 'Released', operationalStatus: 'Checked Out', currentLocationId: undefined }, vehicle.currentLocationId, undefined);
     toast.success(`${vehicle.plateNumber} released.`);
     if (navigator.onLine) void sync(false);
@@ -509,7 +528,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     }
     setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === vehicle.id ? updatedVehicle : item));
     addMovement(vehicle.id, previous, target.id, 'Transfer', movementNotes);
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicle.id, payload: { locationId: target.id, actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: transferredAt });
+    enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicle.id, payload: { locationId: target.id, actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: transferredAt });
     logAudit('Transfer', 'Vehicle', `${vehicle.plateNumber}: ${locationLabel(previous)} → ${target.zone}-${target.bayNumber}`, updatedVehicle, previous, target.id);
     toast.success('Vehicle transferred.');
     playSound('general');
@@ -536,6 +555,17 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setScreen('assignment');
     return true;
   };
+  const assignFromAssistant = (plateNumber: string, targetBayId: string): boolean => {
+    if (!canAssignVehicle) return false;
+    const normalizedPlate = plateNumber.trim().toUpperCase();
+    const existing = activeVehicles.find((item: Vehicle) => item.plateNumber.trim().toUpperCase() === normalizedPlate);
+    if (existing?.currentLocationId) return false;
+    const draft: VehicleFormData = existing
+      ? { plateNumber: existing.plateNumber, vin: existing.vin, brand: existing.brand, model: existing.model, color: existing.color, customerName: existing.customerName, driverOwner: existing.driverOwner, department: existing.department, xParking: existing.xParking ?? 'No' }
+      : { ...emptyVehicleForm, plateNumber: normalizedPlate };
+    // Use the same validation, occupancy checks, audit and persistence as manual Assign.
+    return handleAssign(targetBayId, false, undefined, draft);
+  };
   const handleRoadTestLocationChange = (vehicleId: string, fromId: string | undefined, toId: string | undefined, out: boolean) => {
     const vehicle = vehicles.find((item: Vehicle) => item.id === vehicleId);
     const updatedVehicle = vehicle ? { ...vehicle, currentLocationId: toId, operationalStatus: out ? 'Checked Out' as const : 'Parked' as const, status: out ? 'Released' as const : 'Assigned' as const } : undefined;
@@ -550,7 +580,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     if (!vehicle) return toast.error('This vehicle is not in the Delivered Archive.');
     const recoveredVehicle: Vehicle = { ...vehicle, status: 'Released', operationalStatus: 'Checked Out', currentLocationId: undefined, deliveredAt: undefined, deliveredBy: undefined, finalParkingBay: undefined, checkOutAt: undefined };
     setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === vehicleId ? recoveredVehicle : item));
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicleId, payload: { vehicleName: vehicle.vehicleId, plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, locationId: '', ownerId: queueOwnerId, ownerName: vehicle.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
+    enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: 'update', recordId: vehicleId, payload: { vehicleName: vehicle.vehicleId, plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, locationId: '', ownerId: queueOwnerId, ownerName: vehicle.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
     logAudit('Restore', 'Vehicle', `${vehicle.plateNumber} recovered from Delivered Archive${reason ? ` · ${reason}` : ''}`, recoveredVehicle);
     toast.success(`${vehicle.plateNumber} recovered and is ready for reassignment.`);
     if (navigator.onLine) void sync(false);
@@ -596,9 +626,9 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       && Date.parse(item.reservationDate) < endTime && (item.endDate ? Date.parse(item.endDate) : Date.parse(item.reservationDate) + 3600000) > startTime)) {
       return toast.error('The bay already has a reservation during this time.');
     }
-    const reservation: Reservation = { id: `res-${crypto.randomUUID()}`, reservationId: `RS-${Date.now().toString().slice(-4)}`, vehicleId: selectedVehicleId, locationId: newLocationId, reservationDate: startDate, endDate, reservedBy: actor, status: 'Upcoming' };
+    const reservation: Reservation = { id: `res-${createUUID()}`, reservationId: `RS-${Date.now().toString().slice(-4)}`, vehicleId: selectedVehicleId, locationId: newLocationId, reservationDate: startDate, endDate, reservedBy: actor, status: 'Upcoming' };
     setReservations((current: Reservation[]) => [reservation, ...current]);
-    enqueueSync({ id: crypto.randomUUID(), ownerId: queueOwnerId, entity: 'Reservation', action: 'create', recordId: reservation.id, payload: { name: reservation.reservationId, vehicleId: selectedVehicleId, vehicleName: vehicle?.vehicleId ?? selectedVehicleId, locationId: newLocationId, startDate, endDate, actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: new Date().toISOString() });
+    enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'Reservation', action: 'create', recordId: reservation.id, payload: { name: reservation.reservationId, vehicleId: selectedVehicleId, vehicleName: vehicle?.vehicleId ?? selectedVehicleId, locationId: newLocationId, startDate, endDate, actorId: queueOwnerId, actorName: actor }, version: 1, createdAt: new Date().toISOString() });
     if (vehicle) logAudit('Reservation', 'Vehicle', `${vehicle.plateNumber} → ${locationLabel(newLocationId)}`, { ...vehicle, operationalStatus: 'Reserved' }, vehicle.currentLocationId, newLocationId);
     toast.success('Parking bay reservation saved.');
     playSound('assignment');
@@ -744,10 +774,11 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
             }
             onPickupWorkspaceRefresh?.(id);
           }} readOnly={guestPreview} vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} hasUnsyncedChanges={Boolean(pendingChanges || syncState === 'syncing' || syncState === 'error')} />}
-          {screen === 'road-tests' && canAccessRoadTests && <RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} actorRole={role} canCreateAssignment canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} isAdministrator={isAdministrator} initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} /> }
+          {screen === 'road-tests' && canAccessRoadTests && <RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} actorRole={role} canCreateAssignment canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} isAdministrator={isAdministrator} initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} onRoadTestStarted={(id: string) => { setLockedRoadTestId(id); setScreen('road-tests'); }} onRoadTestCompleted={() => setLockedRoadTestId(undefined)} /> }
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
-          {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage} canEditVehicle={canEditVehicle} canTransferVehicle={canTransferVehicle} canAssignVehicle={canAssignVehicle} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} assignSelectedBay={(selectedBayId?: string, vehicleForm?: VehicleFormData) => handleAssign(selectedBayId, false, undefined, vehicleForm)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
-          {screen === 'assignment' && <Assignment assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} zone={zone} setZone={setZone} bayId={bayId} setBayId={setBayId} availableBays={availableBays} locations={locations} vehicles={activeVehicles} zoneNames={zoneNames} handleAssign={(targetBayId?: string, occupant?: XParkingOccupant) => handleAssign(targetBayId, false, occupant)} handleAssignUnassigned={() => handleAssign(undefined, true)} handleRelease={handleRelease} handleOcr={handleOcr} fileRef={fileRef} />}
+          {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage} canEditVehicle={canEditVehicle} canTransferVehicle={canTransferVehicle} canAssignVehicle={canAssignVehicle} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onMoveVehicle={(vehicleId: string) => { setSelectedVehicleId(vehicleId); setNewLocationId(''); setNotes(''); setScreen('transfer'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} assignSelectedBay={(selectedBayId?: string, vehicleForm?: VehicleFormData) => handleAssign(selectedBayId, false, undefined, vehicleForm)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
+          {screen === 'assignment' && canManage && <div className="mb-3 flex justify-end"><Button variant="outline" onClick={exportVehicleBayData}><Download /> Download all vehicle / bay data</Button></div>}
+          {screen === 'assignment' && <Assignment assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} zone={zone} setZone={setZone} bayId={bayId} setBayId={setBayId} availableBays={availableBays} locations={locations} vehicles={activeVehicles} zoneNames={zoneNames} handleAssign={(targetBayId?: string, occupant?: XParkingOccupant) => handleAssign(targetBayId, zone === 'Unassigned Bay', occupant)} handleAssignUnassigned={() => handleAssign(undefined, true)} handleRelease={handleRelease} handleOcr={handleOcr} fileRef={fileRef} />}
           {screen === 'search' && <SearchScreen onRecoverDeliveredVehicle={canRecoverDeliveredVehicle ? recoverDeliveredVehicle : undefined} archiveOnSearchMiss={role === 'TechnicalLeader' || role === 'TechnicalAdvisor' || role === 'Drivers' || role === 'Technician'} query={searchQuery} setQuery={setSearchQuery} result={searchQuery ? searchResult : undefined} locationLabel={locationLabel} locations={locations} vehicles={vehicles} movements={movements} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} />}
           {screen === 'layout' && <LayoutScreen locations={locations} zoneFilter={zoneFilter} setZoneFilter={setZoneFilter} zoneStats={zoneStats} />}
           {screen === 'transfer' && <Transfer vehicles={vehicles} locations={locations} movements={movements} selectedVehicleId={selectedVehicleId} setSelectedVehicleId={setSelectedVehicleId} selectedVehicle={selectedVehicle} newLocationId={newLocationId} setNewLocationId={setNewLocationId} notes={notes} setNotes={setNotes} handleTransfer={handleTransfer} locationLabel={locationLabel} canAcceptContainer={containerCanAccept} />}
@@ -780,7 +811,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
       <WorkspaceRecoveryReview userId={user?.objectId} open={recoveryReviewOpen} onOpenChange={setRecoveryReviewOpen} onKeepCloudReviewed={keepCloudAfterReview} />
-      {!localGuest && <AiAssistant launcherVisible={aiLauncherVisible} open={aiOpen} onOpenChange={setAiOpen} vehicles={vehicles} movements={movements} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} locationLabel={locationLabel} onAssign={openAssistantAssignment} onTransfer={transferVehicleById} />}
+      {!localGuest && <AiAssistant launcherVisible={aiLauncherVisible} open={aiOpen} onOpenChange={setAiOpen} vehicles={vehicles} movements={movements} locations={locations} role={role} actor={actor} userId={ownerId ?? ''} canAccessRoadTests={canAccessRoadTests} onRoadTestLocationChange={handleRoadTestLocationChange} canAssign={canAssignVehicle} canTransfer={canTransferVehicle} locationLabel={locationLabel} onAssign={openAssistantAssignment} onAssignToBay={assignFromAssistant} onTransfer={transferVehicleById} />}
     </div>
   );
   return appShell;
@@ -822,10 +853,11 @@ function TopViewCar({ vehicle, roadTest, xParked = false, onSelect }: { vehicle:
   );
 }
 
-function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, zoneStats, occupied, available, reserved, utilization, locationLabel, actor, actorId, role, addMovement, canManage, canEditVehicle, canTransferVehicle, canAssignVehicle, canAccessRoadTests, logAudit, garageLayout, focusedVehicleId, onFocusedVehicleHandled, onOpenRoadTests, onAssignUnassignedVehicle, assignSelectedBay, assignmentVehicle, setAssignmentVehicle }: { locations: ParkingLocation[]; setLocations: React.Dispatch<React.SetStateAction<ParkingLocation[]>>; movements: Movement[]; vehicles: Vehicle[]; setVehicles: React.Dispatch<React.SetStateAction<Vehicle[]>>; zoneStats: { zone: string; total: number; available: number; percent: number; state: string }[]; occupied: number; available: number; reserved: number; utilization: number; locationLabel: (id?: string) => string; actor: string; actorId: string; role: Role; addMovement: (vehicleId: string, fromLocationId: string | undefined, toLocationId: string | undefined, type: Movement['movementType']) => void; canManage: boolean; canEditVehicle: boolean; canTransferVehicle: boolean; canAssignVehicle: boolean; canAccessRoadTests: boolean; logAudit: (action: string, entity: string, detail: string) => void; garageLayout: GarageLayoutItem[]; focusedVehicleId?: string; onFocusedVehicleHandled: () => void; onOpenRoadTests: (vehicleId?: string) => void; onAssignUnassignedVehicle: (vehicle: Vehicle) => void; assignSelectedBay: (bayId?: string, vehicleForm?: VehicleFormData) => boolean; assignmentVehicle: VehicleFormData; setAssignmentVehicle: React.Dispatch<React.SetStateAction<VehicleFormData>> }) {
+function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, zoneStats, occupied, available, reserved, utilization, locationLabel, actor, actorId, role, addMovement, canManage, canEditVehicle, canTransferVehicle, canAssignVehicle, canAccessRoadTests, logAudit, garageLayout, focusedVehicleId, onFocusedVehicleHandled, onOpenRoadTests, onMoveVehicle, onAssignUnassignedVehicle, assignSelectedBay, assignmentVehicle, setAssignmentVehicle }: { locations: ParkingLocation[]; setLocations: React.Dispatch<React.SetStateAction<ParkingLocation[]>>; movements: Movement[]; vehicles: Vehicle[]; setVehicles: React.Dispatch<React.SetStateAction<Vehicle[]>>; zoneStats: { zone: string; total: number; available: number; percent: number; state: string }[]; occupied: number; available: number; reserved: number; utilization: number; locationLabel: (id?: string) => string; actor: string; actorId: string; role: Role; addMovement: (vehicleId: string, fromLocationId: string | undefined, toLocationId: string | undefined, type: Movement['movementType']) => void; canManage: boolean; canEditVehicle: boolean; canTransferVehicle: boolean; canAssignVehicle: boolean; canAccessRoadTests: boolean; logAudit: (action: string, entity: string, detail: string) => void; garageLayout: GarageLayoutItem[]; focusedVehicleId?: string; onFocusedVehicleHandled: () => void; onOpenRoadTests: (vehicleId?: string) => void; onMoveVehicle: (vehicleId: string) => void; onAssignUnassignedVehicle: (vehicle: Vehicle) => void; assignSelectedBay: (bayId?: string, vehicleForm?: VehicleFormData) => boolean; assignmentVehicle: VehicleFormData; setAssignmentVehicle: React.Dispatch<React.SetStateAction<VehicleFormData>> }) {
   const [selectedBayId, setSelectedBayId] = useState<string>();
   const [selectedXParkingBayId, setSelectedXParkingBayId] = useState<string>();
   const [overviewVehicleId, setOverviewVehicleId] = useState<string>();
+  const [vehicleActionsDetailsId, setVehicleActionsDetailsId] = useState<string>();
   const [draggedVehicleId, setDraggedVehicleId] = useState<string>();
   const [garageZoneFilter, setGarageZoneFilter] = useState('all');
   const [openedParkingZone, setOpenedParkingZone] = useState<string | null>(null);
@@ -861,7 +893,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const showVehiclesOnMap = true;
 
   const [collapsedZones, setCollapsedZones] = useState<Set<string>>(new Set());
-  const visibleZones = zoneStats.filter((zoneItem: { zone: string }) => !['BP1', 'BP2', 'BP3', 'Washing Area', 'Toyota Reception', 'Lexus Reception', 'Workshop Centre Bay'].includes(zoneItem.zone) && (garageZoneFilter === 'all' || zoneItem.zone === garageZoneFilter));
+  const visibleZones = zoneStats.filter((zoneItem: { zone: string }) => !['BP1', 'BP2', 'BP3', 'Washing Area', 'Toyota Reception', 'Lexus Reception', 'Workshop Centre Bay', 'Manager Parking'].includes(zoneItem.zone) && (garageZoneFilter === 'all' || zoneItem.zone === garageZoneFilter));
   useEffect(() => {
     if (!focusedVehicleId) return;
     const focusedVehicle = vehicles.find((vehicle: Vehicle) => vehicle.id === focusedVehicleId);
@@ -949,7 +981,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     ? { ...selectedPhysicalBay, status: (selectedBayVehicle ? 'Occupied' : selectedMaintenance ? 'Maintenance' : selectedReservation ? 'Reserved' : 'Available') as ParkingLocation['status'] }
     : selectedPhysicalBay;
   const appendBayAudit = (bayIdValue: string, action: string, comments: string) => {
-    const entry: BayAuditEntry = { id: `bay-audit-${crypto.randomUUID()}`, bayId: bayIdValue, user: actor, role, timestamp: new Date().toISOString(), action, comments };
+    const entry: BayAuditEntry = { id: `bay-audit-${createUUID()}`, bayId: bayIdValue, user: actor, role, timestamp: new Date().toISOString(), action, comments };
     setBayManagement((current) => ({ ...current, audit: [entry, ...current.audit] }));
     const auditLocation = bayIdValue.startsWith('x-parking:') ? `X Parking beside ${locationLabel(bayIdValue.slice('x-parking:'.length))}` : locationLabel(bayIdValue);
     logAudit(action, 'Parking bay', `${auditLocation} · ${comments} · role ${role}`);
@@ -997,7 +1029,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     toast.success(approved ? 'Release approved; bay is now vacant.' : 'Reservation kept; requester notified.');
   };
   const containerVehicleCount = (locationId: string) => activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(locationId)).length;
-  const containerCanAccept = (location: ParkingLocation) => isLiveGarageContainer(location) && location.status !== 'Reserved' && location.status !== 'Maintenance' && containerVehicleCount(location.id) < 15;
+  const containerCanAccept = (location: ParkingLocation) => isLiveGarageContainer(location) && location.status !== 'Reserved' && location.status !== 'Maintenance' && containerVehicleCount(location.id) < location.capacity;
   const transferVehicle = (vehicleId: string, destinationId: string, toXParking = false, nextOperationalStatus: Vehicle['operationalStatus'] = 'Parked') => {
     const vehicle = activeVehicles.find((item: Vehicle) => item.id === vehicleId);
     const destination = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(destinationId));
@@ -1080,7 +1112,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
 
     const updated = vehicle ? { ...vehicle, ...changes } : undefined;
     setVehicles((current: Vehicle[]) => current.map((item: Vehicle) => item.id === vehicleId ? { ...item, ...changes } : item));
-    if (updated) enqueueSync({ id: crypto.randomUUID(), ownerId: actorId, entity: 'Vehicle', action: 'update', recordId: vehicleId, payload: { vehicleName: updated.vehicleId, plateNumber: updated.plateNumber, vin: updated.vin, brand: updated.brand, model: updated.model, color: updated.color, locationId: updated.currentLocationId ?? '', ownerId: actorId, ownerName: updated.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
+    if (updated) enqueueSync({ id: createUUID(), ownerId: actorId, entity: 'Vehicle', action: 'update', recordId: vehicleId, payload: { vehicleName: updated.vehicleId, plateNumber: updated.plateNumber, vin: updated.vin, brand: updated.brand, model: updated.model, color: updated.color, locationId: updated.currentLocationId ?? '', ownerId: actorId, ownerName: updated.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
     logAudit(auditAction, 'Vehicle', updated?.plateNumber ?? vehicleId);
   };
   const deleteVehicle = (vehicleId: string) => {
@@ -1293,7 +1325,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
       </div>
       {!openedParkingZone && <section className="vplm-parking-other-section">
         <button type="button" className="vplm-parking-other-toggle" onClick={() => setShowOtherParkingAreas((current) => !current)} aria-expanded={showOtherParkingAreas}>
-          <span className="flex min-w-0 flex-col gap-0.5 text-left"><strong>Other parking areas</strong><small>Unassigned · Reception · Washing · BP containers</small></span>
+          <span className="flex min-w-0 flex-col gap-0.5 text-left"><strong>Other parking areas</strong><small>Unassigned · Reception · Washing · BP · Manager Parking</small></span>
           <span className="flex shrink-0 items-center gap-2"><Badge variant="outline">{unassignedVehicles.length} unassigned</Badge><ChevronDown className={`h-4 w-4 transition-transform ${showOtherParkingAreas ? 'rotate-180' : ''}`} /></span>
         </button>
         {showOtherParkingAreas && <div className="vplm-parking-other-content">
@@ -1307,7 +1339,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <div><CardTitle className="flex items-center gap-2"><CarFront /> {containerName}</CardTitle><CardDescription>{containerName === 'Workshop Centre Bay' ? 'Urgent / Top Priority Vehicles Only' : 'Separate vehicle parking container'} · no bay number</CardDescription></div>
-                <Badge variant={occupants.length >= 15 ? 'destructive' : 'outline'}>{occupants.length} / 15 vehicles</Badge>
+                <Badge variant={occupants.length >= container.capacity ? 'destructive' : 'outline'}>{occupants.length} / {container.capacity} vehicles</Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -1331,7 +1363,17 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
         </div>}
       </section>}
       <BayInformationDialog compactSheet key={selectedSlotId ?? 'no-bay'} isXParking={Boolean(selectedXParkingBayId)} bay={selectedBay} open={Boolean(selectedAnchorId)} onOpenChange={(open: boolean) => { if (!open) { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); } }} vehicle={selectedBayVehicle} reservation={selectedReservation} maintenance={selectedMaintenance} history={selectedHistory} actor={actor} role={role} onReserve={reserveBay} onMaintenance={markMaintenance} onCompleteMaintenance={completeMaintenance} assignmentVehicle={assignmentVehicle} onAssignmentVehicleChange={setAssignmentVehicle} canAssignVehicle={canAssignVehicle} onAssignVehicle={() => { if (!selectedBay) return; const form = selectedXParkingBayId ? { ...assignmentVehicle, xParking: 'Yes' as const } : assignmentVehicle; if (assignSelectedBay(selectedBay.id, form)) { setSelectedBayId(undefined); setSelectedXParkingBayId(undefined); } }} onRequestRelease={requestRelease} onReleaseDecision={decideRelease} />
-      <VehicleOverviewDialog compactSheet viewerRole={role} vehicle={activeVehicles.find((item: Vehicle) => item.id === overviewVehicleId)} open={Boolean(overviewVehicleId)} onOpenChange={(open: boolean) => { if (!open) setOverviewVehicleId(undefined); }} locations={locations} vehicles={activeVehicles} movements={movements} roadTest={overviewVehicleId ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === overviewVehicleId) : undefined} canRequestRoadTest={canAccessRoadTests} canEdit={canEditVehicle} canTransfer={canTransferVehicle} canDelete={canManage} onRequestRoadTest={(vehicle: Vehicle) => { setOverviewVehicleId(undefined); onOpenRoadTests(vehicle.id); }} onUpdate={updateVehicle} onTransfer={transferVehicle} onStartWashing={startWashing} onDeliver={deliverVehicle} onDelete={deleteVehicle} />
+      {role === 'TechnicalLeader' && overviewVehicleId && <Dialog open onOpenChange={(open: boolean) => { if (!open) setOverviewVehicleId(undefined); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Vehicle actions</DialogTitle><DialogDescription>{activeVehicles.find((item: Vehicle) => item.id === overviewVehicleId)?.plateNumber ?? 'Selected vehicle'}</DialogDescription></DialogHeader>
+          <div className="grid gap-3">
+            <Button disabled={!canAccessRoadTests} onClick={() => { const id = overviewVehicleId; setOverviewVehicleId(undefined); if (id) onOpenRoadTests(id); }}><Route className="mr-2 h-4 w-4" /> Start Road Test</Button>
+            <Button disabled={!canTransferVehicle} variant="outline" onClick={() => { const id = overviewVehicleId; setOverviewVehicleId(undefined); if (id) onMoveVehicle(id); }}><MoveRight className="mr-2 h-4 w-4" /> Move Vehicle</Button>
+            <Button variant="outline" onClick={() => { setVehicleActionsDetailsId(overviewVehicleId); setOverviewVehicleId(undefined); }}><ClipboardList className="mr-2 h-4 w-4" /> More Details</Button>
+          </div>
+        </DialogContent>
+      </Dialog>}
+      <VehicleOverviewDialog compactSheet viewerRole={role} vehicle={activeVehicles.find((item: Vehicle) => item.id === (role === 'TechnicalLeader' ? vehicleActionsDetailsId : overviewVehicleId))} open={Boolean(role === 'TechnicalLeader' ? vehicleActionsDetailsId : overviewVehicleId)} onOpenChange={(open: boolean) => { if (!open) { setOverviewVehicleId(undefined); setVehicleActionsDetailsId(undefined); } }} locations={locations} vehicles={activeVehicles} movements={movements} roadTest={(role === 'TechnicalLeader' ? vehicleActionsDetailsId : overviewVehicleId) ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === (role === 'TechnicalLeader' ? vehicleActionsDetailsId : overviewVehicleId)) : undefined} canRequestRoadTest={canAccessRoadTests} canEdit={canEditVehicle} canTransfer={canTransferVehicle} canDelete={canManage} onRequestRoadTest={(vehicle: Vehicle) => { setOverviewVehicleId(undefined); onOpenRoadTests(vehicle.id); }} onUpdate={updateVehicle} onTransfer={transferVehicle} onStartWashing={startWashing} onDeliver={deliverVehicle} onDelete={deleteVehicle} />
     </div>
   );
 }
@@ -1361,7 +1403,8 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
   const parkHereBay = selectedBayOccupied ? suggestedBay : selectedBay;
   const openAssignment = () => {
     if (assignmentVehicle.xParking !== 'Yes') {
-      handleAssign();
+      if (zone === 'Unassigned Bay') handleAssignUnassigned();
+      else handleAssign();
       return;
     }
     if (!selectedBay) {
@@ -1402,7 +1445,7 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
         <CardContent className="min-w-0 space-y-4">
           <VehicleFormFields value={assignmentVehicle} onChange={setAssignmentVehicle} idPrefix="assignment" assignmentMode />
           <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="min-w-0 space-y-2"><Label>Parking zone</Label><Select value={zone} onValueChange={(value: string) => { setZone(value); setBayId(''); }}><SelectTrigger className="h-12 w-full min-w-0"><SelectValue /></SelectTrigger><SelectContent>{zoneNames.filter((item: string) => item).map((item: string) => <SelectItem key={item} value={item}>{['Lexus Reception', 'Toyota Reception', 'Washing Area', 'BP1', 'BP2', 'BP3', 'Workshop Centre Bay'].includes(item) ? item : `Zone ${item}`}</SelectItem>)}</SelectContent></Select></div>
+            <div className="min-w-0 space-y-2"><Label>Parking zone</Label><Select value={zone} onValueChange={(value: string) => { setZone(value); setBayId(''); }}><SelectTrigger className="h-12 w-full min-w-0"><SelectValue /></SelectTrigger><SelectContent>{zoneNames.filter((item: string) => item).map((item: string) => <SelectItem key={item} value={item}>{parkingZoneLabel(item)}</SelectItem>)}</SelectContent></Select></div>
             <div className="min-w-0 space-y-2"><Label>{assignmentVehicle.xParking === 'Yes' ? 'Parking bay / X Parking anchor' : 'Available bay'}</Label><Select value={bayId || 'none'} onValueChange={(value: string) => { const nextBayId = value === 'none' ? '' : value; setBayId(nextBayId); const nextBay = locations.find((item: ParkingLocation) => item.id === nextBayId); if (nextBay && nextBay.zone !== zone) setZone(nextBay.zone); }}><SelectTrigger className="h-12 w-full min-w-0"><SelectValue placeholder="Select bay" /></SelectTrigger><SelectContent><SelectItem value="none">Select a bay</SelectItem>{baysForSelection.filter((item: ParkingLocation) => item.id).map((item: ParkingLocation) => {
               const occupant = vehicles.find((vehicle: Vehicle) => vehicle.xParking === 'Yes' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(item.id));
               const xReserved = management.reservations.some((record) => record.bayId === xParkingSlotId(item.id) && record.status !== 'Released');
@@ -1633,12 +1676,12 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     const existingZone = garageLayout.find((item: GarageLayoutItem) => item.zone === zoneName && item.kind === 'zone');
     const baseOrder = garageLayout.filter((item: GarageLayoutItem) => item.zone !== zoneName).length + 1;
     const items: GarageLayoutItem[] = [
-      { id: existingZone?.id ?? `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'zone', direction: 'forward', facing: 'north', order: baseOrder, name: zoneNameDraft.trim() || `Zone ${zoneName}`, details: zoneDetailsDraft.trim() },
-      { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'bay-row', direction: 'forward', facing: 'north', order: baseOrder + 1 },
-      { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'divider', direction: 'forward', facing: 'north', order: baseOrder + 2 },
-      { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'bay-row', direction: 'forward', facing: 'south', order: baseOrder + 3 },
-      { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'road', direction: 'forward', facing: 'north', order: baseOrder + 4 },
-      { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'direction-marker', direction: 'forward', facing: 'north', order: baseOrder + 5 },
+      { id: existingZone?.id ?? `layout-${createUUID()}`, zone: zoneName, kind: 'zone', direction: 'forward', facing: 'north', order: baseOrder, name: zoneNameDraft.trim() || `Zone ${zoneName}`, details: zoneDetailsDraft.trim() },
+      { id: `layout-${createUUID()}`, zone: zoneName, kind: 'bay-row', direction: 'forward', facing: 'north', order: baseOrder + 1 },
+      { id: `layout-${createUUID()}`, zone: zoneName, kind: 'divider', direction: 'forward', facing: 'north', order: baseOrder + 2 },
+      { id: `layout-${createUUID()}`, zone: zoneName, kind: 'bay-row', direction: 'forward', facing: 'south', order: baseOrder + 3 },
+      { id: `layout-${createUUID()}`, zone: zoneName, kind: 'road', direction: 'forward', facing: 'north', order: baseOrder + 4 },
+      { id: `layout-${createUUID()}`, zone: zoneName, kind: 'direction-marker', direction: 'forward', facing: 'north', order: baseOrder + 5 },
     ];
     setGarageLayout((current: GarageLayoutItem[]) => [...current.filter((item: GarageLayoutItem) => item.zone !== zoneName), ...items]);
     logAudit('Layout', 'Parking map', `${existingZone || locations.some((item: ParkingLocation) => item.zone === zoneName) ? 'Updated' : 'Added'} complete Zone ${zoneName}`);
@@ -1657,7 +1700,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     setGarageLayout((current: GarageLayoutItem[]) => {
       const hasZoneItem = current.some((item: GarageLayoutItem) => item.zone === editingZoneCode && item.kind === 'zone');
       const updated = current.map((item: GarageLayoutItem) => item.zone === editingZoneCode ? { ...item, zone: nextCode, ...(item.kind === 'zone' ? { name: zoneNameDraft.trim(), details: zoneDetailsDraft.trim() } : {}) } : item);
-      return hasZoneItem ? updated : [{ id: `layout-${crypto.randomUUID()}`, zone: nextCode, kind: 'zone', direction: 'forward', facing: 'north', order: 0, name: zoneNameDraft.trim(), details: zoneDetailsDraft.trim() }, ...updated];
+      return hasZoneItem ? updated : [{ id: `layout-${createUUID()}`, zone: nextCode, kind: 'zone', direction: 'forward', facing: 'north', order: 0, name: zoneNameDraft.trim(), details: zoneDetailsDraft.trim() }, ...updated];
     });
     logAudit('Edit', 'Parking zone', `${editingZoneCode} → ${nextCode} · ${zoneNameDraft.trim()}`); setIsZoneEditorOpen(false); toast.success('Zone details updated.');
   };
@@ -1665,9 +1708,9 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     const zoneName = zoneCodeDraft.trim().toUpperCase();
     if (!zoneName || !zoneNameDraft.trim()) return toast.error('Zone code and name are required.');
     if (existingZoneCodes.includes(zoneName)) return toast.error(`Zone ${zoneName} already exists.`);
-    const newBay: ParkingLocation = { id: `loc-${crypto.randomUUID()}`, zone: zoneName, bayNumber: '1', lane: 'Top', section: 'Main', direction: 'Forward', capacity: 1, status: 'Available', remarks: '' };
+    const newBay: ParkingLocation = { id: `loc-${createUUID()}`, zone: zoneName, bayNumber: '1', lane: 'Top', section: 'Main', direction: 'Forward', capacity: 1, status: 'Available', remarks: '' };
     setLocations((current: ParkingLocation[]) => [...current, newBay]);
-    setGarageLayout((current: GarageLayoutItem[]) => [...current, { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'zone', direction: 'forward', facing: 'north', order: current.length + 1, name: zoneNameDraft.trim(), details: zoneDetailsDraft.trim() }, { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'bay-row', direction: 'forward', facing: 'north', order: current.length + 2 }, { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind: 'road', direction: 'forward', facing: 'north', order: current.length + 3 }]);
+    setGarageLayout((current: GarageLayoutItem[]) => [...current, { id: `layout-${createUUID()}`, zone: zoneName, kind: 'zone', direction: 'forward', facing: 'north', order: current.length + 1, name: zoneNameDraft.trim(), details: zoneDetailsDraft.trim() }, { id: `layout-${createUUID()}`, zone: zoneName, kind: 'bay-row', direction: 'forward', facing: 'north', order: current.length + 2 }, { id: `layout-${createUUID()}`, zone: zoneName, kind: 'road', direction: 'forward', facing: 'north', order: current.length + 3 }]);
     logAudit('Create', 'Parking zone', `${zoneName} · ${zoneNameDraft.trim()}`); setIsZoneEditorOpen(false); toast.success(`Zone ${zoneName} added.`);
   };
   const addRowToZone = (zoneCode: string) => {
@@ -1675,8 +1718,8 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     const lane = zoneBays.some((item: ParkingLocation) => item.lane === 'Top') && !zoneBays.some((item: ParkingLocation) => item.lane === 'Bottom') ? 'Bottom' : zoneBays.length ? `Row ${Array.from(new Set(zoneBays.map((item: ParkingLocation) => item.lane))).length + 1}` : 'Top';
     const numericBays = zoneBays.map((item: ParkingLocation) => Number(item.bayNumber)).filter((value: number) => Number.isFinite(value));
     const nextNumber = numericBays.length ? Math.max(...numericBays) + 1 : 1;
-    setLocations((current: ParkingLocation[]) => [...current, { id: `loc-${crypto.randomUUID()}`, zone: zoneCode, bayNumber: String(nextNumber), lane, section: 'Main', direction: 'Forward', capacity: 1, status: 'Available', remarks: '' }]);
-    setGarageLayout((current: GarageLayoutItem[]) => [...current, { id: `layout-${crypto.randomUUID()}`, zone: zoneCode, kind: 'bay-row', direction: 'forward', facing: lane === 'Bottom' ? 'south' : 'north', order: current.length + 1 }]);
+    setLocations((current: ParkingLocation[]) => [...current, { id: `loc-${createUUID()}`, zone: zoneCode, bayNumber: String(nextNumber), lane, section: 'Main', direction: 'Forward', capacity: 1, status: 'Available', remarks: '' }]);
+    setGarageLayout((current: GarageLayoutItem[]) => [...current, { id: `layout-${createUUID()}`, zone: zoneCode, kind: 'bay-row', direction: 'forward', facing: lane === 'Bottom' ? 'south' : 'north', order: current.length + 1 }]);
     logAudit('Layout', 'Parking row', `Added ${lane} to Zone ${zoneCode}`); toast.success(`${lane} added with its first bay.`);
   };
   const removeRowFromZone = (zoneCode: string, lane: string) => {
@@ -1692,7 +1735,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     const zoneBays = locations.filter((item: ParkingLocation) => item.zone === zoneCode);
     const numericBays = zoneBays.map((item: ParkingLocation) => Number(item.bayNumber)).filter((value: number) => Number.isFinite(value));
     const nextNumber = numericBays.length ? Math.max(...numericBays) + 1 : 1;
-    setLocations((current: ParkingLocation[]) => [...current, { id: `loc-${crypto.randomUUID()}`, zone: zoneCode, bayNumber: String(nextNumber), lane, section: 'Main', direction: 'Forward', capacity: 1, status: 'Available', remarks: '' }]);
+    setLocations((current: ParkingLocation[]) => [...current, { id: `loc-${createUUID()}`, zone: zoneCode, bayNumber: String(nextNumber), lane, section: 'Main', direction: 'Forward', capacity: 1, status: 'Available', remarks: '' }]);
     logAudit('Create', 'Parking bay', `${zoneCode}-${nextNumber} · ${lane}`); toast.success(`Bay ${zoneCode}-${nextNumber} added.`);
   };
   const removeZone = (zoneCode: string) => {
@@ -1718,7 +1761,7 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     const zoneName = layoutZone.trim().toUpperCase();
     if (!zoneName) return toast.error('Choose a zone for this layout item.');
     if (kind === 'divider' && garageLayout.some((item: GarageLayoutItem) => item.zone === zoneName && item.kind === 'divider')) return toast.error(`Zone ${zoneName} already has a divider.`);
-    setGarageLayout((current: GarageLayoutItem[]) => [...current, { id: `layout-${crypto.randomUUID()}`, zone: zoneName, kind, direction: 'forward', facing: 'north', order: current.length + 1, name: kind === 'zone' ? zoneNameDraft.trim() || `Zone ${zoneName}` : undefined, details: kind === 'zone' ? zoneDetailsDraft.trim() : undefined }]);
+    setGarageLayout((current: GarageLayoutItem[]) => [...current, { id: `layout-${createUUID()}`, zone: zoneName, kind, direction: 'forward', facing: 'north', order: current.length + 1, name: kind === 'zone' ? zoneNameDraft.trim() || `Zone ${zoneName}` : undefined, details: kind === 'zone' ? zoneDetailsDraft.trim() : undefined }]);
     logAudit('Layout', 'Parking map', `Added ${kind} to Zone ${zoneName}`);
   };
   const updateZoneDetails = (itemId: string, changes: Pick<GarageLayoutItem, 'name' | 'details'>) => {
@@ -2032,7 +2075,7 @@ function Transfer({ vehicles, locations, movements, selectedVehicleId, setSelect
     ? supportsXParkingLocation(item) && !vehicles.some((vehicle: Vehicle) => vehicle.xParking === 'Yes' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(item.id))
     : item.status !== 'Reserved' && item.status !== 'Maintenance'
       && (canAcceptContainer(item) || !vehicles.some((vehicle: Vehicle) => vehicle.xParking !== 'Yes' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(item.id))));
-  const transferZones = Array.from(new Set(transferLocations.map((item: ParkingLocation) => item.zone))).sort();
+  const transferZones = Array.from(new Set(transferLocations.map((item: ParkingLocation) => item.zone))).sort(parkingZoneSort);
   const selectedDestination = locations.find((item: ParkingLocation) => item.id === newLocationId);
   const [transferZone, setTransferZone] = useState(selectedDestination?.zone ?? transferZones[0] ?? '');
   const firstTransferZone = transferZones[0] ?? '';
@@ -2072,7 +2115,7 @@ function Transfer({ vehicles, locations, movements, selectedVehicleId, setSelect
           </div>
           <div className="space-y-2"><Label>Zone</Label>
             <Select value={effectiveTransferZone || 'none'} onValueChange={(value: string) => { setTransferZone(value === 'none' ? '' : value); setNewLocationId(''); }}>
-              <SelectTrigger className="h-14"><SelectValue placeholder="Choose zone" /></SelectTrigger><SelectContent><SelectItem value="none">Choose zone</SelectItem>{transferZones.filter((item: string) => item).map((item: string) => <SelectItem key={item} value={item}>Zone {item}</SelectItem>)}</SelectContent>
+              <SelectTrigger className="h-14"><SelectValue placeholder="Choose zone" /></SelectTrigger><SelectContent><SelectItem value="none">Choose zone</SelectItem>{transferZones.filter((item: string) => item).map((item: string) => <SelectItem key={item} value={item}>{parkingZoneLabel(item)}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div className="space-y-2"><Label>{destinationType === 'xParking' ? 'X Parking space' : 'Bay number'}</Label>

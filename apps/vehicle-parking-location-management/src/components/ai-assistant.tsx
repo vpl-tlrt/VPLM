@@ -1,6 +1,6 @@
 import { findActivePickup, loadPickupVehicleLocation, pickupLocationWarning, pickupParkingNotice } from '@/lib/pickup-request-data';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { BookOpen, Bot, CarFront, CircleParking, LoaderCircle, MapPin, MoveRight, Route, Search, Send, Sparkles, X } from 'lucide-react';
+import { BookOpen, Bot, CarFront, CircleParking, Maximize2, Minimize2, LoaderCircle, MapPin, MoveRight, Route, Search, Send, Sparkles, X } from 'lucide-react';
 import { mapParkingLocationId, supportsXParkingLocation, type Movement, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import { parseAssistantBay } from '@/lib/assistant-bay';
 import { assistantDisplay, assistantLanguages, isAssistantLanguage, readAssistantLanguage } from '@/lib/assistant-language';
@@ -43,6 +43,7 @@ type AiAssistantProps = {
   canTransfer: boolean;
   locationLabel: (locationId?: string) => string;
   onAssign: (plateNumber: string, vehicle?: Vehicle) => boolean;
+  onAssignToBay: (plateNumber: string, bayId: string) => boolean;
   onTransfer: (vehicleId: string, destinationId: string, notes: string, toXParking?: boolean) => boolean;
 };
 
@@ -83,8 +84,12 @@ export default function AiAssistant({
   canTransfer,
   locationLabel,
   onAssign,
+  onAssignToBay,
   onTransfer,
 }: AiAssistantProps) {
+  // Accept both canonical role IDs and their displayed labels without granting other roles access.
+  const roadTestAssigner = ['administrator', 'supervisor', 'technicalleader', 'technicaladvisor', 'technicalserviceadvisor']
+    .includes(role.toLowerCase().replace(/[^a-z]/g, ''));
   const replyKey = `vplm-assistant-language:${userId}`;
   const displayKey = `vplm-assistant-display-language:${userId}`;
   const [language, setLanguage] = useState(() => readAssistantLanguage(replyKey));
@@ -107,12 +112,14 @@ export default function AiAssistant({
 
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [fullScreenAi, setFullScreenAi] = useState(false);
   const [activeFunction, setActiveFunction] = useState<AssistantFunction | null>(null);
   const [transferFlow, setTransferFlow] = useState<TransferFlow | null>(null);
-  const [roadTest, setRoadTest] = useState<{ type: RoadTestType; vehicleId?: string; resumeId?: string }>();
+  const [roadTest, setRoadTest] = useState<{ type: RoadTestType; vehicleId?: string; resumeId?: string; autoAssign?: boolean }>();
   const roadTestChat = useRef<RoadTestChatHandle>(null);
   const responseVersion = useRef(0);
   const [pickupPlate, setPickupPlate] = useState<string>();
+  const [assignmentDraft, setAssignmentDraft] = useState<{ plate: string; bayId: string; search: string }>();
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
@@ -168,7 +175,7 @@ export default function AiAssistant({
     return { registration: message.match(/[A-Z0-9-]*\d[A-Z0-9-]*/i)?.[0] };
   };
 
-  const ownRunningRoadTest = (vehicle: Vehicle) => (role === 'TechnicalLeader' || role === 'TechnicalAdvisor') && canAccessRoadTests
+  const ownRunningRoadTest = (vehicle: Vehicle) => roadTestAssigner && canAccessRoadTests
     ? loadRoadTests().find(test => test.vehicleId === vehicle.id && test.status === 'In Road Test'
       && (test.startedById ? test.startedById === userId : test.startedBy?.trim().toLowerCase() === actor.trim().toLowerCase()))
     : undefined;
@@ -207,6 +214,13 @@ export default function AiAssistant({
     const parkedDetails = `${details} Current bay: ${locationLabel(currentLocationId)}.${pickupDetails ? `\n${pickupDetails}` : ''}`;
     if (normalizeLocation(currentLocationId) !== normalizeLocation(vehicle.currentLocationId ?? '')) {
       addAssistantMessage(`${parkedDetails}\nRefresh the workspace before transferring this vehicle.`);
+      return;
+    }
+    if (role === 'TechnicalLeader' && canAccessRoadTests) {
+      setTransferFlow(null);
+      setActiveFunction(null);
+      setRoadTest({ type: 'Initial Road Test', vehicleId: vehicle.id });
+      addAssistantMessage(`${parkedDetails}\nAre you going for an RT? Reply Yes to start a road test with default assignment details, or No to close.`);
       return;
     }
     if (!offerTransfer) {
@@ -317,33 +331,62 @@ export default function AiAssistant({
         addAssistantMessage('Your role does not have permission to add or assign vehicles.');
         return;
       }
+      if (registration.duplicates) {
+        addAssistantMessage('More than one vehicle matches. Enter the full vehicle number.');
+        return;
+      }
       if (!registration.registration) {
         setActiveFunction('assign');
-        addAssistantMessage('Enter the vehicle registration number to open the validated Add / Assign form. You can complete the vehicle details and choose a bay there.');
+        addAssistantMessage('Enter the vehicle number to prepare the assignment.');
         return;
       }
       if (registration.vehicle?.status !== 'Delivered' && registration.vehicle?.currentLocationId) {
         setActiveFunction(null);
-        addAssistantMessage(`${registration.vehicle.plateNumber} already has an active bay assignment. Use Transfer to move it instead.`);
+        addAssistantMessage(`${registration.vehicle.plateNumber} already has an active bay assignment. Use Transfer instead.`);
         return;
       }
-      const opened = onAssign(registration.registration, registration.vehicle?.status === 'Delivered' ? undefined : registration.vehicle);
+      setAssignmentDraft({ plate: registration.registration.trim().toUpperCase(), bayId: '', search: '' });
       setActiveFunction(null);
-      addAssistantMessage(opened
-        ? `The Add / Assign form is ready for ${registration.vehicle?.plateNumber ?? registration.registration}. Review or complete the vehicle details and select a bay; nothing is saved until you submit the form.`
-        : 'I could not open Add / Assign. Check your permission and the vehicle’s current assignment.');
+      addAssistantMessage(`Vehicle ${registration.registration.toUpperCase()} prepared with existing profile details or form defaults. Choose an available bay and press Assign. The record will only be saved after confirmation.`);
       return;
     }
 
     if (action === 'road-test') {
       setActiveFunction(null);
       if (!canAccessRoadTests) return addAssistantMessage('Your role does not have access to Road Tests.');
-      const type = /^\/?frt\b/i.test(query.trim()) ? 'Final Road Test' : 'Initial Road Test';
+      const type = /(?:^|\s)\/?frt(?:\s|$)/i.test(query.trim()) ? 'Final Road Test' : 'Initial Road Test';
+      if (registration.duplicates) return addAssistantMessage('More than one vehicle matches. Enter the full registration number.');
       const vehicle = registration.vehicle?.status !== 'Delivered' ? registration.vehicle : undefined;
       const own = vehicle && ownRunningRoadTest(vehicle);
-      setRoadTest(own ? { type: own.testType ?? type, resumeId: own.id } : { type, vehicleId: vehicle?.id });
-      addAssistantMessage(own ? 'Did you complete the road test? Reply Yes or No.'
-        : vehicle ? 'Reply Yes to start, or No to close.' : 'Enter a vehicle number in chat or select a pending task below.');
+      const autoAssign = Boolean(vehicle && !own && roadTestAssigner
+        && /\b(?:irt|frt)\b/i.test(query));
+      setRoadTest(own ? { type: own.testType ?? type, resumeId: own.id } : { type, vehicleId: vehicle?.id, autoAssign });
+      addAssistantMessage(own ? 'This road test is already in progress. Tap Finish RT to record the return parking location.'
+        : autoAssign ? `Assigning ${type} for ${vehicle?.plateNumber} with default values…`
+        : vehicle ? 'Are you going for an RT? Reply Yes to start or No to close.' : 'Enter a vehicle number and IRT or FRT to assign a task automatically.');
+
+    }
+  };
+
+  const assignmentOptions = assignmentDraft ? locations.filter(location =>
+    location.status === 'Available'
+    && !vehicles.some(vehicle => vehicle.status !== 'Delivered' && normalizeLocation(vehicle.currentLocationId ?? '') === normalizeLocation(location.id))
+  ) : [];
+  const assignmentMatches = assignmentOptions.filter(location =>
+    !assignmentDraft?.search || normalize(`${location.zone} ${location.bayNumber} ${location.id}`).includes(normalize(assignmentDraft.search))
+  );
+  const confirmAssistantAssignment = () => {
+    if (!assignmentDraft?.bayId || !canAssign) return;
+    const selected = locations.find(location => location.id === assignmentDraft.bayId);
+    if (!selected || !assignmentOptions.some(location => location.id === selected.id)) {
+      addAssistantMessage('The selected bay is no longer available. Choose another bay.');
+      return;
+    }
+    if (onAssignToBay(assignmentDraft.plate, selected.id)) {
+      addAssistantMessage(`${assignmentDraft.plate} assigned to ${selected.zone}-${selected.bayNumber} successfully.`);
+      setAssignmentDraft(undefined);
+    } else {
+      addAssistantMessage('Assignment could not be saved. Check the vehicle details and bay availability. You can use the full Add / Assign form to correct any missing details.');
     }
   };
 
@@ -522,7 +565,14 @@ export default function AiAssistant({
     setInput('');
     setBusy(true);
 
-    if (/^\/?(?:irt|frt)\b/i.test(message)) {
+    if (roadTestAssigner && /\\b(?:irt|frt)\\b/i.test(message) && findVehicle(message).vehicle && canAccessRoadTests) {
+      setTransferFlow(null);
+      setPickupPlate(undefined);
+      runFunction('road-test', message);
+      setBusy(false);
+      return;
+    }
+    if (/\b(?:irt|frt)\b/i.test(message) && roadTestAssigner) {
       setTransferFlow(null);
       setPickupPlate(undefined);
       runFunction('road-test', message);
@@ -636,11 +686,11 @@ export default function AiAssistant({
   };
 
   return (
-    <div className="pointer-events-none fixed inset-x-3 bottom-3 top-[142px] z-[100] flex items-end justify-end md:inset-x-auto md:bottom-5 md:right-5 md:top-24">
+    <div className={fullScreenAi && open ? "pointer-events-none fixed inset-0 z-[100] flex items-stretch justify-center" : "pointer-events-none fixed inset-x-2 bottom-2 top-2 z-[100] flex min-h-0 items-end justify-end sm:inset-x-3 sm:bottom-3 sm:top-3 md:inset-x-auto md:bottom-5 md:right-5 md:top-5"}>
       {open && (
         <section id="vplm-ai-panel"
           aria-label="VPLM AI assistant"
-          className="pointer-events-auto flex h-full max-h-[680px] min-h-0 w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-2xl md:w-[420px]"
+          className={fullScreenAi ? "pointer-events-auto flex h-full min-h-0 w-full flex-col overflow-hidden bg-card text-card-foreground" : "pointer-events-auto flex h-full max-h-[680px] min-h-0 w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-2xl md:w-[420px]"}
         >
           <header className="flex items-center justify-between gap-3 border-b border-border bg-primary px-4 py-3 text-primary-foreground">
             <div className="flex items-center gap-3">
@@ -653,6 +703,11 @@ export default function AiAssistant({
               </div>
             </div>
             <div className="flex items-center gap-1">
+              <button type="button" role="switch" aria-checked={fullScreenAi} aria-label="Full screen AI mode" title={fullScreenAi ? 'Exit full screen AI' : 'Full screen AI mode'}
+                onClick={() => setFullScreenAi(value => !value)}
+                className="rounded-lg p-2 transition hover:bg-primary-foreground/15">
+                {fullScreenAi ? <Minimize2 size={19} /> : <Maximize2 size={19} />}
+              </button>
               <button
                 type="button"
                 aria-label={languageText.help}
@@ -689,7 +744,7 @@ export default function AiAssistant({
             Workspace data is used for vehicle and bay lookups. Transfers and requests are saved only after you submit their app forms and confirmations. AI answers may be incorrect.
           </div>
 
-          <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
+          <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto overscroll-contain p-3 sm:p-4" aria-live="polite">
             {messages.map((message, index) => (
               <div
                 key={`${message.role}-${index}`}
@@ -704,9 +759,22 @@ export default function AiAssistant({
               </div>
             ))}
 
+            {assignmentDraft && <div className="space-y-2 rounded-xl border bg-card p-3 text-sm">
+              <div className="flex items-center justify-between gap-2"><strong>Add / Assign · {assignmentDraft.plate}</strong><button type="button" onClick={() => setAssignmentDraft(undefined)} aria-label="Close assignment">✕</button></div>
+              <label className="block space-y-1"><span>Bay number (search or select)</span>
+                <input className="w-full rounded border bg-background p-2" value={assignmentDraft.search} onChange={event => setAssignmentDraft(current => current && ({ ...current, search: event.target.value, bayId: '' }))} placeholder="Type zone or bay number" />
+              </label>
+              <select aria-label="Available parking bay" className="w-full rounded border bg-background p-2" value={assignmentDraft.bayId} onChange={event => setAssignmentDraft(current => current && ({ ...current, bayId: event.target.value }))}>
+                <option value="">Select available bay</option>
+                {assignmentMatches.map(location => <option key={location.id} value={location.id}>{location.zone}-{location.bayNumber || location.id}</option>)}
+              </select>
+              <div className="flex flex-wrap gap-2"><button type="button" disabled={!assignmentDraft.bayId || !canAssign} onClick={confirmAssistantAssignment} className="rounded bg-primary px-4 py-2 font-semibold text-primary-foreground disabled:opacity-50">Assign</button>
+                <button type="button" className="rounded border px-3 py-2" onClick={() => { onAssign(assignmentDraft.plate); setAssignmentDraft(undefined); }}>Edit full form</button>
+              </div>
+            </div>}
             {roadTest && canAccessRoadTests && <AssistantRoadTest key={`${roadTest.type}:${roadTest.vehicleId ?? ''}:${roadTest.resumeId ?? ''}`} ref={roadTestChat}
-              type={roadTest.type} initialVehicleId={roadTest.vehicleId} resumeId={roadTest.resumeId}
-              canCreate={(role === 'TechnicalLeader' || role === 'TechnicalAdvisor')} findOwnRunningTest={ownRunningRoadTest} userId={userId} onMessage={addAssistantMessage} vehicles={vehicles} locations={locations}
+              type={roadTest.type} initialVehicleId={roadTest.vehicleId} autoAssign={roadTest.autoAssign} resumeId={roadTest.resumeId}
+              canCreate={roadTestAssigner && canAccessRoadTests} findOwnRunningTest={ownRunningRoadTest} userId={userId} onMessage={addAssistantMessage} vehicles={vehicles} locations={locations}
               actor={actor} onLocationChange={onRoadTestLocationChange} onClose={message => {
                 setRoadTest(undefined);
                 if (message) addAssistantMessage(message);

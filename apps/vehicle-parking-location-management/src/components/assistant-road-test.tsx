@@ -1,4 +1,4 @@
-import { useImperativeHandle, useState, type Ref } from 'react';
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { Button } from '@/components/ui/button';
 import { parkingRecordKey, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import {
@@ -6,10 +6,11 @@ import {
   roadTestLocationLabel, saveRoadTestData, startRoadTestRecord, type RoadTestResult, type RoadTestType,
 } from '@/lib/road-test-data';
 
-export type RoadTestChatHandle = { answer: (message: string) => void };
+export type RoadTestChatHandle = { answer: (message: string) => void; assign: () => void };
 type Props = {
   ref: Ref<RoadTestChatHandle>;
   initialVehicleId?: string;
+  autoAssign?: boolean;
   resumeId?: string;
   canCreate: boolean;
   findOwnRunningTest: (vehicle: Vehicle) => ReturnType<typeof loadRoadTests>[number] | undefined;
@@ -23,13 +24,14 @@ type Props = {
   onClose: (message?: string) => void;
 };
 
-export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, findOwnRunningTest, userId, onMessage, type, vehicles, locations, actor, onLocationChange, onClose }: Props) {
+export function AssistantRoadTest({ ref, initialVehicleId, autoAssign, resumeId, canCreate, findOwnRunningTest, userId, onMessage, type, vehicles, locations, actor, onLocationChange, onClose }: Props) {
   const [selected, setSelected] = useState(initialVehicleId ?? '');
   const [step, setStep] = useState<'select' | 'completed' | 'parking'>(resumeId ? 'completed' : 'select');
   const [zone, setZone] = useState('');
   const [bay, setBay] = useState('');
-  const [result, setResult] = useState<RoadTestResult>();
+  const [result, setResult] = useState<RoadTestResult | undefined>('Pass');
   const [error, setError] = useState('');
+  const [justAssigned, setJustAssigned] = useState(false);
   const pending = loadRoadTests().filter(test => (test.testType ?? 'Initial Road Test') === type && test.status === 'Assigned');
   const taskVehicles = pending.flatMap(task => {
     const vehicle = vehicles.find(item => item.id === task.vehicleId);
@@ -38,8 +40,39 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
   const [runningId, setRunningId] = useState(resumeId);
   const test = loadRoadTests().find(item => item.id === runningId);
   const vehicle = vehicles.find(item => item.id === (test?.vehicleId ?? selected) && item.status !== 'Delivered');
-  const available = locations.filter(location => location.status === 'Available'
+  const available = locations.filter(location => location.status !== 'Reserved' && location.status !== 'Maintenance'
     && !vehicles.some(item => parkingRecordKey(item.currentLocationId) === parkingRecordKey(location.id)));
+  const assign = () => {
+    const target = vehicles.find(item => item.id === selected && item.status !== 'Delivered');
+    if (!target) return setError('Enter a registered active vehicle number.');
+    if (!canCreate) return setError('You do not have permission to assign a road test.');
+    const tests = loadRoadTests();
+    if (tests.some(item => item.vehicleId === target.id && (item.status === 'Assigned' || item.status === 'In Road Test'))) {
+      return setError('This vehicle already has an assigned or ongoing road test. Open the existing task instead.');
+    }
+    const timestamp = new Date().toISOString();
+    const assignment = {
+      id: `rt-${crypto.randomUUID()}`, vehicleId: target.id, jobCardNumber: '',
+      purpose: 'Road test assigned through VPLM AI', assignedBy: actor,
+      assignedTo: actor, priority: 'Normal' as const, testType: type,
+      remarks: '', assignmentTimestamp: timestamp, status: 'Assigned' as const,
+      furtherActionRequired: false, approved: false, immutable: false,
+    };
+    saveRoadTestData([assignment, ...tests], [{
+      id: crypto.randomUUID(), roadTestId: assignment.id, vehicleId: target.id,
+      actor, timestamp, action: 'Assigned', detail: `${type} assigned with default values through VPLM AI.`,
+    }, ...loadRoadTestAudit()], loadRoadTestNotifications());
+    setError('');
+    setJustAssigned(true);
+    onMessage(`${type} assigned to ${actor} for ${target.plateNumber} with Normal priority. Are you taking the vehicle for the road test? Select Yes to start or No to leave it assigned.`);
+  };
+
+  const autoAssigned = useRef(false);
+  useEffect(() => {
+    if (!autoAssign || !initialVehicleId || autoAssigned.current) return;
+    autoAssigned.current = true;
+    assign();
+  }, [autoAssign, initialVehicleId]);
   const save = (finish: boolean) => {
     const tests = loadRoadTests();
     if (!vehicle) return setError('Enter a registered vehicle number.');
@@ -58,8 +91,8 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
       return setError('Choose a result and an available final parking bay.');
     }
     const assignment = current ?? {
-      id: `rt-${crypto.randomUUID()}`, vehicleId: vehicle.id, jobCardNumber: '', purpose: '', assignedBy: actor,
-      assignedTo: '', priority: 'Normal' as const, testType: type, remarks: '', assignmentTimestamp: new Date().toISOString(),
+      id: `rt-${crypto.randomUUID()}`, vehicleId: vehicle.id, jobCardNumber: '', purpose: 'Road test initiated by Technical Leader in VPLM AI', assignedBy: actor,
+      assignedTo: actor, priority: 'Normal' as const, testType: type, remarks: '', assignmentTimestamp: new Date().toISOString(),
       status: 'Assigned' as const, furtherActionRequired: false, approved: false, immutable: false,
     };
     const updated = finish && result
@@ -89,16 +122,17 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
     else {
       setRunningId(updated.id);
       setStep('completed');
-      onMessage(`Road test started for ${vehicle.plateNumber}. Did you complete the road test? Reply Yes or No.`);
+      onMessage(`Road test started for ${vehicle.plateNumber}. Tap Finish RT or type FINISH RT when ready to record the return parking location.`);
     }
   };
 
   const finishPrompt = () => {
     setStep('parking');
     setError('');
-    onMessage('Enter the final parking zone and bay (for example, Workshop-12), then enter Pass or Fail and type Finish.');
+    onMessage('Where did you park the vehicle? Enter a zone and bay, for example Workshop-12. Result defaults to Pass; type Fail if the test failed. Then type Finish to confirm.');
   };
   useImperativeHandle(ref, () => ({
+    assign,
     answer(message) {
       const value = message.trim();
       const key = value.toLowerCase();
@@ -108,6 +142,7 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
       }
       setError('');
       if (step === 'select') {
+        if (/^(assign|assign task|assign road test)$/.test(key)) return assign();
         if (/^(yes|y|start)$/.test(key)) return save(false);
         const plateKey = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, '');
         const matches = vehicles.filter(item => item.status !== 'Delivered' && plateKey(item.plateNumber) === plateKey(value));
@@ -117,16 +152,16 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
         if (running) {
           setRunningId(running.id);
           setStep('completed');
-          onMessage('Did you complete the road test? Reply Yes or No.');
+          onMessage('Road test is in progress. Tap Finish RT or type FINISH RT to enter the return parking location.');
           return;
         }
         setSelected(match.id);
         const pendingTask = pending.some(item => item.vehicleId === match.id);
-        onMessage(`${match.plateNumber} · ${match.model || '—'} · ${match.color || '—'} · Current bay: ${roadTestLocationLabel(match.currentLocationId, locations)}. ${pendingTask || canCreate ? 'Reply Yes to start, or No to close.' : 'This vehicle has no pending task of this type.'}`);
+        onMessage(`${match.plateNumber} · ${match.model || '—'} · ${match.color || '—'} · Current bay: ${roadTestLocationLabel(match.currentLocationId, locations)}. ${pendingTask || canCreate ? 'Are you going for an RT? Reply Yes to start or No to close.' : 'No pending task exists. Your account cannot create road test assignments; ask an administrator to review your role and Road Tests access.'}`);
         return;
       }
       if (step === 'completed') {
-        if (/^(yes|y)$/.test(key)) finishPrompt();
+        if (/^(yes|y|finish rt|finish road test|finish|complete)$/.test(key)) finishPrompt();
         else setError('Reply Yes or No.');
         return;
       }
@@ -151,7 +186,7 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
     },
   }));
 
-  return <div className="space-y-3 rounded-lg border p-3 text-sm">
+  return <div className="min-w-0 max-w-full space-y-3 overflow-x-hidden rounded-lg border p-3 text-sm">
     <div className="flex items-center justify-between gap-2"><strong>{type}</strong><Button size="sm" variant="ghost" onClick={() => onClose()}>Close</Button></div>
     {step === 'select' && <>
       <p>{pending.length} pending road test {pending.length === 1 ? 'task' : 'tasks'}</p>
@@ -163,22 +198,22 @@ export function AssistantRoadTest({ ref, initialVehicleId, resumeId, canCreate, 
       </label>}
       {vehicle && <>
         <p>Model: {vehicle.model || '—'} · Colour: {vehicle.color || '—'} · Current bay: {roadTestLocationLabel(vehicle.currentLocationId, locations)}</p>
-        <p>{pending.some(item => item.vehicleId === vehicle.id) ? 'Are you taking this vehicle for a road test?' : canCreate ? 'Create and start a road test for this vehicle?' : 'This vehicle has no pending task of this type.'}</p>
-        <div className="flex gap-2"><Button size="sm" disabled={!canCreate && !pending.some(item => item.vehicleId === vehicle.id)} onClick={() => save(false)}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose()}>No</Button></div>
+        <p>{(justAssigned || pending.some(item => item.vehicleId === vehicle.id)) ? 'Are you taking the vehicle for the road test?' : canCreate ? 'Are you taking the vehicle for the road test?' : 'No pending task exists. Your account cannot create road test assignments; ask an administrator to review your role and Road Tests access.'}</p>
+        <div className="flex flex-wrap gap-2"><Button size="sm" disabled={!canCreate || !vehicle || justAssigned || pending.some(item => item.vehicleId === vehicle.id)} onClick={assign}>Assign RT</Button><Button size="sm" disabled={!canCreate && !justAssigned && !pending.some(item => item.vehicleId === vehicle.id)} onClick={() => save(false)}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose(justAssigned ? 'Road test remains Assigned and has not been started.' : undefined)}>No</Button></div>
       </>}
     </>}
     {step === 'completed' && <>
-      <p>Road test in progress for {vehicle?.plateNumber}. Did you complete the road test?</p>
-      <div className="flex gap-2"><Button size="sm" onClick={finishPrompt}>Yes</Button><Button size="sm" variant="outline" onClick={() => onClose('Road test remains in progress. You can finish it from Road Tests.')}>No</Button></div>
+      <p>Road test in progress for {vehicle?.plateNumber}. Tap Finish RT when ready to record where you parked.</p>
+      <div className="flex gap-2"><Button size="sm" onClick={finishPrompt}>Finish RT</Button><Button size="sm" variant="outline" onClick={() => onClose('Road test remains in progress. You can finish it from Road Tests.')}>No</Button></div>
     </>}
     {step === 'parking' && <>
-      <label className="grid gap-1">Final parking zone<select className="rounded border bg-background p-2" value={zone} onChange={event => { setZone(event.target.value); setBay(''); }}>
+      <label className="grid min-w-0 gap-1">Final parking zone<select className="w-full min-w-0 rounded border bg-background p-2" value={zone} onChange={event => { setZone(event.target.value); setBay(''); }}>
         <option value="">Select zone</option>{[...new Set(available.map(item => item.zone))].map(item => <option key={item}>{item}</option>)}
       </select></label>
-      <label className="grid gap-1">Final bay number<select className="rounded border bg-background p-2" disabled={!zone} value={bay} onChange={event => setBay(event.target.value)}>
+      <label className="grid min-w-0 gap-1">Final bay number<select className="w-full min-w-0 rounded border bg-background p-2" disabled={!zone} value={bay} onChange={event => setBay(event.target.value)}>
         <option value="">Select bay</option>{available.filter(item => item.zone === zone).map(item => <option key={item.id} value={item.id}>{item.bayNumber || item.zone}</option>)}
       </select></label>
-      <label className="grid gap-1">Road test result<select className="rounded border bg-background p-2" value={result ?? ''} onChange={event => setResult((event.target.value || undefined) as RoadTestResult | undefined)}>
+      <label className="grid min-w-0 gap-1">Road test result<select className="w-full min-w-0 rounded border bg-background p-2" value={result ?? ''} onChange={event => setResult((event.target.value || undefined) as RoadTestResult | undefined)}>
         <option value="">Select result</option><option>Pass</option><option>Fail</option>
       </select></label>
       <Button size="sm" disabled={!bay || !result} onClick={() => save(true)}>Finish road test</Button>

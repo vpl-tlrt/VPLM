@@ -309,6 +309,32 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     };
   }, [localOnly, recoveryKey, sync]);
 
+  // Persist a recovery snapshot synchronously before the browser is suspended or closed.
+  // Browsers may terminate network requests at this point; do not claim cloud success.
+  useEffect(() => {
+    if (localOnly || !userId) return;
+    const protectPending = () => {
+      const current = readWorkspaceSnapshot();
+      const hasChanges = baseline.current ? hasUncommittedData(baseline.current, current) : false;
+      if (hasChanges || inFlight.current || listPendingSyncMutations(userId).length > 0) {
+        saveRecovery(current);
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== 'hidden') return;
+      protectPending();
+      // Best-effort upload while the page remains alive; the local recovery
+      // snapshot above remains the durable fallback if the browser kills it.
+      if (navigator.onLine && !inFlight.current && !syncBlocked.current) void sync(false);
+    };
+    window.addEventListener('pagehide', protectPending);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', protectPending);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [localOnly, userId, sync]);
+
   // Never auto-acknowledge historical journal entries after the login cloud load.
   // Only domain-change events or explicit user sync can start an upload.
 
