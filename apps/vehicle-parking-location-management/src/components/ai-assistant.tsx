@@ -346,12 +346,12 @@ export default function AiAssistant({
     if (action === 'road-test') {
       setActiveFunction(null);
       if (!canAccessRoadTests) return addAssistantMessage('Your role does not have access to Road Tests.');
-      const type = /(?:^|\\s)\\/?frt(?:\\s|$)/i.test(query.trim()) ? 'Final Road Test' : 'Initial Road Test';
+      const type = /(?:^|\s)\/?frt(?:\s|$)/i.test(query.trim()) ? 'Final Road Test' : 'Initial Road Test';
       if (registration.duplicates) return addAssistantMessage('More than one vehicle matches. Enter the full registration number.');
       const vehicle = registration.vehicle?.status !== 'Delivered' ? registration.vehicle : undefined;
       const own = vehicle && ownRunningRoadTest(vehicle);
       const autoAssign = Boolean(vehicle && !own && (role === 'TechnicalLeader' || role === 'TechnicalAdvisor')
-        && /\\b(?:irt|frt)\\b/i.test(query));
+        && /\b(?:irt|frt)\b/i.test(query));
       setRoadTest(own ? { type: own.testType ?? type, resumeId: own.id } : { type, vehicleId: vehicle?.id, autoAssign });
       addAssistantMessage(own ? 'This road test is already in progress. Tap Finish RT to record the return parking location.'
         : autoAssign ? `Assigning ${type} for ${vehicle?.plateNumber} with default values…`
