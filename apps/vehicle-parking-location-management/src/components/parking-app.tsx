@@ -234,6 +234,37 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
     const link = document.createElement('a'); link.href = url; link.download = 'vplm-all-vehicle-parking.csv'; link.click(); URL.revokeObjectURL(url);
   };
+  const downloadCurrentVehicleLocations = () => {
+    const currentVehicles = vehicles.filter((vehicle: Vehicle) => vehicle.status !== 'Delivered' && vehicle.status !== 'Released');
+    const columns = ['Vehicle Number', 'Vehicle ID', 'Brand', 'Model', 'Color', 'Current Parking Zone', 'Current Bay Number', 'Full Current Location', 'Vehicle Status', 'Operational Status', 'X Parking', 'Assigned Date / Last Updated', 'Assigned By', 'Driver Owner', 'Check-in Time', 'Check-out Time'];
+    const excelCell = (value: unknown) => {
+      const raw = String(value ?? '');
+      const safe = /^[=+@\\-\\t\\r]/.test(raw) ? "'" + raw : raw;
+      return '"' + safe.replace(/"/g, '""') + '"';
+    };
+    const rows = currentVehicles
+      .sort((a: Vehicle, b: Vehicle) => a.plateNumber.localeCompare(b.plateNumber, undefined, { numeric: true }))
+      .map((vehicle: Vehicle) => {
+        const location = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(vehicle.currentLocationId));
+        const zoneName = location ? parkingZoneLabel(location.zone) : 'Unassigned Bay';
+        return [
+          vehicle.plateNumber, vehicle.vehicleId, vehicle.brand, vehicle.model, vehicle.color,
+          zoneName, location?.bayNumber ?? '', location ? parkingLocationLabel(location) : 'Unassigned Bay',
+          vehicle.status, vehicle.operationalStatus, vehicle.xParking ?? 'No',
+          vehicle.assignedDate, vehicle.assignedBy, vehicle.driverOwner, vehicle.checkInAt, vehicle.checkOutAt,
+        ].map(excelCell).join(',');
+      });
+    const csv = '\\uFEFF' + [columns.map(excelCell).join(','), ...rows].join('\\r\\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `vplm-current-vehicle-locations-${format(new Date(), 'yyyy-MM-dd-HHmm')}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast.success(`Exported ${currentVehicles.length} current vehicle locations for Excel.`);
+  };
   const [zone, setZone] = useState('Unassigned Bay');
   const [assignmentVehicle, setAssignmentVehicle] = useState<VehicleFormData>(emptyVehicleForm);
   const [bayId, setBayId] = useState('');
@@ -802,7 +833,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
             : <div className="space-y-4"><Button variant="outline" onClick={() => setManageTasks(true)}>Manage tasks</Button>
               <ManagementScreen role={role} locations={locations} setLocations={setLocations} vehicles={vehicles} setVehicles={setVehicles} movements={movements} auditEvents={auditEvents} setAuditEvents={setAuditEvents} logAudit={logAudit} actorId={queueOwnerId} garageLayout={garageLayout} setGarageLayout={setGarageLayout} />
             </div>)}
-          {screen === 'settings' && isAdministrator && <SettingsScreen users={onlineUsers} connected={presenceConnected} />}
+          {screen === 'settings' && isAdministrator && <SettingsScreen users={onlineUsers} connected={presenceConnected} currentVehicleCount={vehicles.filter((vehicle: Vehicle) => vehicle.status !== 'Delivered' && vehicle.status !== 'Released').length} onDownloadVehicleLocations={downloadCurrentVehicleLocations} />}
           {screen === 'backup-playback' && isAdministrator && <BackupPlayback />}
           {screen === 'profile' && <Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />}
         </motion.div>
@@ -1984,11 +2015,11 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
   <TabsContent value="recycle" className="space-y-3">{auditEvents.filter((event: AuditEvent) => event.action === 'Archive').map((event: AuditEvent) => <Card key={event.id}><CardContent className="flex items-center gap-3 p-4"><ArchiveRestore/><div className="flex-1"><p className="font-bold">{event.entity}</p><p className="text-sm text-muted-foreground">{event.detail}</p></div><Button variant="outline" onClick={() => { setAuditEvents((current) => current.map((item: AuditEvent) => item.id === event.id ? { ...item, action: 'Restore' } : item)); logAudit('Restore', event.entity, event.detail); toast.success('Item restored.'); }}><ArchiveRestore/>Restore</Button></CardContent></Card>)}</TabsContent></Tabs></div>;
 }
 
-function SettingsScreen({ users, connected }: { users: OnlineUser[]; connected: boolean }) {
+function SettingsScreen({ users, connected, currentVehicleCount, onDownloadVehicleLocations }: { users: OnlineUser[]; connected: boolean; currentVehicleCount: number; onDownloadVehicleLocations: () => void }) {
   const [showFlow, setShowFlow] = useState(false);
   return <div className="mx-auto max-w-6xl space-y-5">
     <div><p className="technical-label">Administrator only</p><h2 className="text-2xl font-black">System settings</h2><p className="text-muted-foreground">Live user monitoring</p></div>
-    <Button variant="outline" onClick={() => setShowFlow(value => !value)}>{showFlow ? 'Close live flow' : 'View live application flow'}</Button>
+    <Card><CardHeader><CardTitle>Current vehicle location list</CardTitle><CardDescription>Download all currently active vehicles with their full parking location, zone, bay number, and assignment details. Opens in Microsoft Excel; delivered and released vehicles are excluded.</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onDownloadVehicleLocations}><Download /> Download current vehicle locations ({currentVehicleCount})</Button></CardContent></Card>\n    <Button variant="outline" onClick={() => setShowFlow(value => !value)}>{showFlow ? 'Close live flow' : 'View live application flow'}</Button>
     {showFlow && <ApplicationLiveFlow />}
     <Card>
       <CardHeader><CardTitle>Currently online users ({users.length})</CardTitle><CardDescription>{connected ? 'Live connections reported by Supabase Presence. Multiple tabs for one account count as one user.' : 'Presence connection unavailable. Online count may be incomplete.'}</CardDescription></CardHeader>
