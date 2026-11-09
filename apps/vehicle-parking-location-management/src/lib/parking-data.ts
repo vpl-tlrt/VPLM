@@ -81,7 +81,11 @@ const createParkingLayout = (): ParkingLocation[] => {
     remarks: name === 'Workshop Centre Bay' ? 'Urgent / Top Priority Vehicles Only; no bay number.' : name === 'Manager Parking' ? 'Manager Parking · 10 spaces; no bay numbers.' : 'Live Parking Garage container; no bay number.',
   }));
 
-  return [...zoneA, ...zoneB, ...zoneC, ...workshop, ...reception, ...liveGarageContainers];
+  const unassignedBays = Array.from({ length: 40 }, (_: unknown, index: number) =>
+    createBay('Unassigned Bay', index + 1, 'Unassigned', 'Two-way', 'Unassigned Parking'),
+  );
+
+  return [...zoneA, ...zoneB, ...zoneC, ...workshop, ...reception, ...liveGarageContainers, ...unassignedBays];
 };
 
 export const isLiveGarageContainer = (location?: ParkingLocation): boolean =>
