@@ -467,7 +467,7 @@ export default function AiAssistant({
           : 'Please enter a registered vehicle number to continue.');
         return;
       }
-      if (!match.vehicle.currentLocationId || match.vehicle.status === 'Delivered') {
+      if (match.vehicle.status === 'Delivered' || match.vehicle.status === 'Released') {
         setTransferFlow(null);
         setActiveFunction(null);
         void showVehicleDetails(match.vehicle, false);
@@ -497,15 +497,15 @@ export default function AiAssistant({
     if (transferFlow.step === 'destination') {
       const typed = answer ? parseAssistantBay(answer, locations) : undefined;
       const selected = transferFlow.selectedDestinationId;
-      const destinationId = typed ? typed.location?.id : selected?.replace(/^(?:bay|xparking):/, '');
+      const destinationId = /^unassigned(?: bay)?$/i.test(answer.trim()) || selected === 'unassigned' ? 'unassigned' : typed ? typed.location?.id : selected?.replace(/^(?:bay|xparking):/, '');
       const destinationIsXParking = typed ? typed.xParking : selected?.startsWith('xparking:') ?? false;
       const destination = (destinationIsXParking ? availableXParkingDestinations : availableDestinations).find((location) => location.id === destinationId);
-      if (!destination) {
+      if (!destination && destinationId !== 'unassigned') {
         addAssistantMessage(languageText.unavailable, displayLanguage);
         return;
       }
-      setTransferFlow({ ...transferFlow, step: 'parked', destinationId: destination.id, destinationIsXParking, selectedDestinationId: undefined });
-      addAssistantMessage(`Please park ${activeFlowVehicle?.plateNumber} in ${destinationIsXParking ? 'the X Parking space ' : ''}${destination.zone}-${destination.bayNumber}. Have you parked it there?`);
+      setTransferFlow({ ...transferFlow, step: 'parked', destinationId: destinationId!, destinationIsXParking, selectedDestinationId: undefined });
+      addAssistantMessage(`Please park ${activeFlowVehicle?.plateNumber} in ${destinationId === 'unassigned' ? 'Unassigned Bay' : destinationIsXParking ? `the X Parking space ${destination!.zone}-${destination!.bayNumber}` : `${destination!.zone}-${destination!.bayNumber}`}. Have you parked it there?`);
       return;
     }
 
@@ -534,7 +534,7 @@ export default function AiAssistant({
     if (completed) {
       setTransferFlow(null);
       setActiveFunction(null);
-      addAssistantMessage(`Transfer recorded: ${activeFlowVehicle.plateNumber} is now assigned to ${destination ? `${destination.zone}-${destination.bayNumber}` : 'the selected bay'}.`);
+      addAssistantMessage(`Transfer recorded: ${activeFlowVehicle.plateNumber} is now assigned to ${destination ? `${destination.zone}-${destination.bayNumber}` : transferFlow.destinationId === 'unassigned' ? 'Unassigned Bay' : 'the selected bay'}.`);
     } else {
       addAssistantMessage('The transfer could not be recorded. Check the selected bay and your transfer permissions, then try again.');
     }
@@ -813,6 +813,7 @@ export default function AiAssistant({
                   className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
                 >
                   <option value="">{languageText.selectBay}</option>
+                  {activeFlowVehicle?.currentLocationId && <option value="unassigned">Unassigned Bay · no bay number (40 spaces)</option>}
                   {availableDestinations.map((location) => (
                     <option key={`bay:${location.id}`} value={`bay:${location.id}`}>
                       {location.zone}-{location.bayNumber}{location.section ? ` · ${location.section}` : ''}
@@ -824,7 +825,7 @@ export default function AiAssistant({
                     </option>
                   ))}
                 </select>
-                {availableDestinations.length === 0 && availableXParkingDestinations.length === 0 && <p className="text-xs text-muted-foreground">No eligible spaces are currently available.</p>}
+                {availableDestinations.length === 0 && availableXParkingDestinations.length === 0 && !activeFlowVehicle?.currentLocationId && <p className="text-xs text-muted-foreground">No eligible spaces are currently available.</p>}
                 <button
                   type="button"
                   disabled={busy || !transferFlow.selectedDestinationId}
