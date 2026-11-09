@@ -340,9 +340,20 @@ export default function AiAssistant({
         addAssistantMessage('Enter the vehicle number to prepare the assignment.');
         return;
       }
-      if (registration.vehicle?.status !== 'Delivered' && registration.vehicle?.currentLocationId) {
+      if (registration.vehicle && registration.vehicle.status !== 'Delivered' && registration.vehicle.status !== 'Released') {
+        const vehicle = registration.vehicle;
+        const latestMovement = movements.filter(item => item.vehicleId === vehicle.id)
+          .sort((a, b) => new Date(b.actionDateTime).getTime() - new Date(a.actionDateTime).getTime())[0];
+        const lastLocation = locationLabel(vehicle.currentLocationId);
+        const lastUpdated = latestMovement?.actionDateTime ?? vehicle.assignedDate;
+        const when = lastUpdated ? new Date(lastUpdated).toLocaleString() : 'an unknown time';
         setActiveFunction(null);
-        addAssistantMessage(`${registration.vehicle.plateNumber} already has an active bay assignment. Use Transfer instead.`);
+        if (!canTransfer) {
+          addAssistantMessage(`As per the last update, ${vehicle.plateNumber} was in ${lastLocation} at ${when}. You do not have permission to change its location.`);
+          return;
+        }
+        setTransferFlow({ vehicleId: vehicle.id, step: 'destination' });
+        addAssistantMessage(`As per the last update, ${vehicle.plateNumber} was in ${lastLocation} at ${when}. Where is it now? Select its current location below and confirm the move.`);
         return;
       }
       setAssignmentDraft({ plate: registration.registration.trim().toUpperCase(), bayId: '', search: '' });
