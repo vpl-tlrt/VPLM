@@ -70,6 +70,8 @@ export function PickupRequestManagement({ readOnly = false, initialRequestId, on
   const [finalBay, setFinalBay] = useState('');
   const [otherBay, setOtherBay] = useState(false);
   const [bayNumber, setBayNumber] = useState('');
+  const [parkingZoneFilter, setParkingZoneFilter] = useState('all');
+  const [parkingBaySearch, setParkingBaySearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'Requested' | 'In Transit' | 'Completed' | 'Cancelled'>('Requested');
@@ -126,6 +128,9 @@ export function PickupRequestManagement({ readOnly = false, initialRequestId, on
   ).slice(0, 30), [vehicles, query]);
   const workshopBays = locations.filter(isWorkshop);
   const finalLocations = opened ? locations.filter(location => matchesDestination(location, opened.destination_type)) : [];
+  const finalZones = [...new Set(finalLocations.map(location => location.zone))].sort();
+  const filteredFinalLocations = finalLocations.filter(location => (parkingZoneFilter === 'all' || location.zone === parkingZoneFilter)
+    && (!parkingBaySearch.trim() || `${location.zone} ${location.bayNumber} ${location.section ?? ''}`.toLowerCase().includes(parkingBaySearch.trim().toLowerCase()))).slice(0, 70);
   const locationById = (id: string | null | undefined) => locations.find(location => location.id === id);
   const centreBay = locations.find(location => location.zone === 'Workshop Centre Bay');
   const finalLocation = locationById(finalBay);
@@ -375,14 +380,41 @@ export function PickupRequestManagement({ readOnly = false, initialRequestId, on
           <p>Requested by: {opened.requested_by}</p>{opened.accepted_by && <p>Accepted by: {opened.accepted_by}</p>}
           <p>Assigned to: {opened.assigned_to ?? 'Any driver'}</p>
           {!readOnly && opened.status === 'In Transit' && <>
-            <Select value={otherBay ? 'other' : finalBay} onValueChange={value => { setOtherBay(value === 'other'); setBayNumber(''); setFinalBay(value === 'other' ? '' : value); }}><SelectTrigger><SelectValue placeholder="Where did you park the vehicle?"/></SelectTrigger><SelectContent>{finalLocations.map(location => <SelectItem key={location.id} value={location.id}>{label(location)}</SelectItem>)}{opened.destination_type === 'Workshop Bay' && <SelectItem value="other">Other · Enter Bay Number</SelectItem>}</SelectContent></Select>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1"><label className="text-xs font-medium" htmlFor="pickup-parking-zone">Filter parking zone</label>
+                <Select value={parkingZoneFilter} onValueChange={value => { setParkingZoneFilter(value); setParkingBaySearch(''); }}>
+                  <SelectTrigger id="pickup-parking-zone"><SelectValue placeholder="All matching zones"/></SelectTrigger>
+                  <SelectContent><SelectItem value="all">All matching zones</SelectItem>{finalZones.map(zone => <SelectItem key={zone} value={zone}>{zone}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1"><label className="text-xs font-medium" htmlFor="pickup-parking-search">Find bay number</label>
+                <Input id="pickup-parking-search" value={parkingBaySearch} onChange={event => setParkingBaySearch(event.target.value)} placeholder="Type bay number or area"/>
+              </div>
+            </div>
+            <Select value={otherBay ? 'other' : finalBay} onValueChange={value => { setOtherBay(value === 'other'); setBayNumber(''); setFinalBay(value === 'other' ? '' : value); }}>
+              <SelectTrigger><SelectValue placeholder="Where did you park the vehicle?"/></SelectTrigger>
+              <SelectContent>
+                {finalBay && !filteredFinalLocations.some(location => location.id === finalBay) && finalLocation && <SelectItem value={finalBay}>{label(finalLocation)} · selected</SelectItem>}
+                {filteredFinalLocations.map(location => <SelectItem key={location.id} value={location.id}>{label(location)}</SelectItem>)}
+                <SelectItem value="other">Other · Enter Bay Number</SelectItem>
+              </SelectContent>
+            </Select>
+            {finalLocations.length > filteredFinalLocations.length && <p className="text-xs text-muted-foreground">Showing {filteredFinalLocations.length} matching locations. Filter by zone or enter a bay number to narrow the list.</p>}
             {otherBay && <div className="space-y-2">
-              <Input aria-label="Enter Bay Number" placeholder="Enter Bay Number" inputMode="numeric" value={bayNumber} onChange={event => {
+              <Input aria-label="Enter Bay Number" placeholder="Enter bay number (e.g. 47)" inputMode="numeric" value={bayNumber} onChange={event => {
                 const value = event.target.value.replace(/\D/g, ''); setBayNumber(value);
-                const match = /^\d+$/.test(value.trim()) ? finalLocations.find(location => location.zone === 'Workshop' && Number(location.bayNumber) === Number(value)) : undefined;
-                setFinalBay(match?.id ?? '');
+                const candidates = /^\d+$/.test(value.trim()) ? finalLocations.filter(location => Number(location.bayNumber) === Number(value)
+                  && (parkingZoneFilter === 'all' || location.zone === parkingZoneFilter)) : [];
+                setFinalBay(candidates.length === 1 ? candidates[0].id : '');
               }} />
-              {finalLocation ? <p>Selected parking: {label(finalLocation)}</p> : bayNumber && <p role="alert" className="text-destructive">Workshop bay not found.</p>}
+              {bayNumber && <div className="space-y-1">
+                {finalLocations.filter(location => Number(location.bayNumber) === Number(bayNumber)
+                  && (parkingZoneFilter === 'all' || location.zone === parkingZoneFilter)).length > 1 && <p className="text-xs text-muted-foreground">Multiple zones use this bay number. Choose the zone above or select the exact match below.</p>}
+                {finalLocations.filter(location => Number(location.bayNumber) === Number(bayNumber)
+                  && (parkingZoneFilter === 'all' || location.zone === parkingZoneFilter)).map(location =>
+                    <Button key={location.id} type="button" size="sm" variant={finalBay === location.id ? 'default' : 'outline'} onClick={() => setFinalBay(location.id)}>{label(location)}</Button>)}
+              </div>}
+              {finalLocation ? <p>Selected parking: {label(finalLocation)}</p> : bayNumber && !finalLocations.some(location => Number(location.bayNumber) === Number(bayNumber)) && <p role="alert" className="text-destructive">Bay not found in the requested destination.</p>}
             </div>}
             {canMoveToCentre && <p role="alert" className="rounded-lg border border-amber-500 p-3">
               Confirm that {finalOccupants[0].plateNumber} was moved to Workshop Centre Bay temporarily and that {opened.plate_number} was parked in the selected bay.
