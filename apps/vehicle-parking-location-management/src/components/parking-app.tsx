@@ -239,7 +239,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     const columns = ['Vehicle Number', 'Vehicle ID', 'Brand', 'Model', 'Color', 'Current Parking Zone', 'Current Bay Number', 'Full Current Location', 'Vehicle Status', 'Operational Status', 'X Parking', 'Assigned Date / Last Updated', 'Assigned By', 'Driver Owner', 'Check-in Time', 'Check-out Time'];
     const excelCell = (value: unknown) => {
       const raw = String(value ?? '');
-      const safe = /^[=+@\\-\\t\\r]/.test(raw) ? "'" + raw : raw;
+      const safe = /^[=+@\-\t\r]/.test(raw) ? "'" + raw : raw;
       return '"' + safe.replace(/"/g, '""') + '"';
     };
     const rows = currentVehicles
@@ -254,7 +254,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           vehicle.assignedDate, vehicle.assignedBy, vehicle.driverOwner, vehicle.checkInAt, vehicle.checkOutAt,
         ].map(excelCell).join(',');
       });
-    const csv = '\\uFEFF' + [columns.map(excelCell).join(','), ...rows].join('\\r\\n');
+    const csv = '\uFEFF' + [columns.map(excelCell).join(','), ...rows].join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
     const anchor = document.createElement('a');
     anchor.href = url;
