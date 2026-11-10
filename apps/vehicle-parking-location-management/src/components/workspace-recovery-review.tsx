@@ -3,6 +3,8 @@ import { AlertTriangle, Cloud, Download, HardDrive, ShieldCheck } from 'lucide-r
 import type { WorkspaceSnapshot } from '@/lib/workspace-storage';
 import { recoveryFingerprint, workspaceContentMatches } from '@/lib/workspace-recovery-status';
 import { loadWorkspace } from '@/lib/workspace-cloud';
+import { listPendingSyncMutations, exportSyncJournal } from '@/lib/sync-queue';
+import { readRecoverySnapshot } from '@/lib/workspace-recovery-status';
 import type { Vehicle } from '@/lib/parking-data';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
@@ -34,6 +36,8 @@ export function WorkspaceRecoveryReview({ userId, open, onOpenChange, onKeepClou
   const [loading, setLoading] = useState(false);
   const [cloudError, setCloudError] = useState('');
   const [downloaded, setDownloaded] = useState(false);
+  const [pendingJournal, setPendingJournal] = useState<ReturnType<typeof listPendingSyncMutations>>([]);
+  const [hasRecoveryCopy, setHasRecoveryCopy] = useState(false);
   useEffect(() => {
     if (!userId || !open) return;
     let active = true;
@@ -41,6 +45,8 @@ export function WorkspaceRecoveryReview({ userId, open, onOpenChange, onKeepClou
     setCloudError('');
     setDownloaded(false);
     setCloudSnapshot(null);
+    setPendingJournal(listPendingSyncMutations(userId));
+    setHasRecoveryCopy(Boolean(readRecoverySnapshot(window.localStorage.getItem(`vplm-unsynced-recovery:${userId}`))));
     void loadWorkspace(userId).then(({ snapshot }) => { if (active) setCloudSnapshot(snapshot); })
       .catch(() => { if (active) setCloudError('Could not read the latest cloud data. Keep the local backup and try again online.'); })
       .finally(() => { if (active) setLoading(false); });
@@ -67,6 +73,15 @@ export function WorkspaceRecoveryReview({ userId, open, onOpenChange, onKeepClou
     } catch { return null; }
   }, [userId, open, cloudSnapshot]);
 
+  const downloadJournal = () => {
+    if (!userId || !pendingJournal.length) return;
+    const url = URL.createObjectURL(new Blob([exportSyncJournal(userId)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'vplm-pending-operation-journal.json';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
   const downloadLocalBackup = () => {
     if (!userId) return;
     const raw = window.localStorage.getItem(`vplm-unsynced-recovery:${userId}`);
@@ -98,7 +113,21 @@ export function WorkspaceRecoveryReview({ userId, open, onOpenChange, onKeepClou
       </DialogHeader>
       {loading ? <p className="text-sm">Checking the latest cloud records…</p> :
         cloudError ? <p role="alert" className="text-sm">{cloudError}</p> :
-        !result ? <p role="alert" className="text-sm">No readable local recovery backup or cloud snapshot was found for this account. Keep the device storage intact.</p> : <>
+        !result ? <div role="alert" className="space-y-3 text-sm">
+          <p>The recovery comparison cannot run yet. Your device data has not been discarded.</p>
+          <p>Local recovery snapshot: <strong>{hasRecoveryCopy ? 'Available' : 'Not found for this account'}</strong></p>
+          <p>Authorized cloud snapshot: <strong>{cloudSnapshot ? 'Available' : 'Not available'}</strong></p>
+          <p>Pending local operations: <strong>{pendingJournal.length}</strong></p>
+          {pendingJournal.length > 0 && <>
+            <p>The operation journal contains unsynchronized actions. Preserve it before attempting recovery. No operations will be replayed or acknowledged by this screen.</p>
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+              {pendingJournal.slice(0, 30).map(item => <p key={item.id}>{item.entity} / {item.action} · {item.recordId} · {item.queuedAt}</p>)}
+              {pendingJournal.length > 30 && <p>And {pendingJournal.length - 30} more operations.</p>}
+            </div>
+            <Button type="button" variant="outline" onClick={downloadJournal}><Download className="h-4 w-4" /> Download operation journal</Button>
+          </>}
+          <p>Keep this browser's storage intact. A missing cloud snapshot or account-specific recovery copy requires investigation before any upload.</p>
+        </div> : <>
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-lg border p-3"><HardDrive className="mb-2 h-4 w-4" /><div className="text-xl font-semibold">{result.localCount}</div><div className="text-xs text-muted-foreground">Vehicles in local copy</div></div>
           <div className="rounded-lg border p-3"><Cloud className="mb-2 h-4 w-4" /><div className="text-xl font-semibold">{result.cloudCount}</div><div className="text-xs text-muted-foreground">Vehicles in cloud copy</div></div>
