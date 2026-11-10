@@ -38,6 +38,35 @@ export function WorkspaceRecoveryReview({ userId, open, onOpenChange, onKeepClou
   const [downloaded, setDownloaded] = useState(false);
   const [pendingJournal, setPendingJournal] = useState<ReturnType<typeof listPendingSyncMutations>>([]);
   const [hasRecoveryCopy, setHasRecoveryCopy] = useState(false);
+  const journalVehicles = useMemo(() => {
+    const vehicles = new Map<string, Item>();
+    const warnings: string[] = [];
+    for (const operation of [...pendingJournal].sort((a, b) => a.queuedAt.localeCompare(b.queuedAt))) {
+      const payload = operation.payload as Record<string, unknown> | undefined;
+      if (!payload) continue;
+      try {
+        let snapshot: Record<string, unknown> | undefined;
+        if (operation.entity === 'AuditLog' && typeof payload.afterSnapshot === 'string') {
+          const after = JSON.parse(payload.afterSnapshot) as Record<string, unknown>;
+          if (typeof after.snapshot === 'string') snapshot = JSON.parse(after.snapshot) as Record<string, unknown>;
+        }
+        if (operation.entity === 'VehicleMovement' && typeof payload.notes === 'string') {
+          const notes = JSON.parse(payload.notes) as Record<string, unknown>;
+          if (notes.snapshot && typeof notes.snapshot === 'object') snapshot = notes.snapshot as Record<string, unknown>;
+        }
+        const vehicle = snapshot?.vehicle as Item | undefined;
+        if (vehicle && typeof vehicle.id === 'string' && typeof vehicle.plateNumber === 'string') vehicles.set(vehicle.id, vehicle);
+      } catch { warnings.push(`Could not parse snapshot from ${operation.recordId}`); }
+    }
+    const rows = [...vehicles.values()];
+    const seen = new Map<string, string>();
+    for (const vehicle of rows.filter(v => v.status !== 'Delivered')) {
+      const key = `${vehicle.currentLocationId}:${vehicle.xParking === 'Yes' ? 'X' : 'regular'}`;
+      if (seen.has(key)) warnings.push(`Possible bay conflict: ${vehicle.plateNumber} and ${seen.get(key)}`);
+      seen.set(key, vehicle.plateNumber);
+    }
+    return { rows, warnings };
+  }, [pendingJournal]);
   useEffect(() => {
     if (!userId || !open) return;
     let active = true;
@@ -118,6 +147,13 @@ export function WorkspaceRecoveryReview({ userId, open, onOpenChange, onKeepClou
           <p>Local recovery snapshot: <strong>{hasRecoveryCopy ? 'Available' : 'Not found for this account'}</strong></p>
           <p>Authorized cloud snapshot: <strong>{cloudSnapshot ? 'Available' : 'Not available'}</strong></p>
           <p>Pending local operations: <strong>{pendingJournal.length}</strong></p>
+          {!cloudSnapshot && <p>The shared workspace has no readable snapshot. This does not establish that the journal is safe to upload; account membership, project identity and current bay occupancy must be verified first.</p>}
+          {journalVehicles.rows.length > 0 && <div className="space-y-2 rounded-md border p-3">
+            <p className="font-semibold">Vehicles reconstructed from journal snapshots (read-only)</p>
+            {journalVehicles.rows.map(vehicle => <p key={vehicle.id}>{label(vehicle)} · {vehicle.status}</p>)}
+            {journalVehicles.warnings.map((warning, i) => <p role="alert" key={i}>{warning}</p>)}
+            <p>These are candidate last-known locations, not confirmed cloud records. No data has been written.</p>
+          </div>}
           {pendingJournal.length > 0 && <>
             <p>The operation journal contains unsynchronized actions. Preserve it before attempting recovery. No operations will be replayed or acknowledged by this screen.</p>
             <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
