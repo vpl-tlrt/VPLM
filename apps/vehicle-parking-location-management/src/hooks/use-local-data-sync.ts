@@ -48,6 +48,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   const retryAttempt = useRef(0);
   const inFlight = useRef(false);
   const refreshing = useRef(false);
+  const refreshRequested = useRef(false);
   const rerun = useRef(false);
   const syncBlocked = useRef(false);
   useEffect(() => {
@@ -302,6 +303,12 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
         rerun.current = false;
         window.dispatchEvent(new Event(WORKSPACE_DATA_CHANGED));
       }
+      // A realtime event received during an upload must not be lost. Refresh
+      // after the upload has settled, never while local edits are in flight.
+      if (refreshRequested.current) {
+        refreshRequested.current = false;
+        window.dispatchEvent(new Event('vplm-refresh-cloud-after-sync'));
+      }
     }
   }, [localOnly, userId, onRecovered, recoveryKey, reviewedKey, preservedKey]);
 
@@ -380,13 +387,16 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   // Realtime events are hints. Fetch and adopt the authoritative snapshot only
   // when no local edits are pending; never overwrite an unsynced browser session.
   const refreshCloudView = useCallback(async () => {
+    if (inFlight.current) { refreshRequested.current = true; return false; }
     if (localOnly || !supabase || !userId || !onRecovered || !navigator.onLine ||
-        inFlight.current || refreshing.current || syncBlocked.current ||
+        refreshing.current || syncBlocked.current ||
         listPendingSyncMutations(userId).length) return false;
     if (!baseline.current || hasUncommittedData(baseline.current, readWorkspaceSnapshot())) return false;
     refreshing.current = true;
     try {
+      const startingRevision = revision.current;
       const latest = await loadWorkspace(userId);
+      if (startingRevision !== revision.current) return false;
       if (!latest.snapshot || latest.isGuest || latest.revision === null || latest.revision <= (revision.current ?? 0)) return false;
       if (inFlight.current || listPendingSyncMutations(userId).length ||
           !baseline.current || hasUncommittedData(baseline.current, readWorkspaceSnapshot())) return false;
@@ -417,8 +427,23 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
         })
       .subscribe(status => { if (status === 'SUBSCRIBED') void refreshCloudView(); });
     const onForeground = () => { if (document.visibilityState === 'visible') void refreshCloudView(); };
+    const onReconnect = () => { void refreshCloudView(); };
+    const onAfterSync = () => { void refreshCloudView(); };
+    // Reconcile after missed websocket events (sleep, mobile backgrounding,
+    // reconnects). Realtime remains the fast path; this is a low-rate fallback.
+    const fallback = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && navigator.onLine) void refreshCloudView();
+    }, 60_000);
     document.addEventListener('visibilitychange', onForeground);
-    return () => { document.removeEventListener('visibilitychange', onForeground); void client.removeChannel(channel); };
+    window.addEventListener('online', onReconnect);
+    window.addEventListener('vplm-refresh-cloud-after-sync', onAfterSync);
+    return () => {
+      window.clearInterval(fallback);
+      document.removeEventListener('visibilitychange', onForeground);
+      window.removeEventListener('online', onReconnect);
+      window.removeEventListener('vplm-refresh-cloud-after-sync', onAfterSync);
+      void client.removeChannel(channel);
+    };
   }, [localOnly, userId, refreshCloudView]);
   const getRevision = useCallback(() => revision.current, []);
   const downloadOperationJournal = () => {
