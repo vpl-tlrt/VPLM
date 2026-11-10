@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { mergeWorkspaceChanges } from '@/lib/workspace-recovery';
 import { loadWorkspace, saveWorkspace, WorkspaceConflictError, WorkspaceResetError } from '@/lib/workspace-cloud';
 import { supabase } from '@/lib/supabase';
+import { submitPendingVehicleConflicts } from '@/lib/sync-conflict-uploader';
 import { applyWorkspaceSnapshot, readWorkspaceSnapshot, workspaceStorageKeys, type WorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
 import { acknowledgeSyncMutations, exportSyncJournal, listPendingSyncMutations } from '@/lib/sync-queue';
@@ -246,6 +247,17 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       if (announce) toast.success('Workspace data synced.');
       return true;
     } catch (error) {
+      // On a competing workspace revision, report pending vehicle operations to
+      // the review inbox without acknowledging or deleting any local records.
+      // A reset is deliberately excluded: pre-reset operations must not replay.
+      if (error instanceof WorkspaceConflictError && userId && navigator.onLine) {
+        try {
+          const count = await submitPendingVehicleConflicts(userId, revision.current);
+          if (count > 0) setConflictDetail(`${count} pending vehicle operations were sent for review. Local recovery data is retained until cloud sync is verified.`);
+        } catch {
+          // Preserve the original error and local journal. Submission can be retried later.
+        }
+      }
       setState(error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError ? 'error' : navigator.onLine ? 'error' : 'offline');
       setPendingCount(1);
       if (error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError) {
