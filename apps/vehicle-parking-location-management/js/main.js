@@ -1,3 +1,4 @@
+import '../css/style.css';
 import {scrapeDashboardLayout} from './scraper.js';
 import {initPhysicsSimulation} from './simulation.js';
 const trigger=document.getElementById('hidden-trigger');
@@ -13,8 +14,8 @@ function open(){if(overlay.classList.contains('is-active'))return;
   previousOverflow=document.body.style.overflow;
   overlay.classList.add('is-active');overlay.setAttribute('aria-hidden','false');
   document.body.style.overflow='hidden';
-  try{stop=initPhysicsSimulation(scrapeDashboardLayout());exit.focus({preventScroll:true})}
-  catch(error){console.error('3D simulation unavailable',error);close()}
+  try{document.getElementById('sim-error')?.remove();stop=initPhysicsSimulation(scrapeDashboardLayout());exit.focus({preventScroll:true})}
+  catch(error){console.error('3D simulation unavailable',error);const instructions=document.getElementById('instructions');if(instructions){let message=document.getElementById('sim-error');if(!message){message=document.createElement('p');message.id='sim-error';message.setAttribute('role','alert');instructions.appendChild(message)}message.textContent='3D rendering could not start: '+(error?.message||'Unknown error')+'. Tap Exit Sim to return.'}}
 }
 trigger?.addEventListener('click',()=>{const now=performance.now();taps=now-lastTap<650?taps+1:1;lastTap=now;if(taps>=3){taps=0;open()}});
 exit?.addEventListener('click',close);
