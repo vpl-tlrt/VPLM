@@ -25,12 +25,12 @@ export function initPhysicsSimulation(scrapedSlots=[]){
   function block(x,y,z,w,h,d,material,parent=scene){
     const mesh=new T.Mesh(new T.BoxGeometry(w,h,d),material);mesh.position.set(x,y,z);parent.add(mesh);return mesh;
   }
-  function textLabel(label,x,z,size=2.2){
+  function textLabel(label,x,z,height=.16){
     const canvas=document.createElement('canvas');canvas.width=512;canvas.height=96;
     const ctx=canvas.getContext('2d');ctx.fillStyle='rgba(12,31,39,.87)';ctx.fillRect(0,0,512,96);
     ctx.fillStyle='#fff';ctx.font='bold 43px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,256,48,495);
     const tex=new T.CanvasTexture(canvas);const mesh=new T.Mesh(new T.PlaneGeometry(Math.max(7,label.length*1.25),2.7),new T.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false}));
-    mesh.rotation.x=-Math.PI/2;mesh.position.set(x,0.16,z);scene.add(mesh);
+    mesh.rotation.x=-Math.PI/2;mesh.position.set(x,height,z);scene.add(mesh);
   }
   // Site footprint, perimeter and lane network (approximate, not surveyed).
   block(0,-.25,0,140,.4,72,road);
@@ -43,7 +43,7 @@ export function initPhysicsSimulation(scrapedSlots=[]){
   function building(name,x,z,w,d,height,color=roof){
     block(x,height/2,z,w,height,d,wall);
     block(x,height+.18,z,w+.6,.35,d+.6,color);
-    textLabel(name,x,z);
+    textLabel(name,x,z,height+.4);
   }
   building('NSD',-53,-5,24,43,7);
   building('BP3',-37,-18,6,22,7);
