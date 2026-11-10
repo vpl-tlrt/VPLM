@@ -9,10 +9,21 @@
     <meta name="theme-color" content="#075f63" />
     <meta name="description" content="Manage vehicle parking assignments, reservations, movements, and road tests." />
     <title>Vehicle Parking Management</title>
+    <link rel="stylesheet" href="./css/style.css" />
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.1/three.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
   </head>
   <body>
-
     <div id="root"></div>
+    <button id="hidden-trigger" type="button" aria-label="Open 3D parking simulation" title="3D simulation"></button>
+    <div id="canvas3d-container" aria-hidden="true">
+      <div id="instructions">
+        <h3>🕹️ 3D SIMULATION ACTIVE</h3>
+        <p>Drag your finger anywhere on screen. Active vehicle will dynamically steer toward it.</p>
+      </div>
+      <button id="exit-btn" type="button">Exit Sim</button>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="./js/main.js"></script>
   </body>
 </html>
