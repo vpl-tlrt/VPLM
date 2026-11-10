@@ -76,6 +76,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       return;
     }
     const protectedRaw = raw;
+    const verificationIds = listPendingSyncMutations(userId).map(item => item.id);
     void loadWorkspace(userId).then(({ snapshot, isGuest }) => {
       if (!active) return;
       if (!snapshot || isGuest) {
@@ -92,6 +93,14 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
           window.localStorage.setItem(reviewedKey, recoveryFingerprint(protectedRaw));
           window.localStorage.removeItem(preservedKey);
           syncBlocked.current = false;
+          // A previous request may have committed successfully but lost its
+          // acknowledgement (tab closed or response lost). The cloud is now
+          // independently verified identical to both the recovery copy and
+          // displayed workspace; acknowledge only the operations present at
+          // the start of this verification, never later edits.
+          if (verificationIds.length) acknowledgeSyncMutations(verificationIds);
+          setPendingCount(listPendingSyncMutations(userId).length);
+          setState('idle');
           setConflictDetail('');
         } catch {
           setConflictDetail('Matching cloud data was verified, but local recovery status could not be saved.');
@@ -347,8 +356,26 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     };
   }, [localOnly, userId, sync]);
 
-  // Never auto-acknowledge historical journal entries after the login cloud load.
-  // Only domain-change events or explicit user sync can start an upload.
+  // On startup, a previous upload may have reached the server but its response
+  // was lost. Confirm the *entire* workspace against the cloud before clearing
+  // journal entries. Never replay historical mutations without validation.
+  useEffect(() => {
+    if (localOnly || !userId || !navigator.onLine || syncBlocked.current) return;
+    const pending = listPendingSyncMutations(userId).map(item => item.id);
+    if (!pending.length) return;
+    let active = true;
+    void loadWorkspace(userId).then(({ snapshot, isGuest }) => {
+      if (!active || !snapshot || isGuest || inFlight.current || syncBlocked.current) return;
+      if (!workspaceContentMatches(readWorkspaceSnapshot(), snapshot)) return;
+      // Verify no newer local edits arrived during the request.
+      if (!workspaceContentMatches(readWorkspaceSnapshot(), snapshot)) return;
+      acknowledgeSyncMutations(pending);
+      setPendingCount(listPendingSyncMutations(userId).length);
+      setLastSyncAt(new Date().toISOString());
+      setState('idle');
+    }).catch(() => { /* Keep journal and retry via the normal sync path. */ });
+    return () => { active = false; };
+  }, [localOnly, userId]);
 
   // Realtime events are hints. Fetch and adopt the authoritative snapshot only
   // when no local edits are pending; never overwrite an unsynced browser session.
