@@ -1,3 +1,4 @@
+import { SyncConflictManagement } from './sync-conflict-management';
 import { createUUID } from '@/lib/secure-uuid';
 import { parkingZoneSort, parkingZoneLabel } from '@/lib/parking-data';
 import { ReviewWorkspaceAccess } from '@/components/workspace-access-requests';
@@ -835,7 +836,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
             </div>)}
           {screen === 'settings' && isAdministrator && <SettingsScreen users={onlineUsers} connected={presenceConnected} currentVehicleCount={vehicles.filter((vehicle: Vehicle) => vehicle.status !== 'Delivered' && vehicle.status !== 'Released').length} onDownloadVehicleLocations={downloadCurrentVehicleLocations} />}
           {screen === 'backup-playback' && isAdministrator && <BackupPlayback />}
-          {screen === 'profile' && <Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />}
+          {screen === 'profile' && <><Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />{(role === 'Administrator' || role === 'Supervisor') && <SyncConflictManagement />}</>}
         </motion.div>
       </main>
       <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 md:hidden" aria-label="Primary navigation">
