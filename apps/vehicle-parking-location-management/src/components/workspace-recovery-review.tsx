@@ -3,6 +3,8 @@ import { AlertTriangle, Cloud, Download, HardDrive, ShieldCheck } from 'lucide-r
 import type { WorkspaceSnapshot } from '@/lib/workspace-storage';
 import { recoveryFingerprint, workspaceContentMatches } from '@/lib/workspace-recovery-status';
 import { loadWorkspace } from '@/lib/workspace-cloud';
+import { listPendingSyncMutations, exportSyncJournal } from '@/lib/sync-queue';
+import { readRecoverySnapshot } from '@/lib/workspace-recovery-status';
 import type { Vehicle } from '@/lib/parking-data';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
@@ -34,6 +36,37 @@ export function WorkspaceRecoveryReview({ userId, open, onOpenChange, onKeepClou
   const [loading, setLoading] = useState(false);
   const [cloudError, setCloudError] = useState('');
   const [downloaded, setDownloaded] = useState(false);
+  const [pendingJournal, setPendingJournal] = useState<ReturnType<typeof listPendingSyncMutations>>([]);
+  const [hasRecoveryCopy, setHasRecoveryCopy] = useState(false);
+  const journalVehicles = useMemo(() => {
+    const vehicles = new Map<string, Item>();
+    const warnings: string[] = [];
+    for (const operation of [...pendingJournal].sort((a, b) => a.queuedAt.localeCompare(b.queuedAt))) {
+      const payload = operation.payload as Record<string, unknown> | undefined;
+      if (!payload) continue;
+      try {
+        let snapshot: Record<string, unknown> | undefined;
+        if (operation.entity === 'AuditLog' && typeof payload.afterSnapshot === 'string') {
+          const after = JSON.parse(payload.afterSnapshot) as Record<string, unknown>;
+          if (typeof after.snapshot === 'string') snapshot = JSON.parse(after.snapshot) as Record<string, unknown>;
+        }
+        if (operation.entity === 'VehicleMovement' && typeof payload.notes === 'string') {
+          const notes = JSON.parse(payload.notes) as Record<string, unknown>;
+          if (notes.snapshot && typeof notes.snapshot === 'object') snapshot = notes.snapshot as Record<string, unknown>;
+        }
+        const vehicle = snapshot?.vehicle as Item | undefined;
+        if (vehicle && typeof vehicle.id === 'string' && typeof vehicle.plateNumber === 'string') vehicles.set(vehicle.id, vehicle);
+      } catch { warnings.push(`Could not parse snapshot from ${operation.recordId}`); }
+    }
+    const rows = [...vehicles.values()];
+    const seen = new Map<string, string>();
+    for (const vehicle of rows.filter(v => v.status !== 'Delivered')) {
+      const key = `${vehicle.currentLocationId}:${vehicle.xParking === 'Yes' ? 'X' : 'regular'}`;
+      if (seen.has(key)) warnings.push(`Possible bay conflict: ${vehicle.plateNumber} and ${seen.get(key)}`);
+      seen.set(key, vehicle.plateNumber);
+    }
+    return { rows, warnings };
+  }, [pendingJournal]);
   useEffect(() => {
     if (!userId || !open) return;
     let active = true;
@@ -41,6 +74,8 @@ export function WorkspaceRecoveryReview({ userId, open, onOpenChange, onKeepClou
     setCloudError('');
     setDownloaded(false);
     setCloudSnapshot(null);
+    setPendingJournal(listPendingSyncMutations(userId));
+    setHasRecoveryCopy(Boolean(readRecoverySnapshot(window.localStorage.getItem(`vplm-unsynced-recovery:${userId}`))));
     void loadWorkspace(userId).then(({ snapshot }) => { if (active) setCloudSnapshot(snapshot); })
       .catch(() => { if (active) setCloudError('Could not read the latest cloud data. Keep the local backup and try again online.'); })
       .finally(() => { if (active) setLoading(false); });
@@ -67,6 +102,15 @@ export function WorkspaceRecoveryReview({ userId, open, onOpenChange, onKeepClou
     } catch { return null; }
   }, [userId, open, cloudSnapshot]);
 
+  const downloadJournal = () => {
+    if (!userId || !pendingJournal.length) return;
+    const url = URL.createObjectURL(new Blob([exportSyncJournal(userId)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'vplm-pending-operation-journal.json';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
   const downloadLocalBackup = () => {
     if (!userId) return;
     const raw = window.localStorage.getItem(`vplm-unsynced-recovery:${userId}`);
@@ -98,7 +142,28 @@ export function WorkspaceRecoveryReview({ userId, open, onOpenChange, onKeepClou
       </DialogHeader>
       {loading ? <p className="text-sm">Checking the latest cloud records…</p> :
         cloudError ? <p role="alert" className="text-sm">{cloudError}</p> :
-        !result ? <p role="alert" className="text-sm">No readable local recovery backup or cloud snapshot was found for this account. Keep the device storage intact.</p> : <>
+        !result ? <div role="alert" className="space-y-3 text-sm">
+          <p>The recovery comparison cannot run yet. Your device data has not been discarded.</p>
+          <p>Local recovery snapshot: <strong>{hasRecoveryCopy ? 'Available' : 'Not found for this account'}</strong></p>
+          <p>Authorized cloud snapshot: <strong>{cloudSnapshot ? 'Available' : 'Not available'}</strong></p>
+          <p>Pending local operations: <strong>{pendingJournal.length}</strong></p>
+          {!cloudSnapshot && <p>The shared workspace has no readable snapshot. This does not establish that the journal is safe to upload; account membership, project identity and current bay occupancy must be verified first.</p>}
+          {journalVehicles.rows.length > 0 && <div className="space-y-2 rounded-md border p-3">
+            <p className="font-semibold">Vehicles reconstructed from journal snapshots (read-only)</p>
+            {journalVehicles.rows.map(vehicle => <p key={vehicle.id}>{label(vehicle)} · {vehicle.status}</p>)}
+            {journalVehicles.warnings.map((warning, i) => <p role="alert" key={i}>{warning}</p>)}
+            <p>These are candidate last-known locations, not confirmed cloud records. No data has been written.</p>
+          </div>}
+          {pendingJournal.length > 0 && <>
+            <p>The operation journal contains unsynchronized actions. Preserve it before attempting recovery. No operations will be replayed or acknowledged by this screen.</p>
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+              {pendingJournal.slice(0, 30).map(item => <p key={item.id}>{item.entity} / {item.action} · {item.recordId} · {item.queuedAt}</p>)}
+              {pendingJournal.length > 30 && <p>And {pendingJournal.length - 30} more operations.</p>}
+            </div>
+            <Button type="button" variant="outline" onClick={downloadJournal}><Download className="h-4 w-4" /> Download operation journal</Button>
+          </>}
+          <p>Keep this browser's storage intact. A missing cloud snapshot or account-specific recovery copy requires investigation before any upload.</p>
+        </div> : <>
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-lg border p-3"><HardDrive className="mb-2 h-4 w-4" /><div className="text-xl font-semibold">{result.localCount}</div><div className="text-xs text-muted-foreground">Vehicles in local copy</div></div>
           <div className="rounded-lg border p-3"><Cloud className="mb-2 h-4 w-4" /><div className="text-xl font-semibold">{result.cloudCount}</div><div className="text-xs text-muted-foreground">Vehicles in cloud copy</div></div>
