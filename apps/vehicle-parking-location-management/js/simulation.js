@@ -8,9 +8,11 @@ export function initPhysicsSimulation(scrapedSlots=[]){
   const host=document.getElementById('canvas3d-container');
   const T=window.THREE, M=window.Matter;
   if(!host||!T||!M)throw new Error('3D libraries unavailable. Check network and reload.');
-  const scene=new T.Scene();scene.background=new T.Color(0xa8c9d9);scene.fog=new T.Fog(0xa8c9d9,115,230);
-  const camera=new T.PerspectiveCamera(48,1,0.1,350);
-  camera.position.set(8,94,105);camera.lookAt(0,0,0);
+  const scene=new T.Scene();scene.background=new T.Color(0x9db8c9);
+  const camera=new T.OrthographicCamera(-80,80,50,-50,0.1,500);
+  let zoom=1, angle=0;
+  function orient(){camera.position.set(Math.sin(angle)*125,145,Math.cos(angle)*125);camera.lookAt(0,0,0);camera.updateProjectionMatrix();}
+  orient();
   const renderer=new T.WebGLRenderer({antialias:true,powerPreference:'low-power'});
   renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.6));
   renderer.outputEncoding=T.sRGBEncoding;
@@ -18,17 +20,17 @@ export function initPhysicsSimulation(scrapedSlots=[]){
   scene.add(new T.HemisphereLight(0xffffff,0x6b7785,2));
   const sun=new T.DirectionalLight(0xffffff,1.2);sun.position.set(-30,80,40);scene.add(sun);
   const mat=c=>new T.MeshLambertMaterial({color:c});
-  const road=mat(0x454d50),roof=mat(0xcbd1d2),wall=mat(0xe6e8e6),green=mat(0x347d74),yellow=mat(0xf3c842),white=mat(0xfafafa);
-  const asphalt=mat(0x343b40),bayMat=mat(0x69777a),blue=mat(0x2978a5),red=mat(0xbd3c37);
+  const road=mat(0x36424d),roof=mat(0x3978bf),wall=mat(0xe4eaf0),green=mat(0x347d74),yellow=mat(0xf3c842),white=mat(0xfafafa);
+  const asphalt=mat(0x273642),bayMat=mat(0x617887),blue=mat(0x2978a5),red=mat(0xbd3c37);
   function block(x,y,z,w,h,d,material,parent=scene){
     const mesh=new T.Mesh(new T.BoxGeometry(w,h,d),material);mesh.position.set(x,y,z);parent.add(mesh);return mesh;
   }
-  function textLabel(label,x,z,size=2.2){
+  function textLabel(label,x,z,height=.16){
     const canvas=document.createElement('canvas');canvas.width=512;canvas.height=96;
     const ctx=canvas.getContext('2d');ctx.fillStyle='rgba(12,31,39,.87)';ctx.fillRect(0,0,512,96);
     ctx.fillStyle='#fff';ctx.font='bold 43px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,256,48,495);
     const tex=new T.CanvasTexture(canvas);const mesh=new T.Mesh(new T.PlaneGeometry(Math.max(7,label.length*1.25),2.7),new T.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false}));
-    mesh.rotation.x=-Math.PI/2;mesh.position.set(x,0.16,z);scene.add(mesh);
+    mesh.rotation.x=-Math.PI/2;mesh.position.set(x,height,z);scene.add(mesh);
   }
   // Site footprint, perimeter and lane network (approximate, not surveyed).
   block(0,-.25,0,140,.4,72,road);
@@ -41,7 +43,7 @@ export function initPhysicsSimulation(scrapedSlots=[]){
   function building(name,x,z,w,d,height,color=roof){
     block(x,height/2,z,w,height,d,wall);
     block(x,height+.18,z,w+.6,.35,d+.6,color);
-    textLabel(name,x,z);
+    textLabel(name,x,z,height+.4);
   }
   building('NSD',-53,-5,24,43,7);
   building('BP3',-37,-18,6,22,7);
@@ -60,7 +62,7 @@ export function initPhysicsSimulation(scrapedSlots=[]){
     block(x,.24,z+2.6,4.2,.08,.12,yellow);
   }
   // Roofed accommodation parking A and B, two long rows on far right.
-  for(const [x,label] of [[65,'ACC A'],[73,'ACC B']]){
+  for(const [x,label] of [[61,'ACC A'],[66,'ACC B']]){
     for(let i=0;i<12;i++){
       const z=-25+i*4.25;
       block(x,.07,z,4.1,.1,3.7,i%3===0?mat(0x829c96):bayMat);
@@ -120,7 +122,14 @@ export function initPhysicsSimulation(scrapedSlots=[]){
   }
   function down(e){dragging=true;renderer.domElement.setPointerCapture?.(e.pointerId);steer(e);}
   function up(){dragging=false;}
-  function resize(){const w=Math.max(host.clientWidth,1),h=Math.max(host.clientHeight,1);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
+  function resize(){const w=Math.max(host.clientWidth,1),h=Math.max(host.clientHeight,1);renderer.setSize(w,h,false);const aspect=w/h;const halfW=83/zoom;const halfH=halfW/aspect;camera.left=-halfW;camera.right=halfW;camera.top=halfH;camera.bottom=-halfH;camera.updateProjectionMatrix();}
+  // A narrow portrait screen needs a rotated site view to fit the long workshop footprint.
+  angle=host.clientWidth<host.clientHeight?Math.PI/2:0;orient();
+  const controls=document.createElement('div');controls.id='sim-view-controls';controls.setAttribute('aria-label','3D camera controls');
+  controls.innerHTML='<button type="button" data-action="zoom-in" aria-label="Zoom in">+</button><button type="button" data-action="zoom-out" aria-label="Zoom out">−</button><button type="button" data-action="rotate" aria-label="Rotate view">⟳</button><button type="button" data-action="reset" aria-label="Reset view">⌂</button>';
+  host.appendChild(controls);
+  function controlClick(e){const action=e.target.closest('button')?.dataset.action;if(!action)return;e.stopPropagation();if(action==='zoom-in')zoom=Math.min(2.5,zoom*1.25);if(action==='zoom-out')zoom=Math.max(.65,zoom/1.25);if(action==='rotate'){angle+=Math.PI/2;orient();}if(action==='reset'){zoom=1;angle=host.clientWidth<host.clientHeight?Math.PI/2:0;orient();}resize();}
+  controls.addEventListener('click',controlClick);
   function tick(now){
     if(!alive)return;
     const dt=Math.min(now-last,33);last=now;
@@ -142,7 +151,7 @@ export function initPhysicsSimulation(scrapedSlots=[]){
     renderer.domElement.removeEventListener('pointerdown',down);renderer.domElement.removeEventListener('pointermove',steer);
     renderer.domElement.removeEventListener('pointerup',up);renderer.domElement.removeEventListener('pointercancel',up);
     scene.traverse(obj=>{if(obj.isMesh){obj.geometry?.dispose();const materials=Array.isArray(obj.material)?obj.material:[obj.material];materials.forEach(m=>{m.map?.dispose();m.dispose()});}});
-    renderer.dispose();renderer.domElement.remove();M.Composite.clear(engine.world,false);M.Engine.clear(engine);disposeCurrent=null;
+    renderer.dispose();renderer.domElement.remove();controls.removeEventListener('click',controlClick);controls.remove();M.Composite.clear(engine.world,false);M.Engine.clear(engine);disposeCurrent=null;
   };
   return disposeCurrent;
 }
