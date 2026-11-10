@@ -8,3 +8,7 @@
 #instructions p{margin:0}
 #exit-btn{position:absolute;right:16px;top:max(16px,env(safe-area-inset-top));z-index:3;padding:10px 14px;border-radius:8px;border:1px solid #ffffff66;background:#223d4c;color:white;cursor:pointer;touch-action:manipulation}
 @media(max-width:380px){#instructions{right:100px;font-size:12px}#instructions h3{font-size:13px}}
+
+#sim-view-controls{position:absolute;right:12px;bottom:max(35px,env(safe-area-inset-bottom));z-index:5;display:flex;flex-direction:column;gap:8px;pointer-events:auto}
+#sim-view-controls button{min-width:48px;min-height:48px;border:1px solid #ffffff80;border-radius:12px;background:#17354eea;color:#fff;font-size:27px;font-weight:700;box-shadow:0 2px 8px #0005;touch-action:manipulation}
+#instructions{background:#102c40d9;padding:9px 11px;border-radius:9px;max-width:calc(100% - 170px);text-shadow:none}
