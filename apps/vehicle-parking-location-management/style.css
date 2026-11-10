@@ -1,0 +1,28 @@
+// js/scraper.js
+export function scrapeDashboardLayout() {
+    const cards = document.querySelectorAll('.slot-card');
+    const parsedSlots = [];
+    
+    cards.forEach((card, idx) => {
+        let hexColor = 0x1f4d43; // Default Empty Green
+        let isOccupied = false;
+
+        if (card.classList.contains('occupied')) {
+            hexColor = 0x00ffcc; // Cyan status indicator
+            isOccupied = true;
+        } else if (card.classList.contains('x-parking')) {
+            hexColor = 0xffaa00; // Warning Amber indicator
+            isOccupied = true;
+        }
+
+        parsedSlots.push({
+            id: card.getAttribute('data-id') || `slot-${idx}`,
+            color: hexColor,
+            isOccupied: isOccupied,
+            // Automatically creates grid coordinates for 3D space placement
+            x: (idx % 4) * 12 - 18,
+            z: Math.floor(idx / 4) * 16 - 8
+        });
+    });
+    return parsedSlots;
+}
