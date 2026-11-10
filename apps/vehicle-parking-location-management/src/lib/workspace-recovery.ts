@@ -21,7 +21,35 @@ function mergeVehicleRecord(base: Item, local: Item, cloud: Item, label: string)
   const allKeys = [...new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(cloud)])];
   const localMovement = allKeys.some(key => movementFields.has(key) && !equal(local[key], base[key]));
   const cloudMovement = allKeys.some(key => movementFields.has(key) && !equal(cloud[key], base[key]));
-  if (localMovement && cloudMovement) throw new Error(`Concurrent vehicle movements: ${label}`);
+  if (localMovement && cloudMovement) {
+    // Agreement about the physical destination is not a conflict. Use the
+    // latest valid action time only when both users describe the same bay,
+    // parking side and lifecycle state. Never use device time to overwrite
+    // a different physical location or a delivery/archive transition.
+    const sameDestination = equal(local.currentLocationId, cloud.currentLocationId)
+      && equal(local.xParking, cloud.xParking)
+      && equal(local.status, cloud.status)
+      && equal(local.operationalStatus, cloud.operationalStatus);
+    const time = (row: Item): number => {
+      const raw = row.assignedDate;
+      const parsed = typeof raw === 'string' ? Date.parse(raw) : NaN;
+      return Number.isFinite(parsed) ? parsed : NaN;
+    };
+    const localTime = time(local), cloudTime = time(cloud);
+    if (!sameDestination || !Number.isFinite(localTime) || !Number.isFinite(cloudTime)) {
+      throw new Error(`Concurrent vehicle movements: ${label}`);
+    }
+    const newer = localTime > cloudTime ? local : cloud;
+    const older = newer === local ? cloud : local;
+    const reconciled: Item = { ...older, ...newer };
+    for (const key of allKeys) {
+      if (movementFields.has(key)) continue;
+      const value = mergeValue(base[key], local[key], cloud[key], `${label} / ${key}`);
+      if (value === undefined) delete reconciled[key];
+      else reconciled[key] = value;
+    }
+    return reconciled;
+  }
   const merged: Item = {};
   for (const key of allKeys) {
     const result = mergeValue(base[key], local[key], cloud[key], `${label} / ${key}`);
