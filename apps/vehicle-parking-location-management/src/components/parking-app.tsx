@@ -220,7 +220,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setGarageLayout(loadGarageLayout());
   }, [onSyncRecovered]);
   const { sync, getRevision, conflictDetail, downloadRecovery, downloadOperationJournal, keepCloudAfterReview, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview, user?.objectId, onWorkspaceMerged);
-  const isOnline = syncState !== 'offline';
+  const isOnline = syncState !== 'offline' && navigator.onLine;
+  const offlineReadOnly = !navigator.onLine || syncState === 'offline';
   const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline · pending' : syncState === 'error' ? 'Sync needs attention' : pendingChanges ? 'Changes pending' : 'Cloud synced';
 
   const exportVehicleBayData = () => {
@@ -428,6 +429,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   };
 
   const handleAssign = (targetBayId?: string, toUnassignedBay = false, xParkingOccupant?: XParkingOccupant, submittedVehicle: VehicleFormData = assignmentVehicle): boolean => {
+    if (!navigator.onLine) { toast.error('Offline view only: reconnect to assign vehicles.'); return false; }
     if (!(access.data?.can('Vehicles', 'Assign') ?? false)) { toast.error('You do not have permission to assign vehicles.'); return false; }
     const existing = vehicles.find((item: Vehicle) => item.plateNumber.trim().toUpperCase() === submittedVehicle.plateNumber.trim().toUpperCase());
     const validation = validateVehicle(submittedVehicle, vehicles, existing?.id);
@@ -570,6 +572,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     return true;
   };
   const handleTransfer = (toXParking = false) => {
+    if (!navigator.onLine) return toast.error('Offline view only: reconnect to transfer vehicles.');
     if (!selectedVehicle) return toast.error('Select a parked vehicle and an available destination.');
     if (transferVehicleById(selectedVehicle.id, newLocationId, notes, toXParking)) {
       setSelectedVehicleId('');
@@ -799,7 +802,17 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
             if (window.confirm('Refresh from the live workspace? Temporary guest changes will be discarded.')) onGuestRefresh?.();
           }}>Refresh live data</Button>
         </div>}
-        <motion.div key={screen} initial={{ opacity: 0, y: 12, scale: 0.995 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] as const }} className="vplm-app-screen mx-auto w-full min-w-0 max-w-[1600px] p-3 sm:p-4 md:p-6 xl:p-8">
+        {offlineReadOnly && <div role="status" className="border-b bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">Offline — View Only. Vehicle data may be outdated. Reconnect to add, transfer, or update records. Existing pending changes are preserved.</div>}
+        <motion.div key={screen} onClickCapture={(event) => {
+          if (!offlineReadOnly) return;
+          const element = event.target as HTMLElement;
+          const control = element.closest('button, [role="button"], input[type="submit"]');
+          if (!control) return;
+          const text = (control.textContent ?? control.getAttribute('aria-label') ?? '').trim().toLowerCase();
+          const blocked = ['assignment', 'transfer', 'road-tests', 'pickup-requests', 'reservations', 'management', 'settings', 'backup-playback'].includes(screen)
+            || /assign|transfer|release|deliver|move vehicle|start road|finish road|update|edit|delete|archive|save|approve|reject|cancel request|add vehicle|create|reserve|recover vehicle|park vehicle|submit/i.test(text);
+          if (blocked) { event.preventDefault(); event.stopPropagation(); toast.error('Offline view only: reconnect before making changes.'); }
+        }} onSubmitCapture={(event) => { if (offlineReadOnly) { event.preventDefault(); event.stopPropagation(); toast.error('Offline view only: forms cannot be submitted.'); } }} initial={{ opacity: 0, y: 12, scale: 0.995 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] as const }} className="vplm-app-screen mx-auto w-full min-w-0 max-w-[1600px] p-3 sm:p-4 md:p-6 xl:p-8">
           {screen === 'pickup-requests' && <PickupRequestManagement getWorkspaceRevision={getRevision} initialRequestId={initialPickupRequestId} onRefreshWorkspace={id => {
             if (pendingChanges || syncState === 'syncing' || syncState === 'error') {
               if (!window.confirm('Reload the workspace and discard unsynced changes on this device?')) return;
@@ -808,7 +821,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           }} readOnly={guestPreview} vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} hasUnsyncedChanges={Boolean(pendingChanges || syncState === 'syncing' || syncState === 'error')} />}
           {screen === 'road-tests' && canAccessRoadTests && <RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} actorRole={role} canCreateAssignment canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} isAdministrator={isAdministrator} initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} onRoadTestStarted={(id: string) => { setLockedRoadTestId(id); setScreen('road-tests'); }} onRoadTestCompleted={() => setLockedRoadTestId(undefined)} /> }
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
-          {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage} canEditVehicle={canEditVehicle} canTransferVehicle={canTransferVehicle} canAssignVehicle={canAssignVehicle} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onMoveVehicle={(vehicleId: string) => { setSelectedVehicleId(vehicleId); setNewLocationId(''); setNotes(''); setScreen('transfer'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} assignSelectedBay={(selectedBayId?: string, vehicleForm?: VehicleFormData) => handleAssign(selectedBayId, false, undefined, vehicleForm)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
+          {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage && !offlineReadOnly} canEditVehicle={canEditVehicle && !offlineReadOnly} canTransferVehicle={canTransferVehicle && !offlineReadOnly} canAssignVehicle={canAssignVehicle && !offlineReadOnly} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onMoveVehicle={(vehicleId: string) => { setSelectedVehicleId(vehicleId); setNewLocationId(''); setNotes(''); setScreen('transfer'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} assignSelectedBay={(selectedBayId?: string, vehicleForm?: VehicleFormData) => handleAssign(selectedBayId, false, undefined, vehicleForm)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
           {screen === 'assignment' && canManage && <div className="mb-3 flex justify-end"><Button variant="outline" onClick={exportVehicleBayData}><Download /> Download all vehicle / bay data</Button></div>}
           {screen === 'assignment' && <Assignment assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} zone={zone} setZone={setZone} bayId={bayId} setBayId={setBayId} availableBays={availableBays} locations={locations} vehicles={activeVehicles} zoneNames={zoneNames} handleAssign={(targetBayId?: string, occupant?: XParkingOccupant) => handleAssign(targetBayId, zone === 'Unassigned Bay', occupant)} handleAssignUnassigned={() => handleAssign(undefined, true)} handleRelease={handleRelease} handleOcr={handleOcr} fileRef={fileRef} />}
           {screen === 'search' && <SearchScreen onRecoverDeliveredVehicle={canRecoverDeliveredVehicle ? recoverDeliveredVehicle : undefined} archiveOnSearchMiss={role === 'TechnicalLeader' || role === 'TechnicalAdvisor' || role === 'Drivers' || role === 'Technician'} query={searchQuery} setQuery={setSearchQuery} result={searchQuery ? searchResult : undefined} locationLabel={locationLabel} locations={locations} vehicles={vehicles} movements={movements} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} />}
@@ -1136,6 +1149,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   };
 
   const updateVehicle = (vehicleId: string, changes: Partial<Vehicle>, auditAction: string) => {
+    if (!navigator.onLine) { toast.error('Offline view only: reconnect to edit vehicles.'); return; }
     const vehicle = vehicles.find((item: Vehicle) => item.id === vehicleId);
     if (changes.xParking === 'Yes' && vehicle && vehicle.xParking !== 'Yes') {
       const location = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(vehicle.currentLocationId));
