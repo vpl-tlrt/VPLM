@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { mergeWorkspaceChanges } from '@/lib/workspace-recovery';
 import { loadWorkspace, saveWorkspace, WorkspaceConflictError, WorkspaceResetError } from '@/lib/workspace-cloud';
 import { supabase } from '@/lib/supabase';
+import { publishSyncMonitorStatus, recordSyncMonitorError, recordSyncMonitorSuccess } from '@/lib/sync-monitor';
 import { reportAutomaticDiagnostic } from '@/lib/automatic-diagnostics';
 import { submitPendingVehicleConflicts } from '@/lib/sync-conflict-uploader';
 import { queuePendingSyncReview } from '@/lib/sync-review-queue';
@@ -32,6 +33,14 @@ const RETRY_MAX_MS = 30_000;
 export function useLocalDataSync(initialRevision: number | null, localOnly = false, userId?: string, onRecovered?: () => void) {
   const [state, setState] = useState<'idle' | 'offline' | 'syncing' | 'error'>(() => localOnly || navigator.onLine ? 'idle' : 'offline');
   const [lastSyncAt, setLastSyncAt] = useState<string>();
+  useEffect(() => {
+    if (localOnly || !supabase) return;
+    const tick = () => { void publishSyncMonitorStatus(); };
+    tick();
+    const interval = window.setInterval(tick, 5000);
+    window.addEventListener('online', tick);
+    return () => { window.clearInterval(interval); window.removeEventListener('online', tick); };
+  }, [localOnly]);
   const [pendingCount, setPendingCount] = useState(() => userId ? listPendingSyncMutations(userId).length : 0);
   const revision = useRef(initialRevision);
   const baseline = useRef<ReturnType<typeof readWorkspaceSnapshot> | null>(null);
@@ -241,7 +250,9 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
               }
             } catch { /* Keep the recovery copy untouched if verification fails. */ }
           }
-          setLastSyncAt(new Date().toISOString());
+          recordSyncMonitorSuccess();
+      void publishSyncMonitorStatus();
+      setLastSyncAt(new Date().toISOString());
           setPendingCount(0);
           setState('idle');
           toast.success('Non-conflicting workspace changes synced without reloading.');
@@ -269,6 +280,8 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
           }
         } catch { /* Keep the recovery copy untouched if verification fails. */ }
       }
+      recordSyncMonitorSuccess();
+      void publishSyncMonitorStatus();
       setLastSyncAt(new Date().toISOString());
       setPendingCount(0);
       setState('idle');
@@ -330,6 +343,8 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
         }, delay);
       }
       const serviceMessage = error instanceof Error ? error.message : String(error);
+      recordSyncMonitorError(serviceMessage);
+      void publishSyncMonitorStatus();
       const diagnosis = error instanceof WorkspaceResetError
         ? 'Workspace reset boundary: local operations must not replay. Recovery copy retained.'
         : error instanceof WorkspaceConflictError
@@ -465,6 +480,8 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       if (!workspaceContentMatches(readWorkspaceSnapshot(), snapshot)) return;
       acknowledgeSyncMutations(pending);
       setPendingCount(listPendingSyncMutations(userId).length);
+      recordSyncMonitorSuccess();
+      void publishSyncMonitorStatus();
       setLastSyncAt(new Date().toISOString());
       setState('idle');
     }).catch(() => { /* Keep journal and retry via the normal sync path. */ });
