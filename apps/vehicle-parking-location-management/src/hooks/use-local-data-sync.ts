@@ -469,10 +469,10 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     const onReconnect = () => { void refreshCloudView(); };
     const onAfterSync = () => { void refreshCloudView(); };
     // Reconcile after missed websocket events (sleep, mobile backgrounding,
-    // reconnects). Realtime remains the fast path; this is a low-rate fallback.
+    // reconnects). Realtime remains the fast path; poll every 15 seconds when visible.
     const fallback = window.setInterval(() => {
       if (document.visibilityState === 'visible' && navigator.onLine) void refreshCloudView();
-    }, 60_000);
+    }, 15_000);
     document.addEventListener('visibilitychange', onForeground);
     window.addEventListener('online', onReconnect);
     window.addEventListener('vplm-refresh-cloud-after-sync', onAfterSync);
