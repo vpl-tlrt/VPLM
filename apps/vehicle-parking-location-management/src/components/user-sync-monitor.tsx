@@ -15,8 +15,8 @@ export function UserSyncMonitor() {
      .order('last_seen_at',{ascending:false}).limit(500);
    if(!queryError && data?.length){
      const ids=[...new Set(data.map(row=>row.user_id))];
-     const {data:members,error:memberError}=await supabase.from('workspace_members').select('user_id,user_name').in('user_id',ids);
-     if(!memberError && members) setNames(Object.fromEntries(members.map(member=>[member.user_id,member.user_name || member.user_id])));
+     const {data:members,error:memberError}=await supabase.rpc('vplm_sync_monitor_names',{p_user_ids:ids});
+     if(!memberError && members) setNames(Object.fromEntries(members.map(member=>[member.user_id,member.display_name || member.user_id])));
    }
    if(queryError) setError(queryError.message);
    else {setError('');setRows((data??[]) as DeviceRow[]);}
@@ -37,7 +37,8 @@ export function UserSyncMonitor() {
    </div>
    <p className="text-sm">Reporting devices: {rows.length} · Last reported pending: {pending} · Offline/stale: {stale}</p>
    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-   <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm">
+   <div className="grid gap-2 md:hidden">{rows.map(row=>{const isStale=Date.now()-new Date(row.last_seen_at).getTime()>20000;return <article key={row.device_id} className="rounded-lg border p-3 text-sm space-y-1"><div className="font-semibold break-words">{names[row.user_id]??row.user_id}</div><div className="text-xs text-muted-foreground">Device {row.device_id.slice(0,8)} · {isStale?'Offline / stale':row.last_error?'Sync error':row.pending_count?'Pending':'Connected'}</div><div>Pending operations: <strong>{row.pending_count}</strong></div><div>Last successful sync: {age(row.last_success_at)}</div><div>Last contact: {age(row.last_seen_at)}</div>{row.last_error&&<div className="break-words text-destructive">{row.last_error}</div>}</article>;})}</div>
+   <div className="hidden md:block overflow-x-auto"><table className="w-full min-w-[720px] text-sm">
      <thead><tr className="border-b text-left"><th className="p-2">User name</th><th className="p-2">Device / tab</th><th className="p-2">Pending</th><th className="p-2">Status</th><th className="p-2">Last successful sync</th><th className="p-2">Last error</th><th className="p-2">Last contact</th></tr></thead>
      <tbody>{rows.map(row=>{
        const stale=Date.now()-new Date(row.last_seen_at).getTime()>20000;
