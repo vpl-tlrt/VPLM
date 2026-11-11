@@ -42,7 +42,12 @@ export class VehicleEditLease {
   private timer: number | undefined;
   private active = false;
   private token: string | null = null;
-  constructor(private vehicleId: string, private onLost: (reason: string) => void) {}
+  private vehicleId: string;
+  private onLost: (reason: string) => void;
+  constructor(vehicleId: string, onLost: (reason: string) => void) {
+    this.vehicleId = vehicleId;
+    this.onLost = onLost;
+  }
   async acquire(override = false): Promise<boolean> {
     const result = await vehicleEditLock(this.vehicleId, override ? 'override' : 'acquire');
     if (!result.granted || !result.token) return false;
