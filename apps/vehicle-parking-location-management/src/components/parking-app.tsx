@@ -1,5 +1,4 @@
 import { SyncConflictManagement } from './sync-conflict-management';
-import { IssueReporting } from './issue-reporting';
 import { createUUID } from '@/lib/secure-uuid';
 import { parkingZoneSort, parkingZoneLabel } from '@/lib/parking-data';
 import { ReviewWorkspaceAccess } from '@/components/workspace-access-requests';
@@ -701,7 +700,6 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
         <div className="mt-auto border-t p-4"><p className="font-semibold">{actor}</p><p className="text-sm text-muted-foreground">{roleLabel(role)}</p></div>
       </aside>
       <main className="min-w-0 pb-20 md:pb-6">
-        {!localGuest && !workspaceGuest && ownerId && <div className="flex justify-end px-4 pt-3"><IssueReporting userId={ownerId} role={role} screen={screen} /></div>}
         <header className="fluent-header sticky top-3 z-20 mx-3 mt-3 rounded-3xl border p-3 md:mx-5 md:p-4">
           <div className="flex items-center gap-3">
             <div className="flex min-w-0 items-center gap-3">
