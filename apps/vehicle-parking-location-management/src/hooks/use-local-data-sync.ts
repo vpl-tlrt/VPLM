@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { mergeWorkspaceChanges } from '@/lib/workspace-recovery';
 import { loadWorkspace, saveWorkspace, WorkspaceConflictError, WorkspaceResetError } from '@/lib/workspace-cloud';
 import { supabase } from '@/lib/supabase';
+import { reportAutomaticDiagnostic } from '@/lib/automatic-diagnostics';
 import { submitPendingVehicleConflicts } from '@/lib/sync-conflict-uploader';
 import { queuePendingSyncReview } from '@/lib/sync-review-queue';
 import { applyWorkspaceSnapshot, readWorkspaceSnapshot, workspaceStorageKeys, type WorkspaceSnapshot } from '@/lib/workspace-storage';
@@ -328,7 +329,24 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
           else setState('offline');
         }, delay);
       }
-      const serviceMessage = error instanceof Error ? error.message : '';
+      const serviceMessage = error instanceof Error ? error.message : String(error);
+      const diagnosis = error instanceof WorkspaceResetError
+        ? 'Workspace reset boundary: local operations must not replay. Recovery copy retained.'
+        : error instanceof WorkspaceConflictError
+          ? 'Workspace revision conflict: another session updated the shared workspace. Check operation journal and cloud revision.'
+          : !navigator.onLine
+            ? 'Device offline: report will be attempted on reconnection; local recovery retained.'
+            : /permission|membership|role|session|invalid|unauthoriz|forbidden/i.test(serviceMessage)
+              ? 'Authorization or session rejected by workspace service; verify membership, token, and permissions.'
+              : 'Workspace request failed: inspect connectivity, Supabase function logs, and service response.';
+      void reportAutomaticDiagnostic(userId, {
+        category: 'Sync',
+        severity: error instanceof WorkspaceResetError ? 'Critical' : 'High',
+        title: error instanceof WorkspaceResetError ? 'Automatic sync alert: reset boundary' : error instanceof WorkspaceConflictError ? 'Automatic sync alert: revision conflict' : 'Automatic sync alert: upload failure',
+        details: ['Diagnosis (preliminary): '+diagnosis, 'Service error: '+serviceMessage, 'Local pending operations: '+(userId ? listPendingSyncMutations(userId).length : 'unknown'), 'Client baseline revision: '+String(revision.current), 'Recovery copy retained: yes', 'Observed at: '+new Date().toISOString()].join('\\n'),
+        screen: 'Workspace synchronization'
+      });
+
       const message = error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError
         ? serviceMessage
         : /permission|membership|role|session|invalid|unauthoriz|forbidden/i.test(serviceMessage)
