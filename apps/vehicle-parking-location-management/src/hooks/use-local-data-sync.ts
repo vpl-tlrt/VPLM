@@ -4,6 +4,7 @@ import { mergeWorkspaceChanges } from '@/lib/workspace-recovery';
 import { loadWorkspace, saveWorkspace, WorkspaceConflictError, WorkspaceResetError } from '@/lib/workspace-cloud';
 import { supabase } from '@/lib/supabase';
 import { submitPendingVehicleConflicts } from '@/lib/sync-conflict-uploader';
+import { queuePendingSyncReview } from '@/lib/sync-review-queue';
 import { applyWorkspaceSnapshot, readWorkspaceSnapshot, workspaceStorageKeys, type WorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
 import { acknowledgeSyncMutations, exportSyncJournal, listPendingSyncMutations } from '@/lib/sync-queue';
@@ -308,7 +309,10 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
               window.dispatchEvent(new Event(WORKSPACE_DATA_CHANGED));
             }, delay);
           } else {
-            setConflictDetail('Some pending operations need review because the same vehicle or bay changed elsewhere. Other users can continue; your local operations are preserved.');
+            try {
+              if (userId) queuePendingSyncReview(userId, 'Repeated workspace revision conflicts; compare pending operation with latest cloud vehicle state.');
+            } catch { /* Never delete or acknowledge operations when local review indexing fails. */ }
+            setConflictDetail('REQUIRES_MANUAL_REVIEW: Pending operations were retained for supervisor review. Other users can continue; do not clear this device storage.');
           }
         }
       } else {
