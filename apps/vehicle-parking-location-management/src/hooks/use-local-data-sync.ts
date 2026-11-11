@@ -184,6 +184,19 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       return false;
     }
 
+    // A realtime notification, reconnect or visibility event is not a local edit.
+    // Avoid uploading an unchanged whole-workspace snapshot: every such write
+    // advances the global revision and can conflict with another active user.
+    // Ask the read-only refresh path to fetch newer cloud changes instead.
+    if (baseline.current &&
+        !hasUncommittedData(baseline.current, readWorkspaceSnapshot()) &&
+        (!userId || listPendingSyncMutations(userId).length === 0)) {
+      setPendingCount(0);
+      setState('idle');
+      window.dispatchEvent(new Event('vplm-refresh-cloud-after-sync'));
+      return true;
+    }
+
     inFlight.current = true;
     setState('syncing');
     setPendingCount(1);
