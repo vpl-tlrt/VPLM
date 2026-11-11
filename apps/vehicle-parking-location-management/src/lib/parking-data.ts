@@ -81,7 +81,18 @@ const createParkingLayout = (): ParkingLocation[] => {
     remarks: name === 'Workshop Centre Bay' ? 'Urgent / Top Priority Vehicles Only; no bay number.' : name === 'Manager Parking' ? 'Manager Parking · 10 spaces; no bay numbers.' : 'Live Parking Garage container; no bay number.',
   }));
 
-  return [...zoneA, ...zoneB, ...zoneC, ...workshop, ...reception, ...liveGarageContainers];
+  const unassignedSlots: ParkingLocation[] = Array.from({ length: 40 }, (_, index) => ({
+    id: `loc-unassigned-slot-${String(index + 1).padStart(2, '0')}`,
+    zone: 'Unassigned Bay',
+    bayNumber: '',
+    lane: 'Unassigned',
+    section: 'Unassigned Parking',
+    direction: 'Two-way',
+    capacity: 1,
+    status: 'Available',
+    remarks: 'Unassigned parking slot; no visible bay number.',
+  }));
+  return [...zoneA, ...zoneB, ...zoneC, ...workshop, ...reception, ...liveGarageContainers, ...unassignedSlots];
 };
 
 export const isLiveGarageContainer = (location?: ParkingLocation): boolean =>
@@ -97,7 +108,7 @@ export const parkingZoneSort = (a: string, b: string): number => {
 
 export const parkingLocationLabel = (location?: ParkingLocation): string => {
   if (!location) return '—';
-  return isLiveGarageContainer(location) ? parkingZoneLabel(location.zone) : `${parkingZoneLabel(location.zone)}-${location.bayNumber}`;
+  return location.zone === 'Unassigned Bay' || isLiveGarageContainer(location) ? parkingZoneLabel(location.zone) : `${parkingZoneLabel(location.zone)}-${location.bayNumber}`;
 };
 
 export const initialLocations: ParkingLocation[] = createParkingLayout();
@@ -113,7 +124,9 @@ export const mapParkingLocationId = (id?: string): string | undefined => {
 
 export const reconcileParkingLayout = (savedLocations?: ParkingLocation[]): ParkingLocation[] => {
   if (!savedLocations?.length) return initialLocations;
-  const bayKey = (location: ParkingLocation): string => `${location.zone.trim().toLowerCase()}::${location.bayNumber.trim().padStart(2, '0')}`;
+  const bayKey = (location: ParkingLocation): string => location.zone === 'Unassigned Bay'
+    ? `unassigned::${location.id}`
+    : `${location.zone.trim().toLowerCase()}::${location.bayNumber.trim().padStart(2, '0')}`;
   const savedById = new Map(savedLocations.map((location: ParkingLocation) => [mapParkingLocationId(location.id) ?? location.id, location]));
   const savedByBay = new Map(savedLocations.map((location: ParkingLocation) => [bayKey(location), location]));
   const defaultIds = new Set(initialLocations.map((location: ParkingLocation) => location.id));
