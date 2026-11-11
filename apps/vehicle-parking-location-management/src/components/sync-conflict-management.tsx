@@ -27,6 +27,10 @@ export function SyncConflictManagement() {
  const [error, setError] = useState('');
  const [busy, setBusy] = useState<string | null>(null);
  const [reason, setReason] = useState<Record<string, string>>({});
+ const [filterUser,setFilterUser] = useState('');
+ const [filterFrom,setFilterFrom] = useState('');
+ const [filterTo,setFilterTo] = useState('');
+ const [bulkBusy,setBulkBusy] = useState(false);
  const refresh = useCallback(async () => {
   if (!supabase) return;
   const { data: alerts } = await supabase.from('vplm_issue_reports')
@@ -47,6 +51,24 @@ export function SyncConflictManagement() {
    .subscribe();
   return () => { window.clearInterval(interval); void supabase?.removeChannel(channel); };
  }, [refresh]);
+ const apply = async (item: Conflict): Promise<string> => {
+  if(!supabase) return 'unavailable';
+  const {data,error:applyError}=await supabase.rpc('vplm_apply_approved_sync_conflict',{p_conflict_id:item.id});
+  if(applyError) throw applyError;
+  return String(data);
+ };
+ const filtered = items.filter(item=>(!filterUser || item.submitted_by===filterUser) && (!filterFrom || new Date(item.client_action_at).getTime()>=new Date(filterFrom).getTime()) && (!filterTo || new Date(item.client_action_at).getTime()<=new Date(filterTo).getTime())).sort((a,b)=>new Date(a.client_action_at).getTime()-new Date(b.client_action_at).getTime());
+ const approveAll=async()=>{
+  if(!supabase || !filterUser || !filterFrom || !filterTo || bulkBusy) return;
+  const selected=filtered.filter(item=>item.status==='pending' || item.status==='approved');
+  if(!selected.length || !window.confirm(`Approve and attempt recovery for ${selected.length} operations, oldest first? Conflicting records will NOT be overwritten.`)) return;
+  setBulkBusy(true);let applied=0,attention=0;
+  try {for(const item of selected){
+   if(item.status==='pending'){const {error:reviewError}=await supabase.rpc('vplm_review_sync_conflict',{p_conflict_id:item.id,p_decision:'approved',p_reason:'Bulk approved by authorized reviewer'});if(reviewError)throw reviewError;}
+   const result=await apply(item);if(result==='applied'||result==='already_applied')applied++;else attention++;
+  }setError(`Recovery completed: ${applied} applied, ${attention} require attention.`);
+  }catch(e){setError(`Recovery stopped: ${e instanceof Error?e.message:String(e)}. Previous successful operations remain applied.`);}finally{setBulkBusy(false);await refresh();}
+ };
  const decide = async (item: Conflict, decision: 'rejected' | 'approved') => {
   if (!supabase || !window.confirm(decision === 'approved'
     ? 'Mark this offline change approved for further validation? This does NOT move the vehicle automatically.'
@@ -57,7 +79,7 @@ export function SyncConflictManagement() {
   });
   setBusy(null);
   if (reviewError) setError(reviewError.message);
-  else { if (data === 'stale') setError('Vehicle changed since submission; approval requires a new review.'); await refresh(); }
+  else { if (data === 'stale') setError('Vehicle changed since submission; approval requires a new review.'); else if(decision==='approved') {try {const result=await apply(item);setError(result==='applied'?'Operation safely applied to MAIN.':`Approval recorded; recovery result: ${result}. Check the record before retrying.`);}catch(e){setError(`Approval recorded, but application failed: ${e instanceof Error?e.message:String(e)}`);}} await refresh(); }
  };
  return <section className="mt-4 rounded-xl border p-4" aria-label="Sync Conflict Management">
   <div className="mb-3 flex items-center justify-between gap-3">
@@ -73,9 +95,10 @@ export function SyncConflictManagement() {
    </details>)}
   </div>
   {error && <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}
+  <div className="mb-3 flex flex-wrap gap-2 items-end"><label className="text-xs">User<select className="block rounded border p-2" value={filterUser} onChange={e=>setFilterUser(e.target.value)}><option value="">Choose user</option>{[...new Set(items.map(x=>x.submitted_by))].map(id=><option key={id} value={id}>{String(items.find(x=>x.submitted_by===id)?.proposed_data.ownerName ?? items.find(x=>x.submitted_by===id)?.proposed_data.actorName ?? id)}</option>)}</select></label><label className="text-xs">Performed from<input type="datetime-local" className="block rounded border p-2" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)}/></label><label className="text-xs">Performed to<input type="datetime-local" className="block rounded border p-2" value={filterTo} onChange={e=>setFilterTo(e.target.value)}/></label><button type="button" className="rounded border px-3 py-2 text-sm" disabled={bulkBusy||!filterUser||!filterFrom||!filterTo} onClick={()=>void approveAll()}>{bulkBusy?'Processing…':'Approve All & Recover'}</button></div>
   <p className="mb-3 text-sm">{items.filter(x => x.status === 'pending').length} pending reviews</p>
   {items.length === 0 && <p className="text-sm text-muted-foreground">No reported conflicts.</p>}
-  <div className="space-y-3">{items.map(item => <details key={item.id} className="rounded-lg border p-3">
+  <div className="space-y-3">{filtered.map(item => <details key={item.id} className="rounded-lg border p-3">
    <summary className="cursor-pointer font-medium">{item.plate_number} · {item.action_type} · {item.status === 'approved' ? 'Approved for review — NOT applied' : item.status}</summary>
    <div className="mt-3 space-y-2 text-sm">
     <p>Device: {item.device_id} · User ID: {item.submitted_by}</p>
@@ -94,7 +117,7 @@ export function SyncConflictManagement() {
       <button disabled={busy === item.id} className="rounded border px-3 py-2" onClick={() => void decide(item, 'approved')}>Approve for validation</button>
      </div>
      <p className="text-xs text-muted-foreground">Approval records a decision only. It does not apply the proposed location; a validated vehicle movement is required.</p>
-    </> : <p>Decision recorded (does not apply to MAIN). Reviewed: {time(item.reviewed_at)} · Reviewer: {item.reviewed_by ?? '—'} · Notes: {item.review_reason ?? '—'}</p>}
+    </> : <p>Decision recorded. Reviewed: {time(item.reviewed_at)} · Reviewer: {item.reviewed_by ?? '—'} · Notes: {item.review_reason ?? '—'} · {item.status === 'applied' ? 'Applied to MAIN' : 'Application not verified'}</p>}
    </div>
   </details>)}</div>
  </section>;
