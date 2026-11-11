@@ -8,6 +8,7 @@ type Conflict = {
  current_data: Record<string, unknown>; status: string; submitted_by: string;
  reviewed_by: string | null; reviewed_at: string | null; review_reason: string | null;
 };
+type RecoveryLocation = {id:string;label:string;occupiedBy:string;capacity:number};
 type Diagnostic = { id:string; title:string; details:string; severity:string; created_at:string; status:string };
 const time = (value: string | null) => value ? new Date(value).toLocaleString() : '—';
 const location = (value: Record<string, unknown>, kind: 'main' | 'proposed' | 'previous') => {
@@ -31,8 +32,12 @@ export function SyncConflictManagement() {
  const [filterFrom,setFilterFrom] = useState('');
  const [filterTo,setFilterTo] = useState('');
  const [bulkBusy,setBulkBusy] = useState(false);
+ const [recoveryLocations,setRecoveryLocations]=useState<RecoveryLocation[]>([]);
+ const [destinations,setDestinations]=useState<Record<string,string>>({});
  const refresh = useCallback(async () => {
   if (!supabase) return;
+  const {data: locationRows}=await supabase.rpc('vplm_recovery_locations');
+  if(Array.isArray(locationRows)) setRecoveryLocations(locationRows as RecoveryLocation[]);
   const { data: alerts } = await supabase.from('vplm_issue_reports')
    .select('id,title,details,severity,created_at,status').eq('category','Sync').neq('status','Resolved')
    .order('created_at',{ascending:false}).limit(50);
@@ -53,7 +58,7 @@ export function SyncConflictManagement() {
  }, [refresh]);
  const apply = async (item: Conflict): Promise<string> => {
   if(!supabase) return 'unavailable';
-  const {data,error:applyError}=await supabase.rpc('vplm_apply_approved_sync_conflict',{p_conflict_id:item.id});
+  const {data,error:applyError}=await supabase.rpc('vplm_recover_approved_sync_conflict',{p_conflict_id:item.id,p_destination_id:destinations[item.id] || null});
   if(applyError) throw applyError;
   return String(data);
  };
@@ -117,7 +122,7 @@ export function SyncConflictManagement() {
       <button disabled={busy === item.id} className="rounded border px-3 py-2" onClick={() => void decide(item, 'approved')}>Approve for validation</button>
      </div>
      <p className="text-xs text-muted-foreground">Approval records a decision only. It does not apply the proposed location; a validated vehicle movement is required.</p>
-    </> : <p>Decision recorded. Reviewed: {time(item.reviewed_at)} · Reviewer: {item.reviewed_by ?? '—'} · Notes: {item.review_reason ?? '—'} · {item.status === 'applied' ? 'Applied to MAIN' : 'Application not verified'}{item.status==='approved' && <button type="button" disabled={busy===item.id} className="ml-2 rounded border px-3 py-1" onClick={()=>{if(!window.confirm('Attempt validated recovery for this previously approved operation?'))return;setBusy(item.id);void apply(item).then(result=>setError(`Recovery: ${result}`)).catch(e=>setError(String(e))).finally(()=>{setBusy(null);void refresh();});}}>Recover approved operation</button>}</p>}
+    </> : <p>Decision recorded. Reviewed: {time(item.reviewed_at)} · Reviewer: {item.reviewed_by ?? '—'} · Notes: {item.review_reason ?? '—'} · {item.status === 'applied' ? 'Applied to MAIN' : 'Application not verified'}{item.status==='approved' && <><label className="ml-2 inline-block text-xs">Recovery destination <select className="ml-1 max-w-full rounded border bg-background p-2" value={destinations[item.id] ?? ''} onChange={e=>setDestinations(old=>({...old,[item.id]:e.target.value}))}><option value="">Original requested bay</option>{recoveryLocations.map(loc=><option key={loc.id} value={loc.id} disabled={Boolean(loc.occupiedBy) && loc.capacity<=loc.occupiedBy.split(',').length}>{loc.label} {loc.occupiedBy?`(Occupied: ${loc.occupiedBy})`:'(Available)'}</option>)}</select></label><button type="button" disabled={busy===item.id} className="ml-2 rounded border px-3 py-1" onClick={()=>{if(!window.confirm('Attempt validated recovery for this previously approved operation?'))return;setBusy(item.id);void apply(item).then(result=>setError(`Recovery: ${result}`)).catch(e=>setError(String(e))).finally(()=>{setBusy(null);void refresh();});}}>Recover approved operation</button></>}</p>}
    </div>
   </details>)}</div>
  </section>;
