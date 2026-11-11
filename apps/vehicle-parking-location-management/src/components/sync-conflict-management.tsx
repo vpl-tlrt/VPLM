@@ -8,15 +8,21 @@ type Conflict = {
  current_data: Record<string, unknown>; status: string; submitted_by: string;
  reviewed_by: string | null; reviewed_at: string | null; review_reason: string | null;
 };
+type Diagnostic = { id:string; title:string; details:string; severity:string; created_at:string; status:string };
 const time = (value: string | null) => value ? new Date(value).toLocaleString() : '—';
 const location = (value: Record<string, unknown>) => String(value.currentLocationId ?? value.finalLocationId ?? 'Unassigned');
 export function SyncConflictManagement() {
  const [items, setItems] = useState<Conflict[]>([]);
+ const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
  const [error, setError] = useState('');
  const [busy, setBusy] = useState<string | null>(null);
  const [reason, setReason] = useState<Record<string, string>>({});
  const refresh = useCallback(async () => {
   if (!supabase) return;
+  const { data: alerts } = await supabase.from('vplm_issue_reports')
+   .select('id,title,details,severity,created_at,status').eq('category','Sync').neq('status','Resolved')
+   .order('created_at',{ascending:false}).limit(50);
+  if (alerts) setDiagnostics(alerts as Diagnostic[]);
   const { data, error: queryError } = await supabase.from('vplm_sync_conflicts')
    .select('*').order('received_at', { ascending: false }).limit(100);
   if (queryError) setError(queryError.message);
@@ -24,11 +30,12 @@ export function SyncConflictManagement() {
  }, []);
  useEffect(() => {
   void refresh();
+  const interval = window.setInterval(() => { void refresh(); }, 20_000);
   if (!supabase) return;
   const channel = supabase.channel('vplm-conflict-inbox')
    .on('postgres_changes', { event: '*', schema: 'public', table: 'vplm_sync_conflicts' }, () => { void refresh(); })
    .subscribe();
-  return () => { void supabase?.removeChannel(channel); };
+  return () => { window.clearInterval(interval); void supabase?.removeChannel(channel); };
  }, [refresh]);
  const decide = async (item: Conflict, decision: 'rejected' | 'approved') => {
   if (!supabase || !window.confirm(decision === 'approved'
@@ -47,6 +54,13 @@ export function SyncConflictManagement() {
    <div><h3 className="text-lg font-semibold">Sync Conflict Management</h3>
     <p className="text-sm text-muted-foreground">Review offline changes without overwriting current MAIN locations.</p></div>
    <button type="button" className="rounded-md border px-3 py-2 text-sm" onClick={() => void refresh()}>Refresh</button>
+  </div>
+  <div className="mb-4 space-y-2"><h4 className="font-semibold">Automatic sync error diagnostics ({diagnostics.length} recent unresolved)</h4>
+   {diagnostics.length === 0 && <p className="text-sm text-muted-foreground">No unresolved automatic sync alerts.</p>}
+   {diagnostics.map(alert => <details key={alert.id} className="rounded-md border p-3">
+    <summary className="cursor-pointer text-sm font-medium">{alert.severity} · {alert.title} · {time(alert.created_at)}</summary>
+    <pre className="mt-2 whitespace-pre-wrap break-words text-xs">{alert.details}</pre>
+   </details>)}
   </div>
   {error && <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}
   <p className="mb-3 text-sm">{items.filter(x => x.status === 'pending').length} pending reviews</p>
