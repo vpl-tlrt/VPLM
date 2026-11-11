@@ -376,6 +376,36 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     };
   }, [localOnly, recoveryKey, sync]);
 
+  // Escalate multiple outstanding vehicle operations to the existing supervisor
+  // conflict inbox. Never acknowledge, remove, or replay the device journal here.
+  // A failed submission is retried at the next visible/online check.
+  useEffect(() => {
+    if (localOnly || !userId || !supabase) return;
+    let running = false;
+    let lastReported = '';
+    const check = async () => {
+      if (running || !navigator.onLine) return;
+      const pending = listPendingSyncMutations(userId);
+      if (pending.length <= 2) { lastReported = ''; return; }
+      const fingerprint = pending.map(item => item.id).sort().join('|');
+      if (fingerprint === lastReported) return;
+      running = true;
+      try {
+        const submitted = await submitPendingVehicleConflicts(userId, revision.current);
+        if (submitted > 0) {
+          lastReported = fingerprint;
+          setConflictDetail(`${pending.length} unsynced operations on this device; ${submitted} vehicle operations submitted to the supervisor conflict inbox. Keep this device data until confirmed synced.`);
+        }
+      } catch { /* Retain pending data and retry next check. */ }
+      finally { running = false; }
+    };
+    const interval = window.setInterval(() => { void check(); }, 15_000);
+    const onOnline = () => { void check(); };
+    window.addEventListener('online', onOnline);
+    void check();
+    return () => { window.clearInterval(interval); window.removeEventListener('online', onOnline); };
+  }, [localOnly, userId]);
+
   // Persist a recovery snapshot synchronously before the browser is suspended or closed.
   // Browsers may terminate network requests at this point; do not claim cloud success.
   useEffect(() => {
