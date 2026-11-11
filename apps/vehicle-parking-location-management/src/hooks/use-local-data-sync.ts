@@ -51,6 +51,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
   const refreshRequested = useRef(false);
   const rerun = useRef(false);
   const syncBlocked = useRef(false);
+  const revisionConflictRetries = useRef(0);
   useEffect(() => {
     if (localOnly || !userId || !recoveryKey || !preservedKey || !reviewedKey) return;
     let active = true;
@@ -225,6 +226,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
           baseline.current = merged;
           acknowledgeSyncMutations(startedMutationIds);
           retryAttempt.current = 0;
+          revisionConflictRetries.current = 0;
           if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
           retryTimer.current = undefined;
           if (recoveryKey && reviewedKey && preservedKey && !syncBlocked.current) {
@@ -252,6 +254,7 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       revision.current = nextRevision;
       acknowledgeSyncMutations(startedMutationIds);
       retryAttempt.current = 0;
+      revisionConflictRetries.current = 0;
       if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
       retryTimer.current = undefined;
       if (recoveryKey && reviewedKey && preservedKey && !syncBlocked.current) {
@@ -285,10 +288,29 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       setPendingCount(1);
       if (error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError) {
         saveRecovery(readWorkspaceSnapshot());
-        if (error instanceof WorkspaceResetError) setConflictDetail(error.message);
-        syncBlocked.current = true;
-        if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
-        retryTimer.current = undefined;
+        if (error instanceof WorkspaceResetError) {
+          // A reset is a hard boundary: replaying pre-reset records would undo
+          // the administrator's reset. Keep the recovery copy for review.
+          setConflictDetail(error.message);
+          syncBlocked.current = true;
+          if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
+          retryTimer.current = undefined;
+        } else {
+          // Another user's successful entry is not itself a reason to suspend
+          // this device indefinitely. Retry boundedly against a fresh cloud
+          // revision, while preserving conflicting operations for manual review.
+          revisionConflictRetries.current += 1;
+          if (revisionConflictRetries.current <= 3) {
+            const delay = Math.min(8000, 750 * (2 ** (revisionConflictRetries.current - 1)));
+            if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
+            retryTimer.current = window.setTimeout(() => {
+              retryTimer.current = undefined;
+              window.dispatchEvent(new Event(WORKSPACE_DATA_CHANGED));
+            }, delay);
+          } else {
+            setConflictDetail('Some pending operations need review because the same vehicle or bay changed elsewhere. Other users can continue; your local operations are preserved.');
+          }
+        }
       } else {
         // navigator.onLine can remain true when Wi-Fi is connected but the internet is unavailable.
         // Retry in the background until the workspace service responds.
