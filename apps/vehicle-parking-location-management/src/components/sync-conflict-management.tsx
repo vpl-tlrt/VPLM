@@ -117,7 +117,7 @@ export function SyncConflictManagement() {
       <button disabled={busy === item.id} className="rounded border px-3 py-2" onClick={() => void decide(item, 'approved')}>Approve for validation</button>
      </div>
      <p className="text-xs text-muted-foreground">Approval records a decision only. It does not apply the proposed location; a validated vehicle movement is required.</p>
-    </> : <p>Decision recorded. Reviewed: {time(item.reviewed_at)} · Reviewer: {item.reviewed_by ?? '—'} · Notes: {item.review_reason ?? '—'} · {item.status === 'applied' ? 'Applied to MAIN' : 'Application not verified'}</p>}
+    </> : <p>Decision recorded. Reviewed: {time(item.reviewed_at)} · Reviewer: {item.reviewed_by ?? '—'} · Notes: {item.review_reason ?? '—'} · {item.status === 'applied' ? 'Applied to MAIN' : 'Application not verified'}{item.status==='approved' && <button type="button" disabled={busy===item.id} className="ml-2 rounded border px-3 py-1" onClick={()=>{if(!window.confirm('Attempt validated recovery for this previously approved operation?'))return;setBusy(item.id);void apply(item).then(result=>setError(`Recovery: ${result}`)).catch(e=>setError(String(e))).finally(()=>{setBusy(null);void refresh();});}}>Recover approved operation</button>}</p>}
    </div>
   </details>)}</div>
  </section>;
