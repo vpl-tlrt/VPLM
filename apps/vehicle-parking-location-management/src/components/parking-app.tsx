@@ -1,4 +1,5 @@
 import { SyncConflictManagement } from './sync-conflict-management';
+import { UserSyncMonitor } from './user-sync-monitor';
 import { createUUID } from '@/lib/secure-uuid';
 import { parkingZoneSort, parkingZoneLabel } from '@/lib/parking-data';
 import { ReviewWorkspaceAccess } from '@/components/workspace-access-requests';
@@ -2035,6 +2036,7 @@ function SettingsScreen({ users, connected, auditEvents, currentVehicleCount, on
   return <div className="mx-auto max-w-6xl space-y-5">
     <div><p className="technical-label">Administrator only</p><h2 className="text-2xl font-black">System settings</h2><p className="text-muted-foreground">Live user monitoring</p></div>
     <Card><CardHeader><CardTitle>Current vehicle location list</CardTitle><CardDescription>Download all currently active vehicles with their full parking location, zone, bay number, and assignment details. Opens in Microsoft Excel; delivered and released vehicles are excluded.</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onDownloadVehicleLocations}><Download /> Download current vehicle locations ({currentVehicleCount})</Button></CardContent></Card>\n    <Card><CardHeader><CardTitle>Recent user activities</CardTitle><CardDescription>Latest synchronized workspace audit entries. Pending offline device actions appear only after synchronization; use the sync inbox for reported conflicts.</CardDescription></CardHeader><CardContent className="max-h-96 space-y-2 overflow-y-auto">{[...auditEvents].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)).slice(0, 100).map(event => <div key={event.id} className="rounded-lg border p-3 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong>{event.actor} · {event.action} · {event.entity}</strong><time className="text-muted-foreground">{new Date(event.timestamp).toLocaleString()}</time></div><p className="break-words text-muted-foreground">{event.detail}</p></div>)}{auditEvents.length === 0 && <p className="text-sm text-muted-foreground">No synchronized activity records available.</p>}</CardContent></Card>
+    <UserSyncMonitor />
     <SyncConflictManagement />
     <Button variant="outline" onClick={() => setShowFlow(value => !value)}>{showFlow ? 'Close live flow' : 'View live application flow'}</Button>
     {showFlow && <ApplicationLiveFlow />}
