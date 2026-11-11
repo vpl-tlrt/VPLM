@@ -1367,7 +1367,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                           {parkingZoneLabel(zone)}
                         </button>)}
                       </div>
-                    </div>;
+                    </div> : null;
                     const renderOrientedSlot = (bay: ParkingLocation, index: number, direction: string) =>
                       <div key={bay.id} className="vplm-oriented-slot" data-facing={direction === '↓' ? 'down' : 'up'}>
                         {renderBay(bay, index)}
