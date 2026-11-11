@@ -94,14 +94,14 @@ export function mergeWorkspaceChanges(base: WorkspaceSnapshot, local: WorkspaceS
       for (const vehicle of state.vehicles as Item[]) {
         if (vehicle.status === 'Delivered') continue;
         const registration = String(vehicle.plateNumber ?? '').trim().toUpperCase();
-        if (registration && liveIds.has(registration)) throw new Error(`Vehicle ${registration}`);
+        if (registration && liveIds.has(registration)) throw new Error(`DUPLICATE_VEHICLE: ${registration} already has an active registration. Pending local changes have been preserved.`);
         liveIds.add(registration);
         if (!vehicle.currentLocationId) continue;
         const bay = String(vehicle.currentLocationId);
         const x = vehicle.xParking === 'Yes';
         const slot = `${bay}:${x ? 'x' : 'regular'}`;
         const count = (occupied.get(slot) ?? 0) + 1;
-        if (count > (x ? 1 : capacities.get(bay) ?? 1)) throw new Error(`Bay ${bay}`);
+        if (count > (x ? 1 : capacities.get(bay) ?? 1)) throw new Error(`BAY_CAPACITY_EXCEEDED: Bay ${bay} is already occupied. Choose another available bay; pending local changes have been preserved.`);
         occupied.set(slot, count);
       }
       merged[key] = JSON.stringify(state);
