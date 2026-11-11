@@ -4,6 +4,7 @@ import { mergeWorkspaceChanges } from '@/lib/workspace-recovery';
 import { loadWorkspace, saveWorkspace, WorkspaceConflictError, WorkspaceResetError } from '@/lib/workspace-cloud';
 import { supabase } from '@/lib/supabase';
 import { submitPendingVehicleConflicts } from '@/lib/sync-conflict-uploader';
+import { queuePendingSyncReview } from '@/lib/sync-review-queue';
 import { applyWorkspaceSnapshot, readWorkspaceSnapshot, workspaceStorageKeys, type WorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
 import { acknowledgeSyncMutations, exportSyncJournal, listPendingSyncMutations } from '@/lib/sync-queue';
@@ -308,7 +309,10 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
               window.dispatchEvent(new Event(WORKSPACE_DATA_CHANGED));
             }, delay);
           } else {
-            setConflictDetail('Some pending operations need review because the same vehicle or bay changed elsewhere. Other users can continue; your local operations are preserved.');
+            try {
+              if (userId) queuePendingSyncReview(userId, 'Repeated workspace revision conflicts; compare pending operation with latest cloud vehicle state.');
+            } catch { /* Never delete or acknowledge operations when local review indexing fails. */ }
+            setConflictDetail('REQUIRES_MANUAL_REVIEW: Pending operations were retained for supervisor review. Other users can continue; do not clear this device storage.');
           }
         }
       } else {
@@ -371,6 +375,36 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
       if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
     };
   }, [localOnly, recoveryKey, sync]);
+
+  // Escalate multiple outstanding vehicle operations to the existing supervisor
+  // conflict inbox. Never acknowledge, remove, or replay the device journal here.
+  // A failed submission is retried at the next visible/online check.
+  useEffect(() => {
+    if (localOnly || !userId || !supabase) return;
+    let running = false;
+    let lastReported = '';
+    const check = async () => {
+      if (running || !navigator.onLine) return;
+      const pending = listPendingSyncMutations(userId);
+      if (pending.length <= 2) { lastReported = ''; return; }
+      const fingerprint = pending.map(item => item.id).sort().join('|');
+      if (fingerprint === lastReported) return;
+      running = true;
+      try {
+        const submitted = await submitPendingVehicleConflicts(userId, revision.current);
+        if (submitted > 0) {
+          lastReported = fingerprint;
+          setConflictDetail(`${pending.length} unsynced operations on this device; ${submitted} vehicle operations submitted to the supervisor conflict inbox. Keep this device data until confirmed synced.`);
+        }
+      } catch { /* Retain pending data and retry next check. */ }
+      finally { running = false; }
+    };
+    const interval = window.setInterval(() => { void check(); }, 15_000);
+    const onOnline = () => { void check(); };
+    window.addEventListener('online', onOnline);
+    void check();
+    return () => { window.clearInterval(interval); window.removeEventListener('online', onOnline); };
+  }, [localOnly, userId]);
 
   // Persist a recovery snapshot synchronously before the browser is suspended or closed.
   // Browsers may terminate network requests at this point; do not claim cloud success.
@@ -465,10 +499,10 @@ export function useLocalDataSync(initialRevision: number | null, localOnly = fal
     const onReconnect = () => { void refreshCloudView(); };
     const onAfterSync = () => { void refreshCloudView(); };
     // Reconcile after missed websocket events (sleep, mobile backgrounding,
-    // reconnects). Realtime remains the fast path; this is a low-rate fallback.
+    // reconnects). Realtime remains the fast path; poll every 15 seconds when visible.
     const fallback = window.setInterval(() => {
       if (document.visibilityState === 'visible' && navigator.onLine) void refreshCloudView();
-    }, 60_000);
+    }, 15_000);
     document.addEventListener('visibilitychange', onForeground);
     window.addEventListener('online', onReconnect);
     window.addEventListener('vplm-refresh-cloud-after-sync', onAfterSync);
