@@ -16,7 +16,7 @@ export function UserSyncMonitor() {
    if(!queryError && data?.length){
      const ids=[...new Set(data.map(row=>row.user_id))];
      const {data:members,error:memberError}=await supabase.rpc('vplm_sync_monitor_names',{p_user_ids:ids});
-     if(!memberError && members) setNames(Object.fromEntries(members.map(member=>[member.user_id,member.display_name || member.user_id])));
+     if(!memberError && members) setNames(Object.fromEntries(members.map((member: {user_id:string;display_name:string|null})=>[member.user_id,member.display_name || member.user_id])));
    }
    if(queryError) setError(queryError.message);
    else {setError('');setRows((data??[]) as DeviceRow[]);}
