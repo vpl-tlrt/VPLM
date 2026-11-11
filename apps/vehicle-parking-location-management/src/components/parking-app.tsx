@@ -853,6 +853,18 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           {screen === 'profile' && <><Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />{(role === 'Administrator' || role === 'Supervisor') && <SyncConflictManagement />}</>}
         </motion.div>
       </main>
+      {portalTransfer && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 p-4" role="dialog" aria-modal="true" aria-label="Cross-zone vehicle transfer">
+        <div className="w-full max-w-md rounded-2xl bg-background p-5 shadow-xl space-y-4">
+          <div className="flex justify-between items-center"><h3 className="font-semibold">Transfer to {parkingZoneLabel(portalTransfer.zone)}</h3><button type="button" aria-label="Close" onClick={() => setPortalTransfer(null)}><X size={20}/></button></div>
+          <p className="text-sm text-muted-foreground">Choose a vacant parking location. The vehicle will not move until you confirm.</p>
+          <select className="w-full rounded-lg border bg-background p-3" aria-label="Available destination bay" value={portalDestinationId} onChange={(event) => setPortalDestinationId(event.target.value)}>
+            <option value="">Choose available parking</option>
+            {portalAvailable.map((location: ParkingLocation) => <option key={location.id} value={location.id}>{location.zone === 'Unassigned Bay' ? 'Available unassigned slot' : parkingLocationLabel(location)}{location.zone === 'Unassigned Bay' ? ' · ' + location.id.slice(-2) : ''}</option>)}
+          </select>
+          {!portalAvailable.length && <p className="text-sm text-destructive">No available spaces in this zone.</p>}
+          <div className="flex justify-end gap-2"><button type="button" className="rounded-lg border px-4 py-2" onClick={() => setPortalTransfer(null)}>Cancel</button><button type="button" className="rounded-lg bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50" disabled={!portalDestinationId} onClick={confirmPortalTransfer}>Confirm transfer</button></div>
+        </div>
+      </div>}
       <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 md:hidden" aria-label="Primary navigation">
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
@@ -905,6 +917,9 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const [overviewVehicleId, setOverviewVehicleId] = useState<string>();
   const [vehicleActionsDetailsId, setVehicleActionsDetailsId] = useState<string>();
   const [draggedVehicleId, setDraggedVehicleId] = useState<string>();
+  const [portalTransfer, setPortalTransfer] = useState<{ vehicleId: string; zone: string } | null>(null);
+  const [portalDestinationId, setPortalDestinationId] = useState('');
+
   const [garageZoneFilter, setGarageZoneFilter] = useState('all');
   const [openedParkingZone, setOpenedParkingZone] = useState<string | null>(null);
   const [showOtherParkingAreas, setShowOtherParkingAreas] = useState(false);
@@ -935,7 +950,28 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     return index;
   }, [activeVehicles]);
   const unassignedVehicles = activeVehicles.filter((item: Vehicle) => !item.currentLocationId && item.status !== 'Released');
+  const portalZones = Array.from(new Set(locations.map((item: ParkingLocation) => item.zone))).sort(parkingZoneSort);
+  const portalAvailable = portalTransfer ? locations.filter((location: ParkingLocation) =>
+    location.zone === portalTransfer.zone && location.status !== 'Reserved' && location.status !== 'Maintenance'
+    && (isLiveGarageContainer(location)
+      ? activeVehicles.filter((vehicle: Vehicle) => parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(location.id) && vehicle.xParking !== 'Yes').length < location.capacity
+      : !activeVehicles.some((vehicle: Vehicle) => vehicle.xParking !== 'Yes' && parkingRecordKey(vehicle.currentLocationId) === parkingRecordKey(location.id)))
+  ) : [];
 
+
+  const openZonePortal = (vehicleId: string, zone: string) => {
+    setPortalTransfer({ vehicleId, zone });
+    setPortalDestinationId('');
+    setDraggedVehicleId(undefined);
+  };
+  const confirmPortalTransfer = () => {
+    if (!portalTransfer || !portalDestinationId || !canTransferVehicle) return;
+    const target = portalAvailable.find((location: ParkingLocation) => location.id === portalDestinationId);
+    if (!target) return toast.error('Destination is no longer available. Select another bay.');
+    transferVehicle(portalTransfer.vehicleId, target.id);
+    setPortalTransfer(null);
+    setPortalDestinationId('');
+  };
   const showVehiclesOnMap = true;
 
   const [collapsedZones, setCollapsedZones] = useState<Set<string>>(new Set());
@@ -1320,13 +1356,25 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                     const laneArrow = (lane: string, bays: ParkingLocation[]): string =>
                       lane === 'Top' ? '↑' : lane === 'Bottom' ? '↓'
                         : bays[0]?.direction === 'Two-way' ? '↕' : bays[0]?.direction === 'Reverse' ? '↓' : '↑';
+                    const zonePortalBar = canTransferVehicle ? <div className="rounded-xl border bg-background/95 p-2 my-3">
+                      <p className="text-xs font-semibold mb-2">Move to another zone · drag a vehicle onto a portal, or select a vehicle and choose a zone</p>
+                      <div className="flex gap-2 overflow-x-auto pb-2" aria-label="Transfer zone portals">
+                        {portalZones.map((zone: string) => <button key={zone} type="button"
+                          className="shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-accent"
+                          onDragOver={(event) => { if (draggedVehicleId) event.preventDefault(); }}
+                          onDrop={(event) => { event.preventDefault(); if (draggedVehicleId) openZonePortal(draggedVehicleId, zone); }}
+                          onClick={() => { const selected = draggedVehicleId ?? overviewVehicleId ?? selectedVehicleId; if (selected) openZonePortal(selected, zone); else toast.info('Select a vehicle first, then choose a destination zone.'); }}>
+                          {parkingZoneLabel(zone)}
+                        </button>)}
+                      </div>
+                    </div>;
                     const renderOrientedSlot = (bay: ParkingLocation, index: number, direction: string) =>
                       <div key={bay.id} className="vplm-oriented-slot" data-facing={direction === '↓' ? 'down' : 'up'}>
                         {renderBay(bay, index)}
                         {supportsXParkingLocation(bay) && renderXParkingSpace(bay)}
                       </div>;
                     return <div key={zoneItem.zone} className="vplm-oriented-zone">
-                      {!isCollapsed && (zoneLocations.length > 0 ? <div className="vplm-oriented-lanes">
+                      {!isCollapsed && (zoneLocations.length > 0 ? <div className="vplm-oriented-lanes">{zonePortalBar}
                         {lanePairs.map((pair: string[], pairIndex: number) => {
                           const firstLane = pair[0];
                           const secondLane = pair[1];
