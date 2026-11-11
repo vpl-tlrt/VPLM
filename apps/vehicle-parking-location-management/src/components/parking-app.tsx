@@ -1342,6 +1342,15 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                               <span>Swipe horizontally <ChevronRight className="inline h-3.5 w-3.5" aria-hidden="true" /></span>
                             </div>
                             <div className="vplm-oriented-horizontal-scroll" role="region" tabIndex={0}
+                              style={{ marginTop: 12, paddingTop: 8 }}
+                              onDragOver={(event) => {
+                                if (!draggedVehicleId) return;
+                                const bounds = event.currentTarget.getBoundingClientRect();
+                                const edge = 72;
+                                const offset = event.clientX - bounds.left;
+                                if (offset < edge) event.currentTarget.scrollLeft -= Math.max(8, (edge - offset) / 2);
+                                else if (offset > bounds.width - edge) event.currentTarget.scrollLeft += Math.max(8, (offset - (bounds.width - edge)) / 2);
+                              }}
                               aria-label={`Scroll bays horizontally: ${firstLane}${secondLane ? ` and ${secondLane}` : ''}`}>
                               <div className="vplm-oriented-track"
                                 style={{ gridTemplateColumns: `repeat(${columns}, minmax(88px, 1fr))`, width: `${columns * 94}px` }}>
