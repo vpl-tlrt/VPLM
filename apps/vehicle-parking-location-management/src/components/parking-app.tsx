@@ -1,5 +1,3 @@
-import { SyncConflictManagement } from './sync-conflict-management';
-import { UserSyncMonitor } from './user-sync-monitor';
 import { createUUID } from '@/lib/secure-uuid';
 import { parkingZoneSort, parkingZoneLabel } from '@/lib/parking-data';
 import { ReviewWorkspaceAccess } from '@/components/workspace-access-requests';
@@ -218,10 +216,10 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setAuditEvents(updated.auditEvents);
     setGarageLayout(loadGarageLayout());
   }, [onSyncRecovered]);
-  const { sync, getRevision, conflictDetail, downloadRecovery, downloadOperationJournal, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview, user?.objectId, onWorkspaceMerged);
+  const { sync, retryFailedWrite, getRevision, conflictDetail, downloadRecovery, state: syncState, lastSyncAt, pendingCount: pendingChanges, hasPublishedSnapshot } = useLocalDataSync(initialCloudRevision, localGuest || guestPreview, user?.objectId, onWorkspaceMerged);
   const isOnline = syncState !== 'offline' && navigator.onLine;
-  const offlineReadOnly = !navigator.onLine || syncState === 'offline';
-  const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline · pending' : syncState === 'error' ? 'Sync needs attention' : pendingChanges ? 'Changes pending' : 'Cloud synced';
+  const offlineReadOnly = !navigator.onLine || syncState === 'offline' || syncState === 'error' || syncState === 'syncing';
+  const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Saving to MAIN…' : syncState === 'offline' ? 'Internet required' : syncState === 'error' ? 'NOT saved' : 'MAIN live';
 
   const exportVehicleBayData = () => {
     const columns = ['Plate Number', 'VIN', 'Brand', 'Model', 'Status', 'Parking Zone', 'Parking Bay', 'Location', 'Assigned Date', 'Assigned By', 'Driver Owner'];
@@ -467,8 +465,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       ? { ...existing, ...validation.value, ...xParkingDetails, status: 'Assigned', currentLocationId: location?.id, assignedDate: assignedAt, assignedBy: actor }
       : { id: vehicleId, vehicleId: `VH-${Date.now().toString().slice(-4)}`, ...validation.value, ...xParkingDetails, customerName: validation.value.customerName || 'Walk-in', status: 'Assigned', currentLocationId: location?.id, assignedDate: assignedAt, assignedBy: actor, driverOwner: validation.value.driverOwner || actor, department: validation.value.department || 'Workshop intake', operationalStatus: 'Checked In', photoUrls: [], geofenceStatus: 'Unknown', geofenceAlertEnabled: true };
     const destinationLabel = location ? `${location.zone}-${location.bayNumber}` : 'Unassigned Bay';
-    // Persist the vehicle and bay update synchronously before reporting success or
-    // starting any network sync. This keeps assignments safe during internet loss.
+    // Stage the vehicle update in tab memory; the cloud writer immediately
+    // attempts to save it. This tab has no offline persistent workspace.
     const nextVehicles = existing
       ? vehicles.map((item: Vehicle) => item.id === vehicleId ? assignedVehicle : item)
       : [assignedVehicle, ...vehicles];
@@ -484,11 +482,11 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       movements,
       reservations,
       auditEvents,
-      pendingChanges: 1,
+      pendingChanges: 0,
       savedAt: new Date().toISOString(),
     });
     if (!savedLocally) {
-      toast.error('Could not save this assignment on the device. Free device storage and try again.');
+      toast.error('Could not stage this assignment. Retry while connected to MAIN.');
       return false;
     }
     logAudit(existing ? 'Edit' : 'Assignment', 'Vehicle', `${normalized} → ${destinationLabel}`, assignedVehicle, existing?.currentLocationId, location?.id);
@@ -786,18 +784,13 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           </div>
           <div className="relative mt-3 overflow-hidden rounded-2xl bg-background lg:hidden"><span className="pointer-events-none absolute inset-y-0 right-4 flex items-center font-mono text-base font-bold tabular-nums text-muted-foreground" aria-hidden="true"><LiveClock formatString="HH:mm:ss" /></span><Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={searchQuery} onChange={(event: ChangeEvent<HTMLInputElement>) => setSearchQuery(event.target.value)} onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === 'Enter' && searchQuery.trim()) setScreen('search'); }} placeholder="Search plate or VIN" className="relative z-[1] h-11 rounded-2xl bg-transparent pl-10 pr-24" aria-label="Global vehicle search" /></div>
         </header>
-        {conflictDetail && <div role="alert" className="flex flex-wrap items-center gap-2 border-b bg-muted p-3 text-sm">
-          <span>Sync recovery: {conflictDetail} The local backup remains available.</span>
-          <Button size="sm" variant="outline" onClick={downloadRecovery}>Download pending changes</Button>
-          <Button size="sm" variant="outline" onClick={downloadOperationJournal}>Download operation journal</Button>
-        </div>}
-        {!guestPreview && pendingChanges > 0 && (syncState === 'error' || syncState === 'offline') && !conflictDetail && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-sm">
-          <span>Vehicle data has not reached the cloud yet. Keep this device's local data until sync succeeds.</span>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={downloadRecovery}>Download local backup</Button>
-            <Button size="sm" variant="outline" onClick={downloadOperationJournal}>Download sync journal</Button>
-            {syncState !== 'offline' && <Button size="sm" onClick={() => void sync(true)}>Retry sync</Button>}
-          </div>
+        {conflictDetail && <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-red-400 bg-red-950/70 p-3 text-sm">
+          <span><strong>Not saved to MAIN.</strong> {conflictDetail} The current draft exists only in this open tab.</span>
+          <Button size="sm" variant="outline" onClick={() => void retryFailedWrite()} disabled={!navigator.onLine}>Retry cloud save</Button>
+          <Button size="sm" variant="outline" onClick={downloadRecovery}>Download unconfirmed draft</Button>
+          <Button size="sm" variant="outline" onClick={() => {
+            if (window.confirm('Discard the unconfirmed changes in this tab and reload the latest MAIN cloud records?')) onSyncRecovered?.();
+          }}>Reload MAIN</Button>
         </div>}
         {workspaceGuest && <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-sm">
           <span>Guest preview. Vehicle changes are temporary. Pickup requests are view-only.</span>
@@ -805,7 +798,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
             if (window.confirm('Refresh from the live workspace? Temporary guest changes will be discarded.')) onGuestRefresh?.();
           }}>Refresh live data</Button>
         </div>}
-        {offlineReadOnly && <div role="status" className="border-b bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">Offline — View Only. Vehicle data may be outdated. Reconnect to add, transfer, or update records. Existing pending changes are preserved.</div>}
+        {offlineReadOnly && <div role="status" className="border-b bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">{syncState === 'syncing' ? 'Saving to MAIN cloud. Please wait before making another change.' : syncState === 'error' ? 'Cloud save not confirmed. Retry or reload MAIN before continuing.' : 'Online connection required. Vehicle changes are disabled until connected.'}</div>}
         <motion.div key={screen} onClickCapture={(event) => {
           if (!offlineReadOnly) return;
           const element = event.target as HTMLElement;
@@ -814,8 +807,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           const text = (control.textContent ?? control.getAttribute('aria-label') ?? '').trim().toLowerCase();
           const blocked = ['assignment', 'transfer', 'road-tests', 'pickup-requests', 'reservations', 'management', 'settings', 'backup-playback'].includes(screen)
             || /assign|transfer|release|deliver|move vehicle|start road|finish road|update|edit|delete|archive|save|approve|reject|cancel request|add vehicle|create|reserve|recover vehicle|park vehicle|submit/i.test(text);
-          if (blocked) { event.preventDefault(); event.stopPropagation(); toast.error('Offline view only: reconnect before making changes.'); }
-        }} onSubmitCapture={(event) => { if (offlineReadOnly) { event.preventDefault(); event.stopPropagation(); toast.error('Offline view only: forms cannot be submitted.'); } }} initial={{ opacity: 0, y: 12, scale: 0.995 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] as const }} className="vplm-app-screen mx-auto w-full min-w-0 max-w-[1600px] p-3 sm:p-4 md:p-6 xl:p-8">
+          if (blocked) { event.preventDefault(); event.stopPropagation(); toast.error('Online-only: wait for a confirmed MAIN cloud connection before editing.'); }
+        }} onSubmitCapture={(event) => { if (offlineReadOnly) { event.preventDefault(); event.stopPropagation(); toast.error('Online-only: cloud connection required before submitting.'); } }} initial={{ opacity: 0, y: 12, scale: 0.995 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] as const }} className="vplm-app-screen mx-auto w-full min-w-0 max-w-[1600px] p-3 sm:p-4 md:p-6 xl:p-8">
           {screen === 'pickup-requests' && <PickupRequestManagement getWorkspaceRevision={getRevision} initialRequestId={initialPickupRequestId} onRefreshWorkspace={id => {
             if (pendingChanges || syncState === 'syncing' || syncState === 'error') {
               if (!window.confirm('Reload the workspace and discard unsynced changes on this device?')) return;
@@ -852,7 +845,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
             </div>)}
           {screen === 'settings' && isAdministrator && <SettingsScreen users={onlineUsers} connected={presenceConnected} auditEvents={auditEvents} currentVehicleCount={vehicles.filter((vehicle: Vehicle) => vehicle.status !== 'Delivered' && vehicle.status !== 'Released').length} onDownloadVehicleLocations={downloadCurrentVehicleLocations} />}
           {screen === 'backup-playback' && isAdministrator && <BackupPlayback />}
-          {screen === 'profile' && <><Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />{(role === 'Administrator' || role === 'Supervisor') && <SyncConflictManagement />}</>}
+          {screen === 'profile' && <Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />}
         </motion.div>
       </main>
       <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 md:hidden" aria-label="Primary navigation">
@@ -2046,8 +2039,6 @@ function SettingsScreen({ users, connected, auditEvents, currentVehicleCount, on
   return <div className="mx-auto max-w-6xl space-y-5">
     <div><p className="technical-label">Administrator only</p><h2 className="text-2xl font-black">System settings</h2><p className="text-muted-foreground">Live user monitoring</p></div>
     <Card><CardHeader><CardTitle>Current vehicle location list</CardTitle><CardDescription>Download all currently active vehicles with their full parking location, zone, bay number, and assignment details. Opens in Microsoft Excel; delivered and released vehicles are excluded.</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onDownloadVehicleLocations}><Download /> Download current vehicle locations ({currentVehicleCount})</Button></CardContent></Card>\n    <Card><CardHeader><CardTitle>Recent user activities</CardTitle><CardDescription>Latest synchronized workspace audit entries. Pending offline device actions appear only after synchronization; use the sync inbox for reported conflicts.</CardDescription></CardHeader><CardContent className="max-h-96 space-y-2 overflow-y-auto">{[...auditEvents].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)).slice(0, 100).map(event => <div key={event.id} className="rounded-lg border p-3 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong>{event.actor} · {event.action} · {event.entity}</strong><time className="text-muted-foreground">{new Date(event.timestamp).toLocaleString()}</time></div><p className="break-words text-muted-foreground">{event.detail}</p></div>)}{auditEvents.length === 0 && <p className="text-sm text-muted-foreground">No synchronized activity records available.</p>}</CardContent></Card>
-    <UserSyncMonitor />
-    <SyncConflictManagement />
     <Button variant="outline" onClick={() => setShowFlow(value => !value)}>{showFlow ? 'Close live flow' : 'View live application flow'}</Button>
     {showFlow && <ApplicationLiveFlow />}
     <Card>
