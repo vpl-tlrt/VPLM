@@ -4,13 +4,21 @@ export const appStorageKey = (key: string): string => {
 };
 
 let guestWorkspace: Map<string, string> | undefined;
+// Online-only: all operational workspace reads/writes live in this tab's memory.
+// Historical browser storage is intentionally left untouched for manual recovery;
+// it is never considered live or replayed into cloud records.
+let onlineWorkspace: Map<string, string> | undefined;
+
+export function setOnlineOnlyWorkspace(enabled: boolean): void {
+  onlineWorkspace = enabled ? new Map() : undefined;
+}
 
 export function setGuestWorkspace(enabled: boolean) {
   guestWorkspace = enabled ? new Map() : undefined;
 }
 
 export function workspaceDataStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
-  const sandbox = guestWorkspace;
+  const sandbox = guestWorkspace ?? onlineWorkspace;
   if (!sandbox) return window.localStorage;
   return {
     getItem: key => sandbox.get(key) ?? null,
