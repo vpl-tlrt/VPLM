@@ -290,22 +290,20 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
     background: color-mix(in oklch, var(--primary) 18%, transparent);
   }
 
+  @keyframes workflow-flow {
+    from { transform: rotate(-4deg) skewX(-10deg) translate3d(-1.5%, 0, 0); }
+    to { transform: rotate(-2deg) skewX(-7deg) translate3d(1.5%, -8px, 0); }
+  }
+  @keyframes bay-scan {
+    0%, 24% { transform: translateX(-130%); }
+    70%, 100% { transform: translateX(130%); }
+  }
+  @keyframes road-flow {
+    from { background-position: 0 50%; }
+    to { background-position: 96px 50%; }
+  }
+
   .enterprise-backdrop {
-@keyframes workflow-flow {
-  from { transform: rotate(-4deg) skewX(-10deg) translate3d(-1.5%, 0, 0); }
-  to { transform: rotate(-2deg) skewX(-7deg) translate3d(1.5%, -8px, 0); }
-}
-
-@keyframes bay-scan {
-  0%, 24% { transform: translateX(-130%); }
-  70%, 100% { transform: translateX(130%); }
-}
-
-@keyframes road-flow {
-  from { background-position: 0 50%; }
-  to { background-position: 96px 50%; }
-}
-
     position: relative;
     isolation: isolate;
   }
@@ -1301,7 +1299,7 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   -webkit-overflow-scrolling: touch;
   scrollbar-gutter: stable;
 }
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .vplm-parking-detail-sheet[data-slot="dialog-content"] {
     inset: auto 0 0 0 !important;
     top: auto !important;
@@ -1419,7 +1417,7 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
 :is(.vplm-responsive-dialog, .vplm-parking-detail-sheet) [data-slot="tabs-trigger"] {
   flex: 0 0 auto; min-width: max-content;
 }
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
   .vplm-parking-detail-sheet {
     width: min(620px, calc(100dvw - 1rem));
     max-width: min(620px, calc(100dvw - 1rem));
@@ -1550,4 +1548,41 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   color: var(--foreground);
   font-size: .67rem;
   font-weight: 750;
+}
+
+/* Mobile/tablet viewport containment for VPLM's swipeable bay rows.
+   The wide bay track must scroll inside its zone, never resize the app shell. */
+@layer components {
+  #root { width: 100%; min-width: 0; max-width: 100%; }
+  .enterprise-backdrop { width: 100%; min-width: 0; max-width: 100%; }
+  .enterprise-backdrop > main { width: 100%; min-width: 0; min-inline-size: 0; max-width: 100%; overflow-x: clip; }
+  .vplm-app-screen { width: 100%; min-width: 0; min-inline-size: 0; max-width: 100%; }
+  .vplm-app-screen > .grid,
+  .vplm-parking-panel,
+  .vplm-zone-detail,
+  .vplm-bay-browser,
+  .vplm-oriented-zone,
+  .vplm-oriented-lanes,
+  .vplm-oriented-lane-group {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-inline-size: 0;
+    max-width: 100%;
+  }
+  .vplm-oriented-horizontal-scroll {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    min-inline-size: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  @media (max-width: 1279px) {
+    .enterprise-backdrop { display: block; }
+    .fluent-header { max-width: calc(100% - 1.5rem); }
+    .fluent-header > .flex { min-width: 0; max-width: 100%; }
+    .vplm-app-screen > .grid { grid-template-columns: minmax(0, 1fr); }
+  }
 }
