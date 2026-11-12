@@ -330,6 +330,7 @@ export default function HomePage() {
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
   const [workspaceUserId, setWorkspaceUserId] = useState<string>();
   const [workspaceError, setWorkspaceError] = useState('');
+  const [recoveryExported, setRecoveryExported] = useState(false);
 
   const onSyncRecovered = useCallback(() => {
     setPickupToReopen(undefined);
@@ -463,8 +464,10 @@ export default function HomePage() {
               link.href = url;
               link.download = 'vplm-unsynced-local-workspace.json';
               link.click();
-              URL.revokeObjectURL(url);
+              window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+              setRecoveryExported(true);
             }}>Download unsynced local workspace</Button>}
+            {workspaceError.includes('pending vehicle data') && <div className="mt-3 space-y-2"><p className="text-sm">Your session is authenticated, but the app cannot safely replace unsynced browser data. Save the recovery file first. Free browser storage if necessary, then retry. Do not clear this site's data.</p><Button variant="outline" onClick={() => { setWorkspaceLoaded(false); setWorkspaceRefresh(value => value + 1); }}>Retry secure workspace access</Button>{recoveryExported && <p className="text-xs">Download was initiated. Verify that the JSON file exists in your Downloads folder before any browser cleanup.</p>}</div>}
             <Button variant="outline" onClick={() => { void client.auth.signOut(); }}>Sign out</Button>
           </CardContent>
         </Card>
