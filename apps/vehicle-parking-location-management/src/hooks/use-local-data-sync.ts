@@ -1,568 +1,228 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { mergeWorkspaceChanges } from '@/lib/workspace-recovery';
 import { loadWorkspace, saveWorkspace, WorkspaceConflictError, WorkspaceResetError } from '@/lib/workspace-cloud';
 import { supabase } from '@/lib/supabase';
-import { publishSyncMonitorStatus, recordSyncMonitorError, recordSyncMonitorSuccess } from '@/lib/sync-monitor';
-import { reportAutomaticDiagnostic } from '@/lib/automatic-diagnostics';
-import { submitPendingVehicleConflicts } from '@/lib/sync-conflict-uploader';
-import { queuePendingSyncReview } from '@/lib/sync-review-queue';
-import { applyWorkspaceSnapshot, readWorkspaceSnapshot, workspaceStorageKeys, type WorkspaceSnapshot } from '@/lib/workspace-storage';
+import { readWorkspaceSnapshot, applyWorkspaceSnapshot, workspaceStorageKeys, type WorkspaceSnapshot } from '@/lib/workspace-storage';
 import { WORKSPACE_DATA_CHANGED } from '@/lib/workspace-sync-events';
-import { acknowledgeSyncMutations, exportSyncJournal, listPendingSyncMutations } from '@/lib/sync-queue';
-import { preserveWorkspaceRecoveryCopy, readRecoverySnapshot, recoveryFingerprint, workspaceContentMatches } from '@/lib/workspace-recovery-status';
 
-const hasUncommittedData = (before: WorkspaceSnapshot, current: WorkspaceSnapshot): boolean =>
-  workspaceStorageKeys.some(key => {
-    if (before[key] === current[key]) return false;
-    if (key !== 'vehicle-parking-browser-state-v2') return true;
+// Online-only cloud writer. No offline persistence, no automatic replay,
+// no delayed background uploads, and no merge that could override live records.
+function sameWorkspace(left: WorkspaceSnapshot, right: WorkspaceSnapshot): boolean {
+  return workspaceStorageKeys.every(key => {
+    if (left[key] === right[key]) return true;
+    if (key !== 'vehicle-parking-browser-state-v2') return false;
     try {
-      const normalize = (serialized: string | null) => {
-        const { pendingChanges: _pending, savedAt: _savedAt, ...content } = JSON.parse(serialized ?? '{}') as Record<string, unknown>;
-        void _pending;
-        void _savedAt;
-        return JSON.stringify(content);
+      const normalize = (value: string | null) => {
+        const { pendingChanges: _p, savedAt: _s, ...live } =
+          JSON.parse(value ?? '{}') as Record<string, unknown>;
+        void _p; void _s;
+        return JSON.stringify(live);
       };
-      return normalize(before[key]) !== normalize(current[key]);
-    } catch { return true; }
-  });
-
-const RETRY_BASE_MS = 1500;
-const RETRY_MAX_MS = 30_000;
-
-export function useLocalDataSync(initialRevision: number | null, localOnly = false, userId?: string, onRecovered?: () => void) {
-  const [state, setState] = useState<'idle' | 'offline' | 'syncing' | 'error'>(() => localOnly || navigator.onLine ? 'idle' : 'offline');
-  const [lastSyncAt, setLastSyncAt] = useState<string>();
-  useEffect(() => {
-    if (localOnly || !supabase) return;
-    const tick = () => { void publishSyncMonitorStatus(); };
-    tick();
-    const interval = window.setInterval(tick, 5000);
-    window.addEventListener('online', tick);
-    return () => { window.clearInterval(interval); window.removeEventListener('online', tick); };
-  }, [localOnly]);
-  const [pendingCount, setPendingCount] = useState(() => userId ? listPendingSyncMutations(userId).length : 0);
-  const revision = useRef(initialRevision);
-  const baseline = useRef<ReturnType<typeof readWorkspaceSnapshot> | null>(null);
-  if (!baseline.current && !localOnly) baseline.current = readWorkspaceSnapshot();
-  const recoveryKey = userId ? `vplm-unsynced-recovery:${userId}` : undefined;
-  const preservedKey = userId ? `vplm-preserved-unsynced:${userId}` : undefined;
-  const reviewedKey = userId ? `vplm-recovery-verified:${userId}` : undefined;
-  const [conflictDetail, setConflictDetail] = useState('');
-  const saveRecovery = (draft: ReturnType<typeof readWorkspaceSnapshot>) => {
-    // Retain earlier recovery versions when a new offline session is saved.
-    // A quota failure leaves the original key untouched for later export.
-    if (userId) preserveWorkspaceRecoveryCopy(userId, draft, false);
-  };
-  const timer = useRef<number | undefined>(undefined);
-  const retryTimer = useRef<number | undefined>(undefined);
-  const retryAttempt = useRef(0);
-  const inFlight = useRef(false);
-  const refreshing = useRef(false);
-  const refreshRequested = useRef(false);
-  const rerun = useRef(false);
-  const syncBlocked = useRef(false);
-  const revisionConflictRetries = useRef(0);
-  useEffect(() => {
-    if (localOnly || !userId || !recoveryKey || !preservedKey || !reviewedKey) return;
-    let active = true;
-    let raw: string | null = null;
-    let preserved = false;
-    try {
-      raw = window.localStorage.getItem(recoveryKey);
-      preserved = Boolean(window.localStorage.getItem(preservedKey));
-      if (!raw && !preserved) return;
-      // A previously reviewed backup stays on this device for audit/recovery.
-      // It should not produce a permanent "sync conflict" warning.
-      if (raw && !preserved && window.localStorage.getItem(reviewedKey) === recoveryFingerprint(raw)) return;
-      syncBlocked.current = preserved;
-      setConflictDetail(preserved
-        ? 'An offline copy was protected before cloud reload. Compare it with the cloud before enabling uploads.'
-        : 'Checking a saved recovery copy against the shared workspace.');
-    } catch { return; }
-    if (!raw) {
-      setConflictDetail('This device has a protected offline state but no readable backup. Do not clear its site storage.');
-      return;
-    }
-    if (!navigator.onLine) {
-      setConflictDetail('Recovery copy saved on this device. Reconnect to verify it against the cloud.');
-      return;
-    }
-    const protectedRaw = raw;
-    const verificationIds = listPendingSyncMutations(userId).map(item => item.id);
-    void loadWorkspace(userId).then(({ snapshot, isGuest }) => {
-      if (!active) return;
-      if (!snapshot || isGuest) {
-        setConflictDetail('Could not verify the saved local copy against an authorized cloud workspace.');
-        return;
-      }
-      // Require *all* workspace collections to match, not just vehicle plates.
-      // The current displayed snapshot must also match to avoid suppressing new edits.
-      const identical = workspaceContentMatches(readRecoverySnapshot(protectedRaw), snapshot)
-        && workspaceContentMatches(readWorkspaceSnapshot(), snapshot);
-      if (identical) {
-        try {
-          if (window.localStorage.getItem(recoveryKey) !== protectedRaw) return;
-          window.localStorage.setItem(reviewedKey, recoveryFingerprint(protectedRaw));
-          window.localStorage.removeItem(preservedKey);
-          syncBlocked.current = false;
-          // A previous request may have committed successfully but lost its
-          // acknowledgement (tab closed or response lost). The cloud is now
-          // independently verified identical to both the recovery copy and
-          // displayed workspace; acknowledge only the operations present at
-          // the start of this verification, never later edits.
-          if (verificationIds.length) acknowledgeSyncMutations(verificationIds);
-          setPendingCount(listPendingSyncMutations(userId).length);
-          setState('idle');
-          setConflictDetail('');
-        } catch {
-          setConflictDetail('Matching cloud data was verified, but local recovery status could not be saved.');
-        }
-      } else {
-        setConflictDetail('A preserved local backup differs from current cloud records. Review both copies; nothing will be overwritten automatically.');
-      }
-    }).catch(() => {
-      if (active) setConflictDetail('Could not check this backup against the cloud. Keep local data and try reviewing when online.');
-    });
-    return () => { active = false; };
-  }, [localOnly, userId, recoveryKey, preservedKey, reviewedKey]);
-
-  const keepCloudAfterReview = useCallback((): boolean => {
-    if (!recoveryKey || !reviewedKey || !preservedKey || !baseline.current
-        || hasUncommittedData(baseline.current, readWorkspaceSnapshot())) {
-      toast.error('New local changes are pending. Sync or back them up before resolving an older recovery copy.');
-      return false;
-    }
-    try {
-      const raw = window.localStorage.getItem(recoveryKey);
-      if (!raw || !readRecoverySnapshot(raw)) return false;
-      // Retain the complete recovery copy and journal. Only acknowledge the user's
-      // explicit decision to continue with the displayed cloud state.
-      window.localStorage.setItem(reviewedKey, recoveryFingerprint(raw));
-      window.localStorage.removeItem(preservedKey);
-      syncBlocked.current = false;
-      setConflictDetail('');
-      setState('idle');
-      return true;
+      return normalize(left[key]) === normalize(right[key]);
     } catch { return false; }
-  }, [recoveryKey, reviewedKey, preservedKey]);
+  });
+}
 
-  useEffect(() => {
-    if (localOnly) return;
-    const setOnline = () => {
-      setState('idle');
-      if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
-      retryTimer.current = undefined;
-      window.dispatchEvent(new Event(WORKSPACE_DATA_CHANGED));
-    };
-    const setOffline = () => {
-      setState('offline');
-      setPendingCount((count) => Math.max(count, 1));
-    };
-    window.addEventListener('online', setOnline);
-    window.addEventListener('offline', setOffline);
-    return () => {
-      if (timer.current !== undefined) window.clearTimeout(timer.current);
-      if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
-      window.removeEventListener('online', setOnline);
-      window.removeEventListener('offline', setOffline);
-    };
-  }, [localOnly]);
+function downloadSnapshot(snapshot: WorkspaceSnapshot) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify({
+    exportedAt: new Date().toISOString(), warning: 'Not confirmed in cloud', snapshot,
+  }, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'vplm-unconfirmed-cloud-write.json';
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
-  const sync = useCallback(async (announce = true) => {
-    if (localOnly) {
-      if (announce) toast.info('Guest data stays on this device and is not uploaded.');
-      return false;
-    }
-    if (!supabase) {
-      setState('error');
-      setPendingCount(1);
-      if (announce) toast.error('Supabase is not configured. Changes remain saved on this device.');
-      return false;
-    }
-    if (!navigator.onLine) {
-      saveRecovery(readWorkspaceSnapshot());
-      setState('offline');
-      setPendingCount(1);
-      if (announce) toast.info('Saved on this device. Sync will resume when the connection returns.');
-      return false;
-    }
-    if (syncBlocked.current) {
-      if (announce) toast.error('Workspace sync is paused to protect your unsynced data. Download the local backup before reloading.');
-      return false;
-    }
-    if (inFlight.current) {
-      rerun.current = true;
-      return false;
-    }
+type CloudState = 'idle' | 'offline' | 'syncing' | 'error';
 
-    // A realtime notification, reconnect or visibility event is not a local edit.
-    // Avoid uploading an unchanged whole-workspace snapshot: every such write
-    // advances the global revision and can conflict with another active user.
-    // Ask the read-only refresh path to fetch newer cloud changes instead.
-    if (baseline.current &&
-        !hasUncommittedData(baseline.current, readWorkspaceSnapshot()) &&
-        (!userId || listPendingSyncMutations(userId).length === 0)) {
-      setPendingCount(0);
-      setState('idle');
-      window.dispatchEvent(new Event('vplm-refresh-cloud-after-sync'));
-      return true;
-    }
+export function useLocalDataSync(
+  initialRevision: number | null, localOnly = false, userId?: string, onRecovered?: () => void,
+) {
+  const [state, setState] = useState<CloudState>(() => navigator.onLine ? 'idle' : 'offline');
+  const [lastSyncAt, setLastSyncAt] = useState<string>();
+  const [conflictDetail, setConflictDetail] = useState('');
+  const revision = useRef(initialRevision);
+  const baseline = useRef<WorkspaceSnapshot>(readWorkspaceSnapshot());
+  const saving = useRef(false);
+  const refreshing = useRef(false);
+  const timer = useRef<number | null>(null);
+  const saveAgain = useRef(false);
+  const blocked = useRef(false);
 
-    inFlight.current = true;
-    setState('syncing');
-    setPendingCount(1);
-    try {
-      const snapshot = readWorkspaceSnapshot();
-      const startedMutationIds = userId ? listPendingSyncMutations(userId).map(item => item.id) : [];
-      let nextRevision;
-      try {
-        nextRevision = await saveWorkspace(snapshot, revision.current);
-        baseline.current = snapshot;
-      } catch (error) {
-        if (!(error instanceof WorkspaceConflictError) || !userId || !baseline.current || !onRecovered) throw error;
-        const latest = await loadWorkspace(userId);
-        if (!latest.snapshot || latest.isGuest) throw error;
-        const draft = readWorkspaceSnapshot();
-        try {
-          const merged = mergeWorkspaceChanges(baseline.current, draft, latest.snapshot);
-          nextRevision = await saveWorkspace(merged, latest.revision);
-          if (JSON.stringify(readWorkspaceSnapshot()) !== JSON.stringify(draft)) {
-            throw new Error('More local changes arrived during recovery.');
-          }
-          // The cloud accepted a merged snapshot. Apply it locally and rehydrate
-          // the mounted workspace without a full page or screen reload.
-          applyWorkspaceSnapshot(merged);
-          revision.current = nextRevision;
-          baseline.current = merged;
-          acknowledgeSyncMutations(startedMutationIds);
-          retryAttempt.current = 0;
-          revisionConflictRetries.current = 0;
-          if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
-          retryTimer.current = undefined;
-          if (recoveryKey && reviewedKey && preservedKey && !syncBlocked.current) {
-            try {
-              const savedCopy = window.localStorage.getItem(recoveryKey);
-              if (savedCopy && workspaceContentMatches(readRecoverySnapshot(savedCopy), merged)) {
-                window.localStorage.setItem(reviewedKey, recoveryFingerprint(savedCopy));
-                window.localStorage.removeItem(preservedKey);
-                setConflictDetail('');
-              }
-            } catch { /* Keep the recovery copy untouched if verification fails. */ }
-          }
-          recordSyncMonitorSuccess();
-      void publishSyncMonitorStatus();
-      setLastSyncAt(new Date().toISOString());
-          setPendingCount(0);
-          setState('idle');
-          toast.success('Non-conflicting workspace changes synced without reloading.');
-          onRecovered();
-          return true;
-        } catch (mergeError) {
-          saveRecovery(readWorkspaceSnapshot());
-          setConflictDetail(mergeError instanceof Error ? mergeError.message : 'The workspace changed.');
-          throw error;
-        }
-      }
-      revision.current = nextRevision;
-      acknowledgeSyncMutations(startedMutationIds);
-      retryAttempt.current = 0;
-      revisionConflictRetries.current = 0;
-      if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
-      retryTimer.current = undefined;
-      if (recoveryKey && reviewedKey && preservedKey && !syncBlocked.current) {
-        try {
-          const savedCopy = window.localStorage.getItem(recoveryKey);
-          if (savedCopy && workspaceContentMatches(readRecoverySnapshot(savedCopy), snapshot)) {
-            window.localStorage.setItem(reviewedKey, recoveryFingerprint(savedCopy));
-            window.localStorage.removeItem(preservedKey);
-            setConflictDetail('');
-          }
-        } catch { /* Keep the recovery copy untouched if verification fails. */ }
-      }
-      recordSyncMonitorSuccess();
-      void publishSyncMonitorStatus();
-      setLastSyncAt(new Date().toISOString());
-      setPendingCount(0);
-      setState('idle');
-      if (announce) toast.success('Workspace data synced.');
-      return true;
-    } catch (error) {
-      // On a competing workspace revision, report pending vehicle operations to
-      // the review inbox without acknowledging or deleting any local records.
-      // A reset is deliberately excluded: pre-reset operations must not replay.
-      if (error instanceof WorkspaceConflictError && userId && navigator.onLine) {
-        try {
-          const count = await submitPendingVehicleConflicts(userId, revision.current);
-          if (count > 0) setConflictDetail(`${count} pending vehicle operations were sent for review. Local recovery data is retained until cloud sync is verified.`);
-        } catch {
-          // Preserve the original error and local journal. Submission can be retried later.
-        }
-      }
-      setState(error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError ? 'error' : navigator.onLine ? 'error' : 'offline');
-      setPendingCount(1);
-      if (error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError) {
-        saveRecovery(readWorkspaceSnapshot());
-        if (error instanceof WorkspaceResetError) {
-          // A reset is a hard boundary: replaying pre-reset records would undo
-          // the administrator's reset. Keep the recovery copy for review.
-          setConflictDetail(error.message);
-          syncBlocked.current = true;
-          if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
-          retryTimer.current = undefined;
-        } else {
-          // Another user's successful entry is not itself a reason to suspend
-          // this device indefinitely. Retry boundedly against a fresh cloud
-          // revision, while preserving conflicting operations for manual review.
-          revisionConflictRetries.current += 1;
-          if (revisionConflictRetries.current <= 3) {
-            const delay = Math.min(8000, 750 * (2 ** (revisionConflictRetries.current - 1)));
-            if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
-            retryTimer.current = window.setTimeout(() => {
-              retryTimer.current = undefined;
-              window.dispatchEvent(new Event(WORKSPACE_DATA_CHANGED));
-            }, delay);
-          } else {
-            try {
-              if (userId) queuePendingSyncReview(userId, 'Repeated workspace revision conflicts; compare pending operation with latest cloud vehicle state.');
-            } catch { /* Never delete or acknowledge operations when local review indexing fails. */ }
-            setConflictDetail('REQUIRES_MANUAL_REVIEW: Pending operations were retained for supervisor review. Other users can continue; do not clear this device storage.');
-          }
-        }
-      } else {
-        // navigator.onLine can remain true when Wi-Fi is connected but the internet is unavailable.
-        // Retry in the background until the workspace service responds.
-        saveRecovery(readWorkspaceSnapshot());
-        retryAttempt.current += 1;
-        const delay = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** Math.min(retryAttempt.current - 1, 5)));
-        if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
-        retryTimer.current = window.setTimeout(() => {
-          retryTimer.current = undefined;
-          if (navigator.onLine) window.dispatchEvent(new Event(WORKSPACE_DATA_CHANGED));
-          else setState('offline');
-        }, delay);
-      }
-      const serviceMessage = error instanceof Error ? error.message : String(error);
-      recordSyncMonitorError(serviceMessage);
-      void publishSyncMonitorStatus();
-      const diagnosis = error instanceof WorkspaceResetError
-        ? 'Workspace reset boundary: local operations must not replay. Recovery copy retained.'
-        : error instanceof WorkspaceConflictError
-          ? 'Workspace revision conflict: another session updated the shared workspace. Check operation journal and cloud revision.'
-          : !navigator.onLine
-            ? 'Device offline: report will be attempted on reconnection; local recovery retained.'
-            : /permission|membership|role|session|invalid|unauthoriz|forbidden/i.test(serviceMessage)
-              ? 'Authorization or session rejected by workspace service; verify membership, token, and permissions.'
-              : 'Workspace request failed: inspect connectivity, Supabase function logs, and service response.';
-      void reportAutomaticDiagnostic(userId, {
-        category: 'Sync',
-        severity: error instanceof WorkspaceResetError ? 'Critical' : 'High',
-        title: error instanceof WorkspaceResetError ? 'Automatic sync alert: reset boundary' : error instanceof WorkspaceConflictError ? 'Automatic sync alert: revision conflict' : 'Automatic sync alert: upload failure',
-        details: ['Diagnosis (preliminary): '+diagnosis, 'Service error: '+serviceMessage, 'Local pending operations: '+(userId ? listPendingSyncMutations(userId).length : 'unknown'), 'Client baseline revision: '+String(revision.current), 'Recovery copy retained: yes', 'Observed at: '+new Date().toISOString()].join('\\n'),
-        screen: 'Workspace synchronization'
-      });
-
-      const message = error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError
-        ? serviceMessage
-        : /permission|membership|role|session|invalid|unauthoriz|forbidden/i.test(serviceMessage)
-          ? `${serviceMessage} Your local backup is still available.`
-          : 'Could not reach the workspace service. Your changes remain saved locally and will retry automatically.';
-      if (announce || error instanceof WorkspaceConflictError || error instanceof WorkspaceResetError || /permission|membership|unauthoriz|forbidden/i.test(serviceMessage)) toast.error(message);
-      return false;
-    } finally {
-      inFlight.current = false;
-      if (rerun.current) {
-        rerun.current = false;
-        window.dispatchEvent(new Event(WORKSPACE_DATA_CHANGED));
-      }
-      // A realtime event received during an upload must not be lost. Refresh
-      // after the upload has settled, never while local edits are in flight.
-      if (refreshRequested.current) {
-        refreshRequested.current = false;
-        window.dispatchEvent(new Event('vplm-refresh-cloud-after-sync'));
-      }
-    }
-  }, [localOnly, userId, onRecovered, recoveryKey, reviewedKey, preservedKey]);
-
-  useEffect(() => {
-    const scheduleSync = () => {
-      if (localOnly) return;
-      if (syncBlocked.current || !navigator.onLine) saveRecovery(readWorkspaceSnapshot());
-      if (syncBlocked.current) return;
-      if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
-      retryTimer.current = undefined;
-      setPendingCount(Math.max(1, listPendingSyncMutations(userId).length));
-      if (inFlight.current) { rerun.current = true; return; }
-      // Throttle rather than repeatedly resetting the timer: frequent edits must
-      // not indefinitely postpone the upload.
-      if (timer.current !== undefined) return;
-      timer.current = window.setTimeout(() => {
-        timer.current = undefined;
-        void sync(false);
-      }, 180);
-    };
-    window.addEventListener(WORKSPACE_DATA_CHANGED, scheduleSync);
-    return () => {
-      window.removeEventListener(WORKSPACE_DATA_CHANGED, scheduleSync);
-      if (timer.current !== undefined) window.clearTimeout(timer.current);
-      if (retryTimer.current !== undefined) window.clearTimeout(retryTimer.current);
-    };
-  }, [localOnly, recoveryKey, sync]);
-
-  // Escalate multiple outstanding vehicle operations to the existing supervisor
-  // conflict inbox. Never acknowledge, remove, or replay the device journal here.
-  // A failed submission is retried at the next visible/online check.
-  useEffect(() => {
-    if (localOnly || !userId || !supabase) return;
-    let running = false;
-    let lastReported = '';
-    const check = async () => {
-      if (running || !navigator.onLine) return;
-      const pending = listPendingSyncMutations(userId);
-      if (pending.length <= 2) { lastReported = ''; return; }
-      const fingerprint = pending.map(item => item.id).sort().join('|');
-      if (fingerprint === lastReported) return;
-      running = true;
-      try {
-        const submitted = await submitPendingVehicleConflicts(userId, revision.current);
-        if (submitted > 0) {
-          lastReported = fingerprint;
-          setConflictDetail(`${pending.length} unsynced operations on this device; ${submitted} vehicle operations submitted to the supervisor conflict inbox. Keep this device data until confirmed synced.`);
-        }
-      } catch { /* Retain pending data and retry next check. */ }
-      finally { running = false; }
-    };
-    const interval = window.setInterval(() => { void check(); }, 15_000);
-    const onOnline = () => { void check(); };
-    window.addEventListener('online', onOnline);
-    void check();
-    return () => { window.clearInterval(interval); window.removeEventListener('online', onOnline); };
-  }, [localOnly, userId]);
-
-  // Persist a recovery snapshot synchronously before the browser is suspended or closed.
-  // Browsers may terminate network requests at this point; do not claim cloud success.
-  useEffect(() => {
-    if (localOnly || !userId) return;
-    const protectPending = () => {
-      const current = readWorkspaceSnapshot();
-      const hasChanges = baseline.current ? hasUncommittedData(baseline.current, current) : false;
-      if (hasChanges || inFlight.current || listPendingSyncMutations(userId).length > 0) {
-        saveRecovery(current);
-      }
-    };
-    const onVisibility = () => {
-      if (document.visibilityState !== 'hidden') return;
-      protectPending();
-      // Best-effort upload while the page remains alive; the local recovery
-      // snapshot above remains the durable fallback if the browser kills it.
-      if (navigator.onLine && !inFlight.current && !syncBlocked.current) void sync(false);
-    };
-    window.addEventListener('pagehide', protectPending);
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      window.removeEventListener('pagehide', protectPending);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, [localOnly, userId, sync]);
-
-  // On startup, a previous upload may have reached the server but its response
-  // was lost. Confirm the *entire* workspace against the cloud before clearing
-  // journal entries. Never replay historical mutations without validation.
-  useEffect(() => {
-    if (localOnly || !userId || !navigator.onLine || syncBlocked.current) return;
-    const pending = listPendingSyncMutations(userId).map(item => item.id);
-    if (!pending.length) return;
-    let active = true;
-    void loadWorkspace(userId).then(({ snapshot, isGuest }) => {
-      if (!active || !snapshot || isGuest || inFlight.current || syncBlocked.current) return;
-      if (!workspaceContentMatches(readWorkspaceSnapshot(), snapshot)) return;
-      // Verify no newer local edits arrived during the request.
-      if (!workspaceContentMatches(readWorkspaceSnapshot(), snapshot)) return;
-      acknowledgeSyncMutations(pending);
-      setPendingCount(listPendingSyncMutations(userId).length);
-      recordSyncMonitorSuccess();
-      void publishSyncMonitorStatus();
-      setLastSyncAt(new Date().toISOString());
-      setState('idle');
-    }).catch(() => { /* Keep journal and retry via the normal sync path. */ });
-    return () => { active = false; };
-  }, [localOnly, userId]);
-
-  // Realtime events are hints. Fetch and adopt the authoritative snapshot only
-  // when no local edits are pending; never overwrite an unsynced browser session.
   const refreshCloudView = useCallback(async () => {
-    if (inFlight.current) { refreshRequested.current = true; return false; }
-    if (localOnly || !supabase || !userId || !onRecovered || !navigator.onLine ||
-        refreshing.current || syncBlocked.current ||
-        listPendingSyncMutations(userId).length) return false;
-    if (!baseline.current || hasUncommittedData(baseline.current, readWorkspaceSnapshot())) return false;
+    if (localOnly || !supabase || !userId || !navigator.onLine || saving.current ||
+        refreshing.current || blocked.current || !onRecovered) return false;
+    if (!sameWorkspace(baseline.current, readWorkspaceSnapshot())) return false;
     refreshing.current = true;
     try {
-      const startingRevision = revision.current;
-      const latest = await loadWorkspace(userId);
-      if (startingRevision !== revision.current) return false;
-      if (!latest.snapshot || latest.isGuest || latest.revision === null || latest.revision <= (revision.current ?? 0)) return false;
-      if (inFlight.current || listPendingSyncMutations(userId).length ||
-          !baseline.current || hasUncommittedData(baseline.current, readWorkspaceSnapshot())) return false;
-      applyWorkspaceSnapshot(latest.snapshot);
-      baseline.current = latest.snapshot;
-      revision.current = latest.revision;
+      // One tiny revision-only query replaces the old 15-second full-workspace
+      // download. Fetch the large snapshot ONLY if another user saved changes.
+      const { data, error } = await supabase.from('workspace_state')
+        .select('revision').eq('id', 1).maybeSingle();
+      if (error) throw error;
+      const cloudRevision = data?.revision;
+      if (typeof cloudRevision !== 'number' || cloudRevision <= (revision.current ?? -1)) return true;
+      const loaded = await loadWorkspace(userId);
+      if (!loaded.snapshot || loaded.isGuest || saving.current || blocked.current ||
+          !sameWorkspace(baseline.current, readWorkspaceSnapshot())) return false;
+      if (loaded.revision === null || loaded.revision <= (revision.current ?? -1)) return true;
+      applyWorkspaceSnapshot(loaded.snapshot);
+      baseline.current = loaded.snapshot;
+      revision.current = loaded.revision;
+      setLastSyncAt(new Date().toISOString());
       onRecovered();
       return true;
     } catch {
-      // Network loss is handled by the normal durable sync/recovery path.
       return false;
     } finally {
       refreshing.current = false;
     }
   }, [localOnly, userId, onRecovered]);
 
+  const saveNow = useCallback(async (announce = false): Promise<boolean> => {
+    if (localOnly) {
+      if (announce) toast.info('Guest access is read-only.');
+      return false;
+    }
+    if (!supabase || !userId || !navigator.onLine) {
+      blocked.current = true;
+      setState('error');
+      setConflictDetail('Online connection required. The change on this screen has NOT been saved to MAIN.');
+      if (announce) toast.error('Online connection required. This change was not saved.');
+      return false;
+    }
+    if (blocked.current) {
+      if (announce) toast.error('An earlier cloud save failed. Retry the save or reload MAIN.');
+      return false;
+    }
+    if (saving.current) {
+      saveAgain.current = true;
+      return false;
+    }
+    const draft = readWorkspaceSnapshot();
+    if (sameWorkspace(baseline.current, draft)) {
+      if (announce) {
+        const refreshed = await refreshCloudView();
+        if (refreshed) toast.info('MAIN cloud data is up to date.');
+      }
+      return true;
+    }
+    saving.current = true;
+    setState('syncing');
+    try {
+      const savedRevision = await saveWorkspace(draft, revision.current);
+      revision.current = savedRevision;
+      baseline.current = draft;
+      setLastSyncAt(new Date().toISOString());
+      setConflictDetail('');
+      setState('idle');
+      if (announce) toast.success('Saved to MAIN cloud.');
+      return true;
+    } catch (error) {
+      blocked.current = true;
+      setState('error');
+      const explanation = error instanceof WorkspaceConflictError
+        ? 'MAIN changed in another session. This change was NOT saved; reload the current cloud version before editing.'
+        : error instanceof WorkspaceResetError
+          ? 'MAIN was reset; your current change was NOT saved.'
+          : error instanceof Error ? error.message : 'Cloud save failed';
+      setConflictDetail(explanation);
+      toast.error('Not saved to MAIN. Retry or reload after reviewing the change.');
+      return false;
+    } finally {
+      saving.current = false;
+      if (saveAgain.current && !blocked.current) {
+        saveAgain.current = false;
+        window.setTimeout(() => { void saveNow(false); }, 120);
+      }
+    }
+  }, [localOnly, userId, refreshCloudView]);
+
+  // Queue only a short IN-MEMORY debounce to combine the records from one action
+  // (vehicle, movement, audit). Never retain a retry journal or upload offline edits.
   useEffect(() => {
-    if (!supabase || localOnly || !userId) return;
-    const client = supabase;
-    const channel = client.channel(`vplm-vehicle-deltas-${userId}`)
-      .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'vplm_vehicle_delta_events' },
-        payload => {
-          const remoteRevision = Number((payload.new as Record<string, unknown>).workspace_revision);
-          if (Number.isSafeInteger(remoteRevision) && remoteRevision > (revision.current ?? 0)) {
-            void refreshCloudView();
-          }
-        })
-      .subscribe(status => { if (status === 'SUBSCRIBED') void refreshCloudView(); });
-    const onForeground = () => { if (document.visibilityState === 'visible') void refreshCloudView(); };
-    const onReconnect = () => { void refreshCloudView(); };
-    const onAfterSync = () => { void refreshCloudView(); };
-    // Reconcile after missed websocket events (sleep, mobile backgrounding,
-    // reconnects). Realtime remains the fast path; poll every 15 seconds when visible.
-    const fallback = window.setInterval(() => {
-      if (document.visibilityState === 'visible' && navigator.onLine) void refreshCloudView();
-    }, 15_000);
-    document.addEventListener('visibilitychange', onForeground);
-    window.addEventListener('online', onReconnect);
-    window.addEventListener('vplm-refresh-cloud-after-sync', onAfterSync);
+    if (localOnly) return;
+    const changed = () => {
+      if (blocked.current) return;
+      if (timer.current !== null) window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => {
+        timer.current = null;
+        void saveNow(false);
+      }, 250);
+    };
+    window.addEventListener(WORKSPACE_DATA_CHANGED, changed);
     return () => {
-      window.clearInterval(fallback);
-      document.removeEventListener('visibilitychange', onForeground);
-      window.removeEventListener('online', onReconnect);
-      window.removeEventListener('vplm-refresh-cloud-after-sync', onAfterSync);
+      window.removeEventListener(WORKSPACE_DATA_CHANGED, changed);
+      if (timer.current !== null) window.clearTimeout(timer.current);
+    };
+  }, [localOnly, saveNow]);
+
+  useEffect(() => {
+    if (localOnly || !supabase || !userId) return;
+    const client = supabase;
+    // Realtime events remain only a hint: a cheap revision request validates
+    // whether any full workspace response is needed.
+    const channel = client.channel(`vplm-online-workspace-${userId}`)
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'vplm_vehicle_delta_events',
+      }, () => { void refreshCloudView(); }).subscribe();
+    const foreground = () => {
+      if (document.visibilityState === 'visible') void refreshCloudView();
+    };
+    const online = () => {
+      if (blocked.current) return;
+      if (!sameWorkspace(baseline.current, readWorkspaceSnapshot())) {
+        blocked.current = true;
+        setState('error');
+        setConflictDetail('A change occurred without confirmed connectivity. Reload MAIN; nothing will be replayed automatically.');
+        return;
+      }
+      setState('idle');
+      void refreshCloudView();
+    };
+    const offline = () => setState('offline');
+    const poll = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && navigator.onLine) void refreshCloudView();
+    }, 60_000);
+    document.addEventListener('visibilitychange', foreground);
+    window.addEventListener('online', online);
+    window.addEventListener('offline', offline);
+    return () => {
+      window.clearInterval(poll);
+      document.removeEventListener('visibilitychange', foreground);
+      window.removeEventListener('online', online);
+      window.removeEventListener('offline', offline);
       void client.removeChannel(channel);
     };
   }, [localOnly, userId, refreshCloudView]);
+
+  const sync = useCallback(async (announce = true): Promise<boolean> => {
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+    // Let all state changes from the current React event settle before the write.
+    await new Promise<void>(resolve => window.setTimeout(resolve, 250));
+    return saveNow(announce);
+  }, [saveNow]);
+
+  const retryFailedWrite = useCallback(async (): Promise<boolean> => {
+    if (!navigator.onLine) {
+      toast.error('Reconnect before retrying.');
+      return false;
+    }
+    blocked.current = false;
+    setConflictDetail('');
+    return saveNow(true);
+  }, [saveNow]);
+
   const getRevision = useCallback(() => revision.current, []);
-  const downloadOperationJournal = () => {
-    const url = URL.createObjectURL(new Blob([exportSyncJournal(userId)], { type: 'application/json' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'vplm-operation-journal.json';
-    link.click();
-    URL.revokeObjectURL(url);
+  const downloadRecovery = () => downloadSnapshot(readWorkspaceSnapshot());
+  const downloadOperationJournal = () => downloadSnapshot(readWorkspaceSnapshot());
+  return {
+    sync, retryFailedWrite, getRevision, conflictDetail, downloadRecovery,
+    downloadOperationJournal, keepCloudAfterReview: () => false,
+    state, lastSyncAt, pendingCount: 0, hasPublishedSnapshot: true,
   };
-  const downloadRecovery = () => {
-    const saved = recoveryKey ? window.localStorage.getItem(recoveryKey) : null;
-    const url = URL.createObjectURL(new Blob([saved ?? JSON.stringify(readWorkspaceSnapshot())], { type: 'application/json' }));
-    const link = document.createElement('a');
-    link.href = url; link.download = 'vplm-unsynced-recovery.json'; link.click(); URL.revokeObjectURL(url);
-  };
-  return { sync, getRevision, conflictDetail, downloadRecovery, downloadOperationJournal, keepCloudAfterReview, state, lastSyncAt, pendingCount, hasPublishedSnapshot: true };
 }
