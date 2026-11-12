@@ -32,6 +32,7 @@ export function SyncConflictManagement() {
  const [filterFrom,setFilterFrom] = useState('');
  const [filterTo,setFilterTo] = useState('');
  const [bulkBusy,setBulkBusy] = useState(false);
+ const [bulkResult,setBulkResult]=useState('');
  const [recoveryLocations,setRecoveryLocations]=useState<RecoveryLocation[]>([]);
  const [destinations,setDestinations]=useState<Record<string,string>>({});
  const refresh = useCallback(async () => {
@@ -42,10 +43,13 @@ export function SyncConflictManagement() {
    .select('id,title,details,severity,created_at,status').eq('category','Sync').neq('status','Resolved')
    .order('created_at',{ascending:false}).limit(50);
   if (alerts) setDiagnostics(alerts as Diagnostic[]);
-  const { data, error: queryError } = await supabase.from('vplm_sync_conflicts')
-   .select('*').order('received_at', { ascending: false }).limit(100);
-  if (queryError) setError(queryError.message);
-  else { setItems((data ?? []) as Conflict[]); setError(''); }
+  const rows:Conflict[]=[];
+  for(let offset=0;offset<1000;offset+=200){
+   const {data, error:queryError}=await supabase.from('vplm_sync_conflicts').select('*').order('received_at',{ascending:false}).range(offset,offset+199);
+   if(queryError){setError(queryError.message);return;}
+   rows.push(...((data??[]) as Conflict[]));if((data??[]).length<200)break;
+  }
+  setItems(rows);
  }, []);
  useEffect(() => {
   void refresh();
@@ -64,15 +68,17 @@ export function SyncConflictManagement() {
  };
  const filtered = items.filter(item=>(!filterUser || item.submitted_by===filterUser) && (!filterFrom || new Date(item.client_action_at).getTime()>=new Date(filterFrom).getTime()) && (!filterTo || new Date(item.client_action_at).getTime()<=new Date(filterTo).getTime())).sort((a,b)=>new Date(a.client_action_at).getTime()-new Date(b.client_action_at).getTime());
  const approveAll=async()=>{
-  if(!supabase || !filterUser || !filterFrom || !filterTo || bulkBusy) return;
+  if(!supabase || bulkBusy) return;
   const selected=filtered.filter(item=>item.status==='pending' || item.status==='approved');
   if(!selected.length || !window.confirm(`Approve and attempt recovery for ${selected.length} operations, oldest first? Conflicting records will NOT be overwritten.`)) return;
-  setBulkBusy(true);let applied=0,attention=0;
+  setBulkBusy(true);setBulkResult('');let applied=0,attention=0,failed=0;
   try {for(const item of selected){
-   if(item.status==='pending'){const {error:reviewError}=await supabase.rpc('vplm_review_sync_conflict',{p_conflict_id:item.id,p_decision:'approved',p_reason:'Bulk approved by authorized reviewer'});if(reviewError)throw reviewError;}
-   const result=await apply(item);if(result==='applied'||result==='already_applied')applied++;else attention++;
-  }setError(`Recovery completed: ${applied} applied, ${attention} require attention.`);
-  }catch(e){setError(`Recovery stopped: ${e instanceof Error?e.message:String(e)}. Previous successful operations remain applied.`);}finally{setBulkBusy(false);await refresh();}
+   try {
+    if(item.status==='pending'){const {data:review,error:reviewError}=await supabase.rpc('vplm_review_sync_conflict',{p_conflict_id:item.id,p_decision:'approved',p_reason:'Bulk approved by authorized reviewer'});if(reviewError)throw reviewError;if(review==='stale'){attention++;continue;}}
+    const result=await apply(item);if(result==='applied'||result==='already_applied')applied++;else attention++;
+   }catch(e){failed++;setBulkResult(`Processing ${applied+attention+failed}/${selected.length}: ${item.plate_number} failed: ${e instanceof Error?e.message:String(e)}`);}
+  }setBulkResult(`Recovery complete: ${applied} applied, ${attention} require attention, ${failed} failed. Existing occupied bays were protected.`);
+  }finally{setBulkBusy(false);await refresh();}
  };
  const decide = async (item: Conflict, decision: 'rejected' | 'approved') => {
   if (!supabase || !window.confirm(decision === 'approved'
@@ -99,9 +105,10 @@ export function SyncConflictManagement() {
     <pre className="mt-2 whitespace-pre-wrap break-words text-xs">{alert.details}</pre>
    </details>)}
   </div>
+  {bulkResult && <p role="status" className="mb-3 text-sm font-medium">{bulkResult}</p>}
   {error && <p role="alert" className="mb-3 text-sm text-destructive">{error}</p>}
-  <div className="mb-3 flex flex-wrap gap-2 items-end"><label className="text-xs">User<select className="block rounded border p-2" value={filterUser} onChange={e=>setFilterUser(e.target.value)}><option value="">Choose user</option>{[...new Set(items.map(x=>x.submitted_by))].map(id=><option key={id} value={id}>{String(items.find(x=>x.submitted_by===id)?.proposed_data.ownerName ?? items.find(x=>x.submitted_by===id)?.proposed_data.actorName ?? id)}</option>)}</select></label><label className="text-xs">Performed from<input type="datetime-local" className="block rounded border p-2" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)}/></label><label className="text-xs">Performed to<input type="datetime-local" className="block rounded border p-2" value={filterTo} onChange={e=>setFilterTo(e.target.value)}/></label><button type="button" className="rounded border px-3 py-2 text-sm" disabled={bulkBusy||!filterUser||!filterFrom||!filterTo} onClick={()=>void approveAll()}>{bulkBusy?'Processing…':'Approve All & Recover'}</button></div>
-  <p className="mb-3 text-sm">{items.filter(x => x.status === 'pending').length} pending reviews</p>
+  <div className="mb-3 flex flex-wrap gap-2 items-end"><label className="text-xs">User<select className="block rounded border p-2" value={filterUser} onChange={e=>setFilterUser(e.target.value)}><option value="">Choose user</option>{[...new Set(items.map(x=>x.submitted_by))].map(id=><option key={id} value={id}>{String(items.find(x=>x.submitted_by===id)?.proposed_data.ownerName ?? items.find(x=>x.submitted_by===id)?.proposed_data.actorName ?? id)}</option>)}</select></label><label className="text-xs">Performed from<input type="datetime-local" className="block rounded border p-2" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)}/></label><label className="text-xs">Performed to<input type="datetime-local" className="block rounded border p-2" value={filterTo} onChange={e=>setFilterTo(e.target.value)}/></label><button type="button" className="rounded border px-3 py-2 text-sm" disabled={bulkBusy||!filtered.some(x=>x.status==='pending'||x.status==='approved')} onClick={()=>void approveAll()}>{bulkBusy?'Processing…':'Approve All & Recover'}</button></div>
+  <p className="mb-3 text-sm">{items.filter(x => x.status === 'pending').length} pending reviews · {items.filter(x=>x.status==='approved').length} approved but not applied · {items.filter(x=>x.status==='applied').length} applied</p>
   {items.length === 0 && <p className="text-sm text-muted-foreground">No reported conflicts.</p>}
   <div className="space-y-3">{filtered.map(item => <details key={item.id} className="rounded-lg border p-3">
    <summary className="cursor-pointer font-medium">{item.plate_number} · {item.action_type} · {item.status === 'approved' ? 'Approved for review — NOT applied' : item.status}</summary>
