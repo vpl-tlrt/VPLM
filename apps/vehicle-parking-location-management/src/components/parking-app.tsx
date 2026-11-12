@@ -907,7 +907,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const [overviewVehicleId, setOverviewVehicleId] = useState<string>();
   const [vehicleActionsDetailsId, setVehicleActionsDetailsId] = useState<string>();
   const [draggedVehicleId, setDraggedVehicleId] = useState<string>();
-  const [touchGhost, setTouchGhost] = useState<{ plate: string; x: number; y: number } | null>(null);
+  const [touchGhost, setTouchGhost] = useState<{ vehicleId: string; plate: string; x: number; y: number } | null>(null);
   const touchGhostRef = useRef<HTMLDivElement>(null);
   const activeDragVehicleRef = useRef<string | null>(null);
   const touchDragSession = useRef<{ pointerId: number; vehicleId: string; plate: string; startX: number; startY: number; active: boolean } | null>(null);
@@ -1164,7 +1164,22 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     setDraggedVehicleId(vehicle.id);
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', vehicle.id);
-    startParkingAutoScroll(event.clientX, event.clientY);
+    // Drag a vehicle silhouette and registration, not just the bay text.
+    const sourceCar = event.currentTarget.querySelector<HTMLElement>('.top-view-car');
+    if (sourceCar && typeof event.dataTransfer.setDragImage === 'function') {
+      const image = document.createElement('div');
+      image.className = 'vplm-native-drag-preview';
+      const art = document.createElement('div');
+      art.className = 'vplm-native-drag-vehicle';
+      art.appendChild(sourceCar.cloneNode(true));
+      const number = document.createElement('strong');
+      number.textContent = vehicle.plateNumber;
+      image.append(art, number);
+      document.body.appendChild(image);
+      event.dataTransfer.setDragImage(image, 70, 56);
+      window.setTimeout(() => image.remove(), 120);
+    }
+    startParkingAutoScroll(event.clientX, event.clientY, event.currentTarget);
   };
   const finishNativeParkingDrag = () => {
     activeDragVehicleRef.current = null;
@@ -1183,8 +1198,8 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
       session.active = true;
       activeDragVehicleRef.current = session.vehicleId;
       setDraggedVehicleId(session.vehicleId);
-      setTouchGhost({ plate: session.plate, x: event.clientX, y: event.clientY });
-      startParkingAutoScroll(event.clientX, event.clientY);
+      setTouchGhost({ vehicleId: session.vehicleId, plate: session.plate, x: event.clientX, y: event.clientY });
+      startParkingAutoScroll(event.clientX, event.clientY, event.currentTarget);
     }
     if (!session.active) return;
     event.preventDefault();
@@ -1554,8 +1569,16 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
           <div className="flex justify-end gap-2"><button type="button" className="rounded-lg border px-4 py-2" onClick={() => setPortalTransfer(null)}>Cancel</button><button type="button" className="rounded-lg bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50" disabled={!portalDestinationId} onClick={confirmPortalTransfer}>Confirm transfer</button></div>
         </div>
       </div>}
-      {touchGhost && createPortal(<div ref={touchGhostRef} className="pointer-events-none fixed left-0 top-0 z-[160] flex items-center gap-2 rounded-xl border border-primary bg-background/95 px-3 py-2 text-sm font-bold text-primary shadow-lg"
-        style={{ transform: `translate3d(${touchGhost.x + 13}px, ${touchGhost.y - 45}px, 0)` }}><CarFront className="h-4 w-4" />{touchGhost.plate}</div>, document.body)}
+      {touchGhost && createPortal(<div ref={touchGhostRef} className="vplm-touch-drag-preview pointer-events-none fixed left-0 top-0 z-[160] flex items-center gap-2 rounded-xl border border-primary bg-background/95 px-3 py-2 text-sm font-bold text-primary shadow-lg"
+        style={{ transform: `translate3d(${touchGhost.x + 13}px, ${touchGhost.y - 45}px, 0)` }}>
+        <div className="vplm-drag-car-art">
+          {activeVehicles.find((vehicle: Vehicle) => vehicle.id === touchGhost.vehicleId)
+            ? <TopViewCar vehicle={activeVehicles.find((vehicle: Vehicle) => vehicle.id === touchGhost.vehicleId)!}
+                xParked={activeVehicles.find((vehicle: Vehicle) => vehicle.id === touchGhost.vehicleId)?.xParking === 'Yes'} />
+            : <CarFront className="h-8 w-8" />}
+        </div>
+        <span className="max-w-28 break-all text-sm font-black">{touchGhost.plate}</span>
+      </div>, document.body)}
     </div>
   );
 }
