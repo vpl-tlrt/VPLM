@@ -456,7 +456,9 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     }
     const normalized = validation.value.plateNumber;
     const vehicleId = existing?.id ?? `veh-${createUUID()}`;
-    if (parkingRecordKey(existing?.currentLocationId)) { toast.error('Vehicle already has an active parking assignment.'); return false; }
+    const previousBayId = parkingRecordKey(existing?.currentLocationId);
+    if (previousBayId && previousBayId !== normalizedBayId && !canTransferVehicle) { toast.error('Moving an already assigned vehicle requires transfer permission.'); return false; }
+    if (previousBayId && previousBayId === normalizedBayId && !toUnassignedBay) { toast.info('This vehicle is already assigned to the selected bay.'); return false; }
     if (toUnassignedBay && existing && !existing.currentLocationId && existing.status !== 'Released' && existing.status !== 'Delivered') { toast.error('Vehicle is already in the Unassigned Bay tray.'); return false; }
     const assignedAt = new Date().toISOString();
     const xParkingDetails = isXParking ? {
@@ -472,9 +474,12 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     const nextVehicles = existing
       ? vehicles.map((item: Vehicle) => item.id === vehicleId ? assignedVehicle : item)
       : [assignedVehicle, ...vehicles];
-    const nextLocations = location
-      ? locations.map((item: ParkingLocation) => parkingRecordKey(item.id) === normalizedBayId ? { ...item, status: isXParking ? item.status : 'Occupied' as const } : item)
-      : locations;
+    const nextLocations = locations.map((item: ParkingLocation) => {
+      const key = parkingRecordKey(item.id);
+      if (key === normalizedBayId && location) return { ...item, status: isXParking ? item.status : 'Occupied' as const };
+      if (previousBayId && key === previousBayId && previousBayId !== normalizedBayId && !activeVehicles.some((v: Vehicle) => v.id !== vehicleId && parkingRecordKey(v.currentLocationId) === previousBayId)) return { ...item, status: 'Available' as const };
+      return item;
+    });
     const savedLocally = saveOfflineState({
       vehicles: nextVehicles,
       locations: nextLocations,
@@ -492,10 +497,10 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setVehicles(nextVehicles);
     if (location) {
       setLocations(nextLocations);
-      addMovement(vehicleId, existing?.currentLocationId, location.id, 'Assign');
+      addMovement(vehicleId, existing?.currentLocationId, location.id, previousBayId ? 'Transfer' : 'Assign');
     }
     enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'Vehicle', action: existing ? 'update' : 'create', recordId: vehicleId, payload: { vehicleName: existing?.vehicleId ?? assignedVehicle.vehicleId, plateNumber: normalized, vin: validation.value.vin, brand: validation.value.brand, model: validation.value.model, color: validation.value.color, locationId: location?.id ?? '', ownerId: queueOwnerId, ownerName: validation.value.driverOwner || actor }, version: 1, createdAt: new Date().toISOString() });
-    toast.success(`${normalized} assigned to ${destinationLabel}.`);
+    toast.success(`${normalized} ${previousBayId && previousBayId !== normalizedBayId ? 'moved' : 'assigned'} to ${destinationLabel}.`);
     playSound('success');
     setBayId(''); setAssignmentVehicle(emptyVehicleForm); setNotes('');
     setScreen('dashboard');
