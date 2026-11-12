@@ -4,8 +4,7 @@ import { ReviewWorkspaceAccess } from '@/components/workspace-access-requests';
 import { useActivePickup } from '@/hooks/use-active-pickup';
 import { pickupParkingNotice } from '@/lib/pickup-request-data';
 import { TaskManagement } from '@/components/task-management';
-import { ApplicationLiveFlow } from '@/components/application-live-flow';
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { format } from 'date-fns';
 import { motion } from 'motion/react';
 import {
@@ -24,9 +23,6 @@ import { VehicleOverviewDialog } from '@/components/vehicle-overview-dialog';
 import { VehicleModelManagement } from '@/components/vehicle-model-management';
 import AiAssistant from '@/components/ai-assistant';
 import { emptyVehicleForm, VehicleFormFields, vehicleColorClass, type VehicleFormData } from '@/components/vehicle-form-fields';
-import { RoadTestManagement } from '@/components/road-test-management';
-import { PickupRequestManagement } from '@/components/pickup-request-management';
-import { BackupPlayback } from '@/components/backup-playback';
 import { loadBayManagementState, saveBayManagementState, type BayAuditEntry, type BayMaintenance, type BayReservation, xParkingSlotId } from '@/lib/bay-management-data';
 import { getVehicleRoadTest, loadRoadTestAudit, loadRoadTests, type RoadTestRecord } from '@/lib/road-test-data';
 import {
@@ -58,6 +54,13 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { Textarea } from '@/components/ui/textarea';
+
+// Heavy, infrequently visited screens are loaded only when opened. In particular,
+// Road Test charts are not transferred during a normal vehicle lookup/assignment.
+const RoadTestManagement = lazy(() => import('@/components/road-test-management').then(module => ({ default: module.RoadTestManagement })));
+const PickupRequestManagement = lazy(() => import('@/components/pickup-request-management').then(module => ({ default: module.PickupRequestManagement })));
+const BackupPlayback = lazy(() => import('@/components/backup-playback').then(module => ({ default: module.BackupPlayback })));
+const ApplicationLiveFlow = lazy(() => import('@/components/application-live-flow').then(module => ({ default: module.ApplicationLiveFlow })));
 
 const navigation = [
   { id: 'dashboard', label: 'Dashboard', icon: Gauge, minimumRole: 'Operator' },
@@ -809,13 +812,13 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
             || /assign|transfer|release|deliver|move vehicle|start road|finish road|update|edit|delete|archive|save|approve|reject|cancel request|add vehicle|create|reserve|recover vehicle|park vehicle|submit/i.test(text);
           if (blocked) { event.preventDefault(); event.stopPropagation(); toast.error('Online-only: wait for a confirmed MAIN cloud connection before editing.'); }
         }} onSubmitCapture={(event) => { if (offlineReadOnly) { event.preventDefault(); event.stopPropagation(); toast.error('Online-only: cloud connection required before submitting.'); } }} initial={{ opacity: 0, y: 12, scale: 0.995 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.28, ease: [0.25, 0.46, 0.45, 0.94] as const }} className="vplm-app-screen mx-auto w-full min-w-0 max-w-[1600px] p-3 sm:p-4 md:p-6 xl:p-8">
-          {screen === 'pickup-requests' && <PickupRequestManagement getWorkspaceRevision={getRevision} initialRequestId={initialPickupRequestId} onRefreshWorkspace={id => {
+          {screen === 'pickup-requests' && <Suspense fallback={<p className="p-3 text-sm">Loading Pickup Requests…</p>}><PickupRequestManagement getWorkspaceRevision={getRevision} initialRequestId={initialPickupRequestId} onRefreshWorkspace={id => {
             if (pendingChanges || syncState === 'syncing' || syncState === 'error') {
               if (!window.confirm('Reload the workspace and discard unsynced changes on this device?')) return;
             }
             onPickupWorkspaceRefresh?.(id);
-          }} readOnly={guestPreview} vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} hasUnsyncedChanges={Boolean(pendingChanges || syncState === 'syncing' || syncState === 'error')} />}
-          {screen === 'road-tests' && canAccessRoadTests && <RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} actorRole={role} canCreateAssignment canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} isAdministrator={isAdministrator} initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} onRoadTestStarted={(id: string) => { setLockedRoadTestId(id); setScreen('road-tests'); }} onRoadTestCompleted={() => setLockedRoadTestId(undefined)} /> }
+          }} readOnly={guestPreview} vehicles={vehicles} locations={locations} actor={actor} userId={ownerId ?? ''} isAdministrator={role === 'Administrator'} canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} onClose={() => setScreen('dashboard')} hasUnsyncedChanges={Boolean(pendingChanges || syncState === 'syncing' || syncState === 'error')} /></Suspense>}
+          {screen === 'road-tests' && canAccessRoadTests && <Suspense fallback={<p className="p-3 text-sm">Loading Road Tests…</p>}><RoadTestManagement vehicles={vehicles} locations={locations} actor={actor} actorRole={role} canCreateAssignment canViewFullHistory={role === 'Operator' || role === 'Supervisor' || role === 'Administrator'} isAdministrator={isAdministrator} initialVehicleId={roadTestVehicleId} initialTestType={roadTestVehicleId ? 'Initial Road Test' : undefined} onInitialVehicleHandled={() => setRoadTestVehicleId(undefined)} onVehicleLocationChange={handleRoadTestLocationChange} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} onNotificationSound={playSound} onRoadTestStarted={(id: string) => { setLockedRoadTestId(id); setScreen('road-tests'); }} onRoadTestCompleted={() => setLockedRoadTestId(undefined)} /></Suspense> }
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
           {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage && !offlineReadOnly} canEditVehicle={canEditVehicle && !offlineReadOnly} canTransferVehicle={canTransferVehicle && !offlineReadOnly} canAssignVehicle={canAssignVehicle && !offlineReadOnly} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onMoveVehicle={(vehicleId: string) => { setSelectedVehicleId(vehicleId); setNewLocationId(''); setNotes(''); setScreen('transfer'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} assignSelectedBay={(selectedBayId?: string, vehicleForm?: VehicleFormData) => handleAssign(selectedBayId, false, undefined, vehicleForm)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
           {screen === 'assignment' && canManage && <div className="mb-3 flex justify-end"><Button variant="outline" onClick={exportVehicleBayData}><Download /> Download all vehicle / bay data</Button></div>}
@@ -844,7 +847,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
               <ManagementScreen role={role} locations={locations} setLocations={setLocations} vehicles={vehicles} setVehicles={setVehicles} movements={movements} auditEvents={auditEvents} setAuditEvents={setAuditEvents} logAudit={logAudit} actorId={queueOwnerId} garageLayout={garageLayout} setGarageLayout={setGarageLayout} />
             </div>)}
           {screen === 'settings' && isAdministrator && <SettingsScreen users={onlineUsers} connected={presenceConnected} auditEvents={auditEvents} currentVehicleCount={vehicles.filter((vehicle: Vehicle) => vehicle.status !== 'Delivered' && vehicle.status !== 'Released').length} onDownloadVehicleLocations={downloadCurrentVehicleLocations} />}
-          {screen === 'backup-playback' && isAdministrator && <BackupPlayback />}
+          {screen === 'backup-playback' && isAdministrator && <Suspense fallback={<p className="p-3 text-sm">Loading backup screen…</p>}><BackupPlayback /></Suspense>}
           {screen === 'profile' && <Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />}
         </motion.div>
       </main>
@@ -2040,7 +2043,7 @@ function SettingsScreen({ users, connected, auditEvents, currentVehicleCount, on
     <div><p className="technical-label">Administrator only</p><h2 className="text-2xl font-black">System settings</h2><p className="text-muted-foreground">Live user monitoring</p></div>
     <Card><CardHeader><CardTitle>Current vehicle location list</CardTitle><CardDescription>Download all currently active vehicles with their full parking location, zone, bay number, and assignment details. Opens in Microsoft Excel; delivered and released vehicles are excluded.</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onDownloadVehicleLocations}><Download /> Download current vehicle locations ({currentVehicleCount})</Button></CardContent></Card>\n    <Card><CardHeader><CardTitle>Recent user activities</CardTitle><CardDescription>Latest synchronized workspace audit entries. Pending offline device actions appear only after synchronization; use the sync inbox for reported conflicts.</CardDescription></CardHeader><CardContent className="max-h-96 space-y-2 overflow-y-auto">{[...auditEvents].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)).slice(0, 100).map(event => <div key={event.id} className="rounded-lg border p-3 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong>{event.actor} · {event.action} · {event.entity}</strong><time className="text-muted-foreground">{new Date(event.timestamp).toLocaleString()}</time></div><p className="break-words text-muted-foreground">{event.detail}</p></div>)}{auditEvents.length === 0 && <p className="text-sm text-muted-foreground">No synchronized activity records available.</p>}</CardContent></Card>
     <Button variant="outline" onClick={() => setShowFlow(value => !value)}>{showFlow ? 'Close live flow' : 'View live application flow'}</Button>
-    {showFlow && <ApplicationLiveFlow />}
+    {showFlow && <Suspense fallback={<p className="p-3 text-sm">Loading live flow…</p>}><ApplicationLiveFlow /></Suspense>}
     <Card>
       <CardHeader><CardTitle>Currently online users ({users.length})</CardTitle><CardDescription>{connected ? 'Live connections reported by Supabase Presence. Multiple tabs for one account count as one user.' : 'Presence connection unavailable. Online count may be incomplete.'}</CardDescription></CardHeader>
       <CardContent className="space-y-2">
