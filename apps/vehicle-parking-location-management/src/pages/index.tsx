@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { applyWorkspaceSnapshot, clearWorkspaceSnapshot, readWorkspaceSnapshot } from '@/lib/workspace-storage';
 import { preserveWorkspaceRecoveryCopy, workspaceContentMatches } from '@/lib/workspace-recovery-status';
+import { archiveWorkspaceInIndexedDb } from '@/lib/workspace-recovery-indexeddb';
 import { loadOfflineState } from '@/lib/offline-store';
 import { listPendingSyncMutations } from '@/lib/sync-queue';
 import { loadWorkspace } from '@/lib/workspace-cloud';
@@ -383,7 +384,7 @@ export default function HomePage() {
     let active = true;
     setWorkspaceLoaded(false);
     setWorkspaceError('');
-    void loadWorkspace(session.user.id).then(({ snapshot, revision, isGuest }) => {
+    void loadWorkspace(session.user.id).then(async ({ snapshot, revision, isGuest }) => {
       if (!active) return;
       // A mobile device can have assignments not yet uploaded. Preserve that
       // exact local snapshot before replacing the displayed workspace with cloud data.
@@ -391,12 +392,24 @@ export default function HomePage() {
       if (!isGuest && (loadOfflineState()?.pendingChanges || listPendingSyncMutations(session.user.id).length)) {
         const localSnapshot = readWorkspaceSnapshot();
         if (!workspaceContentMatches(localSnapshot, snapshot)) {
+          let preserved = false;
           try {
-            // Version older recovery copies before saving this pending session.
-            // A mismatch only in savedAt/pendingChanges is not an unsynced vehicle change.
-            if (!preserveWorkspaceRecoveryCopy(session.user.id, localSnapshot)) throw new Error('Recovery storage unavailable');
-            window.localStorage.setItem(`vplm-preserved-unsynced:${session.user.id}`, '1');
-          } catch {
+            preserved = preserveWorkspaceRecoveryCopy(session.user.id, localSnapshot);
+            if (preserved) window.localStorage.setItem(`vplm-preserved-unsynced:${session.user.id}`, '1');
+          } catch { preserved = false; }
+          if (!preserved) {
+            // A verified independent archive avoids permanently locking users out
+            // when localStorage is full. Keep the operation journal untouched.
+            preserved = await archiveWorkspaceInIndexedDb(session.user.id, localSnapshot);
+            if (!active) return;
+            if (preserved) {
+              // Only the workspace snapshot is replaced by MAIN below; the
+              // pending mutation journal and conflict records remain untouched.
+              // Free localStorage quota occupied by the superseded snapshot.
+              clearWorkspaceSnapshot();
+            }
+          }
+          if (!preserved) {
             setWorkspaceError('This device has pending vehicle data, but browser storage could not preserve a recovery copy. Export the local workspace before reloading.');
             setWorkspaceUserId(session.user.id);
             setWorkspaceLoaded(true);
