@@ -692,20 +692,20 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   };
 
   const appShell = (
-    <div className={`enterprise-backdrop industrial-grid min-h-screen bg-background text-foreground md:grid md:grid-cols-[240px_1fr] ${isNeumorphism ? 'neumorphism-mode' : ''}`} onPointerDown={handlePullStart} onPointerMove={handlePullMove} onPointerUp={handlePullEnd} onPointerCancel={handlePullEnd}>
-      <aside className="glass-shell m-3 hidden rounded-3xl border text-sidebar-foreground md:flex md:flex-col">
+    <div className={`enterprise-backdrop industrial-grid min-h-screen w-full min-w-0 bg-background text-foreground xl:grid xl:grid-cols-[240px_minmax(0,1fr)] ${isNeumorphism ? 'neumorphism-mode' : ''}`} onPointerDown={handlePullStart} onPointerMove={handlePullMove} onPointerUp={handlePullEnd} onPointerCancel={handlePullEnd}>
+      <aside className="glass-shell m-3 hidden rounded-3xl border text-sidebar-foreground xl:flex xl:flex-col">
         <Brand onHome={() => setScreen('dashboard')} />
         <nav className="space-y-1 p-3">
           {visibleNavigation.map(({ id, label, icon: Icon }) => <Button key={id} variant={screen === id ? 'default' : 'ghost'} className="w-full justify-start" onClick={() => setScreen(id)}><Icon />{label}</Button>)}
         </nav>
         <div className="mt-auto border-t p-4"><p className="font-semibold">{actor}</p><p className="text-sm text-muted-foreground">{roleLabel(role)}</p></div>
       </aside>
-      <main className="min-w-0 pb-20 md:pb-6">
+      <main className="w-full min-w-0 max-w-full pb-20 xl:pb-6">
         <header className="fluent-header sticky top-3 z-20 mx-3 mt-3 rounded-3xl border p-3 md:mx-5 md:p-4">
           <div className="flex items-center gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <Sheet>
-                <SheetTrigger asChild><Button variant="outline" size="icon" className="shrink-0 md:hidden" aria-label="Open navigation"><Menu /></Button></SheetTrigger>
+                <SheetTrigger asChild><Button variant="outline" size="icon" className="shrink-0 xl:hidden" aria-label="Open navigation"><Menu /></Button></SheetTrigger>
                 <SheetContent side="left" className="max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto pb-8">
                   <SheetHeader><SheetTitle>Parking control</SheetTitle></SheetHeader>
                   <div className="mt-6 flex items-center justify-between gap-3">
@@ -853,7 +853,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           {screen === 'profile' && <><Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />{(role === 'Administrator' || role === 'Supervisor') && <SyncConflictManagement />}</>}
         </motion.div>
       </main>
-      <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 md:hidden" aria-label="Primary navigation">
+      <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 xl:hidden" aria-label="Primary navigation">
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
       <WorkspaceRecoveryReview userId={user?.objectId} open={recoveryReviewOpen} onOpenChange={setRecoveryReviewOpen} onKeepCloudReviewed={keepCloudAfterReview} />
@@ -1202,7 +1202,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
         {stats.map(({ label, value, icon: Icon, percent }) => <Card key={label} className={`garage-kpi ${label === 'Vacant' ? vacantColorClass(percent, value) : utilizationColorClass(percent)}`}><CardContent className="flex flex-col p-4"><p className="text-sm font-semibold">{label}</p><div className="flex items-end justify-between"><motion.p key={value} initial={{ opacity: 0, scale: 0.82 }} animate={{ opacity: 1, scale: 1 }} className="text-3xl font-black">{value}</motion.p><div className="garage-kpi-icon"><Icon /></div></div></CardContent></Card>)}
         <Card className={`garage-kpi garage-kpi-utilization ${utilizationColorClass(utilization)}`}><CardContent className="flex flex-col p-4"><p className="text-sm font-semibold">Utilization</p><div className="flex items-end justify-between"><motion.p key={utilization} initial={{ opacity: 0, scale: 0.82 }} animate={{ opacity: 1, scale: 1 }} className="text-3xl font-black">{utilization}%</motion.p><div className="garage-kpi-icon"><Gauge /></div></div></CardContent></Card>
       </div>}
-      <div className="grid gap-3 lg:grid-cols-5">
+      <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-5">
         {!openedParkingZone && <Card className="occupancy-shimmer lg:col-span-3"><CardHeader><div className="flex items-end justify-between"><div><CardTitle>Parking utilization</CardTitle><CardDescription>Real-time occupied bays across the facility</CardDescription></div><strong className="text-3xl">{utilization}%</strong></div></CardHeader><CardContent><Progress value={utilization} /><p className="mt-3 text-sm text-muted-foreground">Operational warning at 80% occupancy</p></CardContent></Card>}
         <section className="vplm-parking-panel lg:col-span-5" aria-label="Parking Lot">
           <div className="vplm-parking-toolbar space-y-2 pb-2">
@@ -1264,8 +1264,8 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                       <Button variant="outline" size="sm" onClick={() => { setOpenedParkingZone(null); }} aria-label="Back to all parking zones"><ChevronLeft className="h-4 w-4" /> Back</Button>
                     </div>
                   </div>
-                  <div className="vplm-bay-browser">
-                    <div className="min-w-0 space-y-3">
+                  <div className="vplm-bay-browser w-full min-w-0 max-w-full">
+                    <div className="w-full min-w-0 max-w-full space-y-3">
                   {visibleZones.filter((zoneItem: { zone: string }) => zoneItem.zone === openedParkingZone).map((zoneItem: { zone: string; total: number; available: number; percent: number; state: string }) => {
                     const rawZoneLocations = locations.filter((location: ParkingLocation) => location.zone === zoneItem.zone);
                     const zoneLocations = rawZoneLocations.filter((location: ParkingLocation) => {
