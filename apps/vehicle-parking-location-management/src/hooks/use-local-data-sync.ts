@@ -145,6 +145,7 @@ export function useLocalDataSync(
     if (localOnly) return;
     const changed = () => {
       if (blocked.current) return;
+      setState(navigator.onLine ? 'syncing' : 'offline');
       if (timer.current !== null) window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => {
         timer.current = null;
@@ -216,6 +217,20 @@ export function useLocalDataSync(
     setConflictDetail('');
     return saveNow(true);
   }, [saveNow]);
+
+  // A browser refresh during a cloud write must not silently discard the tab's
+  // unconfirmed draft. Normal completed writes do not trigger the prompt.
+  useEffect(() => {
+    if (localOnly) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (saving.current || blocked.current || !sameWorkspace(baseline.current, readWorkspaceSnapshot())) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [localOnly]);
 
   const getRevision = useCallback(() => revision.current, []);
   const downloadRecovery = () => downloadSnapshot(readWorkspaceSnapshot());
