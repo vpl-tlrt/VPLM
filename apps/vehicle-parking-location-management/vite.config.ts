@@ -17,11 +17,15 @@ export default defineConfig({
   },
   build: {
     write: process.env.VITE_CHECK_MODE !== 'true',
+    // Split stable vendor dependencies from changing application code so
+    // subsequent releases transfer less JavaScript without caching vehicle data.
     rollupOptions: {
       output: {
-        // https://rollupjs.org/configuration-options/#output-inlinedynamicimports
-        // will inline dynamic imports instead of creating new chunks to create a single bundle
-        inlineDynamicImports: true,
+        manualChunks(id) {
+          if (!id.includes('/node_modules/')) return;
+          if (id.includes('/recharts/') || id.includes('/d3-')) return 'charts';
+          if (id.includes('/@supabase/') || id.includes('/@tanstack/')) return 'cloud-client';
+        },
       },
     },
   },
