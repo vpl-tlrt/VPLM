@@ -6,7 +6,7 @@ type Conflict = {
  action_type: string; device_id: string; client_action_at: string; received_at: string;
  before_data: Record<string, unknown>; proposed_data: Record<string, unknown>;
  current_data: Record<string, unknown>; status: string; submitted_by: string;
- reviewed_by: string | null; reviewed_at: string | null; review_reason: string | null;
+ reviewed_by: string | null; reviewed_at: string | null; review_reason: string | null; apply_message?: string | null;
 };
 type RecoveryLocation = {id:string;label:string;occupiedBy:string;capacity:number};
 type Diagnostic = { id:string; title:string; details:string; severity:string; created_at:string; status:string };
@@ -113,6 +113,7 @@ export function SyncConflictManagement() {
   <div className="space-y-3">{filtered.map(item => <details key={item.id} className="rounded-lg border p-3">
    <summary className="cursor-pointer font-medium">{item.plate_number} · {item.action_type} · {item.status === 'approved' ? 'Approved for review — NOT applied' : item.status}</summary>
    <div className="mt-3 space-y-2 text-sm">
+    {item.apply_message && <p role="status" className="rounded border p-2 text-sm font-medium">Recovery check: {item.apply_message}</p>}
     <p>Device: {item.device_id} · User ID: {item.submitted_by}</p>
     <p>Performed: {time(item.client_action_at)} · Received: {time(item.received_at)}</p>
     <p>Current MAIN location: <strong>{location(item.current_data, 'main')}</strong></p>
