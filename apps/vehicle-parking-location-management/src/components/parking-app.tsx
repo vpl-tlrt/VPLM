@@ -223,6 +223,17 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const isOnline = syncState !== 'offline' && navigator.onLine;
   const offlineReadOnly = !navigator.onLine || syncState === 'offline' || syncState === 'error' || syncState === 'syncing';
   const syncLabel = guestPreview ? 'Guest · preview only' : syncState === 'syncing' ? 'Saving to MAIN…' : syncState === 'offline' ? 'Internet required' : syncState === 'error' ? 'NOT saved' : 'MAIN live';
+  const exitSafely = () => {
+    if (syncState === 'syncing') {
+      toast.info('Wait until the cloud save finishes before signing out.');
+      return;
+    }
+    if (syncState === 'error') {
+      toast.error('The latest change is NOT saved to MAIN. Retry the save or export the draft first.');
+      return;
+    }
+    onExit();
+  };
 
   const exportVehicleBayData = () => {
     const columns = ['Plate Number', 'VIN', 'Brand', 'Model', 'Status', 'Parking Zone', 'Parking Bay', 'Location', 'Assigned Date', 'Assigned By', 'Driver Owner'];
@@ -775,8 +786,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => setScreen('profile')}><UserRound />Profile</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={onExit}><LogOut />Sign out</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={onExit}><DoorOpen />Exit</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={exitSafely}><LogOut />Sign out</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={exitSafely}><DoorOpen />Exit</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               <Button id="ui-mode-button" type="button" variant={isNeumorphism ? 'default' : 'outline'} size="icon" className="soft-ui-push rounded-full" onClick={() => setIsNeumorphism((current: boolean) => !current)} aria-label={isNeumorphism ? 'Turn Soft UI off' : 'Turn Soft UI on'} aria-pressed={isNeumorphism} title={isNeumorphism ? 'Turn Soft UI off' : 'Turn Soft UI on'}>
