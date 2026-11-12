@@ -4,6 +4,9 @@ import { createUUID } from '@/lib/secure-uuid';
 import { parkingZoneSort, parkingZoneLabel } from '@/lib/parking-data';
 import { ReviewWorkspaceAccess } from '@/components/workspace-access-requests';
 import { useActivePickup } from '@/hooks/use-active-pickup';
+import { useParkingAutoScroll } from '@/hooks/use-parking-auto-scroll';
+import { VehiclePhysicsSimulator } from '@/components/vehicle-physics-simulator';
+import { createPortal } from 'react-dom';
 import { pickupParkingNotice } from '@/lib/pickup-request-data';
 import { TaskManagement } from '@/components/task-management';
 import { ApplicationLiveFlow } from '@/components/application-live-flow';
@@ -905,6 +908,13 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const [overviewVehicleId, setOverviewVehicleId] = useState<string>();
   const [vehicleActionsDetailsId, setVehicleActionsDetailsId] = useState<string>();
   const [draggedVehicleId, setDraggedVehicleId] = useState<string>();
+  const [physicsOpen, setPhysicsOpen] = useState(false);
+  const [touchGhost, setTouchGhost] = useState<{ plate: string; x: number; y: number } | null>(null);
+  const touchGhostRef = useRef<HTMLDivElement>(null);
+  const activeDragVehicleRef = useRef<string | null>(null);
+  const touchDragSession = useRef<{ pointerId: number; vehicleId: string; plate: string; startX: number; startY: number; active: boolean } | null>(null);
+  const suppressDragClick = useRef(false);
+  const { start: startParkingAutoScroll, track: trackParkingDrag, stop: stopParkingAutoScroll } = useParkingAutoScroll();
   const [portalTransfer, setPortalTransfer] = useState<{ vehicleId: string; zone: string } | null>(null);
   const [portalDestinationId, setPortalDestinationId] = useState('');
 
@@ -1146,6 +1156,68 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     setOverviewVehicleId(undefined);
     toast.success(`${vehicle.plateNumber} moved to ${destination.zone}-${destination.bayNumber}.`);
   };
+
+  // Native HTML drag is retained for mouse/trackpad. A separate pointer gesture
+  // handles mobile browsers, where draggable HTML elements don't reliably fire drop.
+  const beginNativeParkingDrag = (event: React.DragEvent<HTMLButtonElement>, vehicle: Vehicle) => {
+    if (!canTransferVehicle) { event.preventDefault(); return; }
+    activeDragVehicleRef.current = vehicle.id;
+    setDraggedVehicleId(vehicle.id);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', vehicle.id);
+    startParkingAutoScroll(event.clientX, event.clientY);
+  };
+  const finishNativeParkingDrag = () => {
+    activeDragVehicleRef.current = null;
+    stopParkingAutoScroll();
+    setDraggedVehicleId(undefined);
+  };
+  const beginTouchParkingDrag = (event: ReactPointerEvent<HTMLButtonElement>, vehicle: Vehicle) => {
+    if (!canTransferVehicle || event.pointerType === 'mouse') return;
+    touchDragSession.current = { pointerId: event.pointerId, vehicleId: vehicle.id, plate: vehicle.plateNumber, startX: event.clientX, startY: event.clientY, active: false };
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Pointer may already be cancelled. */ }
+  };
+  const updateTouchParkingDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const session = touchDragSession.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    if (!session.active && Math.hypot(event.clientX - session.startX, event.clientY - session.startY) > 11) {
+      session.active = true;
+      activeDragVehicleRef.current = session.vehicleId;
+      setDraggedVehicleId(session.vehicleId);
+      setTouchGhost({ plate: session.plate, x: event.clientX, y: event.clientY });
+      startParkingAutoScroll(event.clientX, event.clientY);
+    }
+    if (!session.active) return;
+    event.preventDefault();
+    trackParkingDrag(event.clientX, event.clientY);
+    if (touchGhostRef.current) touchGhostRef.current.style.transform = `translate3d(${event.clientX + 13}px, ${event.clientY - 45}px, 0)`;
+  };
+  const finishTouchParkingDrag = (event: ReactPointerEvent<HTMLButtonElement>, commit: boolean) => {
+    const session = touchDragSession.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    if (session.active) {
+      suppressDragClick.current = true;
+      window.setTimeout(() => { suppressDragClick.current = false; }, 220);
+      if (commit) {
+        const node = document.elementFromPoint(event.clientX, event.clientY);
+        const bayTarget = node?.closest<HTMLElement>('[data-parking-bay-id]');
+        const zoneTarget = node?.closest<HTMLElement>('[data-portal-zone]');
+        if (bayTarget?.dataset.parkingBayId) {
+          transferVehicle(session.vehicleId, bayTarget.dataset.parkingBayId, bayTarget.dataset.parkingIsX === 'true');
+        } else if (zoneTarget?.dataset.portalZone) {
+          openZonePortal(session.vehicleId, zoneTarget.dataset.portalZone);
+        } else {
+          toast.info('Drop on a free parking bay or zone portal.');
+        }
+      }
+    }
+    touchDragSession.current = null;
+    activeDragVehicleRef.current = null;
+    stopParkingAutoScroll();
+    setTouchGhost(null);
+    setDraggedVehicleId(undefined);
+  };
+
   const startWashing = (vehicleId: string) => {
     if (!canTransferVehicle) return toast.error('You do not have permission to transfer vehicles.');
     const vehicle = activeVehicles.find((item: Vehicle) => item.id === vehicleId);
@@ -1197,6 +1269,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div><p className="technical-label flex items-center gap-2"><span className="live-dot" /> Live yard overview</p><h2 className="text-2xl font-black">Parking operations</h2></div>
+        <button type="button" className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-primary/70 px-3 py-2 text-xs font-bold text-primary hover:bg-primary/10" onClick={() => setPhysicsOpen(true)}><CarFront className="h-4 w-4" />Vehicle physics</button>
       </div>
       {!openedParkingZone && <div className="garage-kpi-grid">
         {stats.map(({ label, value, icon: Icon, percent }) => <Card key={label} className={`garage-kpi ${label === 'Vacant' ? vacantColorClass(percent, value) : utilizationColorClass(percent)}`}><CardContent className="flex flex-col p-4"><p className="text-sm font-semibold">{label}</p><div className="flex items-end justify-between"><motion.p key={value} initial={{ opacity: 0, scale: 0.82 }} animate={{ opacity: 1, scale: 1 }} className="text-3xl font-black">{value}</motion.p><div className="garage-kpi-icon"><Icon /></div></div></CardContent></Card>)}
