@@ -853,18 +853,6 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           {screen === 'profile' && <><Profile actor={actor} email={user?.userPrincipalName ?? 'signed-in user'} role={role} movements={movements} reservations={reservations} isAdministrator={isAdministrator} />{(role === 'Administrator' || role === 'Supervisor') && <SyncConflictManagement />}</>}
         </motion.div>
       </main>
-      {portalTransfer && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 p-4" role="dialog" aria-modal="true" aria-label="Cross-zone vehicle transfer">
-        <div className="w-full max-w-md rounded-2xl bg-background p-5 shadow-xl space-y-4">
-          <div className="flex justify-between items-center"><h3 className="font-semibold">Transfer to {parkingZoneLabel(portalTransfer.zone)}</h3><button type="button" aria-label="Close" onClick={() => setPortalTransfer(null)}><X size={20}/></button></div>
-          <p className="text-sm text-muted-foreground">Choose a vacant parking location. The vehicle will not move until you confirm.</p>
-          <select className="w-full rounded-lg border bg-background p-3" aria-label="Available destination bay" value={portalDestinationId} onChange={(event) => setPortalDestinationId(event.target.value)}>
-            <option value="">Choose available parking</option>
-            {portalAvailable.map((location: ParkingLocation) => <option key={location.id} value={location.id}>{location.zone === 'Unassigned Bay' ? 'Available unassigned slot' : parkingLocationLabel(location)}{location.zone === 'Unassigned Bay' ? ' · ' + location.id.slice(-2) : ''}</option>)}
-          </select>
-          {!portalAvailable.length && <p className="text-sm text-destructive">No available spaces in this zone.</p>}
-          <div className="flex justify-end gap-2"><button type="button" className="rounded-lg border px-4 py-2" onClick={() => setPortalTransfer(null)}>Cancel</button><button type="button" className="rounded-lg bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50" disabled={!portalDestinationId} onClick={confirmPortalTransfer}>Confirm transfer</button></div>
-        </div>
-      </div>}
       <nav className="glass-shell fixed inset-x-3 bottom-3 z-30 flex snap-x snap-mandatory items-stretch gap-1 overflow-x-auto rounded-2xl border p-1 md:hidden" aria-label="Primary navigation">
         {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setScreen(id)} className={`flex min-h-14 min-w-[4.75rem] flex-1 snap-start flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium ${screen === id ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground'}`}><Icon className="h-5 w-5 shrink-0" /><span className="whitespace-nowrap">{label}</span></button>)}
       </nav>
@@ -1478,6 +1466,18 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
         </DialogContent>
       </Dialog>}
       <VehicleOverviewDialog compactSheet viewerRole={role} vehicle={activeVehicles.find((item: Vehicle) => item.id === (role === 'TechnicalLeader' ? vehicleActionsDetailsId : overviewVehicleId))} open={Boolean(role === 'TechnicalLeader' ? vehicleActionsDetailsId : overviewVehicleId)} onOpenChange={(open: boolean) => { if (!open) { setOverviewVehicleId(undefined); setVehicleActionsDetailsId(undefined); } }} locations={locations} vehicles={activeVehicles} movements={movements} roadTest={(role === 'TechnicalLeader' ? vehicleActionsDetailsId : overviewVehicleId) ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === (role === 'TechnicalLeader' ? vehicleActionsDetailsId : overviewVehicleId)) : undefined} canRequestRoadTest={canAccessRoadTests} canEdit={canEditVehicle} canTransfer={canTransferVehicle} canDelete={canManage} onRequestRoadTest={(vehicle: Vehicle) => { setOverviewVehicleId(undefined); onOpenRoadTests(vehicle.id); }} onUpdate={updateVehicle} onTransfer={transferVehicle} onStartWashing={startWashing} onDeliver={deliverVehicle} onDelete={deleteVehicle} />
+      {portalTransfer && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 p-4" role="dialog" aria-modal="true" aria-label="Cross-zone vehicle transfer">
+        <div className="w-full max-w-md rounded-2xl bg-background p-5 shadow-xl space-y-4">
+          <div className="flex justify-between items-center"><h3 className="font-semibold">Transfer to {parkingZoneLabel(portalTransfer.zone)}</h3><button type="button" aria-label="Close" onClick={() => setPortalTransfer(null)}><X size={20}/></button></div>
+          <p className="text-sm text-muted-foreground">Choose a vacant parking location. The vehicle will not move until you confirm.</p>
+          <select className="w-full rounded-lg border bg-background p-3" aria-label="Available destination bay" value={portalDestinationId} onChange={(event) => setPortalDestinationId(event.target.value)}>
+            <option value="">Choose available parking</option>
+            {portalAvailable.map((location: ParkingLocation) => <option key={location.id} value={location.id}>{location.zone === 'Unassigned Bay' ? 'Available unassigned slot' : parkingLocationLabel(location)}{location.zone === 'Unassigned Bay' ? ' · ' + location.id.slice(-2) : ''}</option>)}
+          </select>
+          {!portalAvailable.length && <p className="text-sm text-destructive">No available spaces in this zone.</p>}
+          <div className="flex justify-end gap-2"><button type="button" className="rounded-lg border px-4 py-2" onClick={() => setPortalTransfer(null)}>Cancel</button><button type="button" className="rounded-lg bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50" disabled={!portalDestinationId} onClick={confirmPortalTransfer}>Confirm transfer</button></div>
+        </div>
+      </div>}
     </div>
   );
 }
