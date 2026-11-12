@@ -1,5 +1,5 @@
 import { RequestWorkspaceAccess } from '@/components/workspace-access-requests';
-import { setGuestWorkspace } from '@/lib/local-storage-scope';
+import { setGuestWorkspace, setOnlineOnlyWorkspace } from '@/lib/local-storage-scope';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { CarFront, Lock, ShieldCheck, UserRound } from 'lucide-react';
@@ -9,11 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { applyWorkspaceSnapshot, clearWorkspaceSnapshot, readWorkspaceSnapshot } from '@/lib/workspace-storage';
-import { preserveWorkspaceRecoveryCopy, workspaceContentMatches } from '@/lib/workspace-recovery-status';
-import { archiveWorkspaceInIndexedDb } from '@/lib/workspace-recovery-indexeddb';
-import { loadOfflineState } from '@/lib/offline-store';
-import { listPendingSyncMutations } from '@/lib/sync-queue';
+import { applyWorkspaceSnapshot, readWorkspaceSnapshot } from '@/lib/workspace-storage';
 import { loadWorkspace } from '@/lib/workspace-cloud';
 import { isSupabaseConfigured, supabase, supabaseConfigurationError } from '@/lib/supabase';
 import { queryClient } from '@/lib/query-client';
@@ -367,15 +363,9 @@ export default function HomePage() {
       setWorkspaceRevision(null);
       setWorkspaceUserId(undefined);
       setWorkspaceError('');
-      if (workspaceUserId) {
-        // Signing out must not erase the only copy of pending assignments.
-        let recoverySaved = true;
-        if (loadOfflineState()?.pendingChanges || listPendingSyncMutations(workspaceUserId).length) {
-          recoverySaved = preserveWorkspaceRecoveryCopy(workspaceUserId, readWorkspaceSnapshot());
-        }
-        // A full browser-storage quota must never turn sign-out into data loss.
-        if (recoverySaved) clearWorkspaceSnapshot();
-      }
+      // Discard only the volatile tab workspace. Previously preserved offline
+      // archives and operation journals in localStorage remain untouched.
+      setOnlineOnlyWorkspace(false);
       setGuestWorkspace(false);
       setWorkspaceGuest(false);
       setPickupToReopen(undefined);
@@ -386,37 +376,9 @@ export default function HomePage() {
     setWorkspaceError('');
     void loadWorkspace(session.user.id).then(async ({ snapshot, revision, isGuest }) => {
       if (!active) return;
-      // A mobile device can have assignments not yet uploaded. Preserve that
-      // exact local snapshot before replacing the displayed workspace with cloud data.
-      // Do not upload it blindly: another user may have edited the same vehicles.
-      if (!isGuest && (loadOfflineState()?.pendingChanges || listPendingSyncMutations(session.user.id).length)) {
-        const localSnapshot = readWorkspaceSnapshot();
-        if (!workspaceContentMatches(localSnapshot, snapshot)) {
-          let preserved = false;
-          try {
-            preserved = preserveWorkspaceRecoveryCopy(session.user.id, localSnapshot);
-            if (preserved) window.localStorage.setItem(`vplm-preserved-unsynced:${session.user.id}`, '1');
-          } catch { preserved = false; }
-          if (!preserved) {
-            // A verified independent archive avoids permanently locking users out
-            // when localStorage is full. Keep the operation journal untouched.
-            preserved = await archiveWorkspaceInIndexedDb(session.user.id, localSnapshot);
-            if (!active) return;
-            if (preserved) {
-              // Only the workspace snapshot is replaced by MAIN below; the
-              // pending mutation journal and conflict records remain untouched.
-              // Free localStorage quota occupied by the superseded snapshot.
-              clearWorkspaceSnapshot();
-            }
-          }
-          if (!preserved) {
-            setWorkspaceError('This device has pending vehicle data, but browser storage could not preserve a recovery copy. Export the local workspace before reloading.');
-            setWorkspaceUserId(session.user.id);
-            setWorkspaceLoaded(true);
-            return;
-          }
-        }
-      }
+      // MAIN is the only active workspace. Historical browser copies are not
+      // read or uploaded; switching to tab memory keeps operational data online-only.
+      setOnlineOnlyWorkspace(true);
       setGuestWorkspace(isGuest);
       applyWorkspaceSnapshot(snapshot ?? {});
       setWorkspaceGuest(isGuest);
