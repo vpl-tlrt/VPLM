@@ -29,12 +29,15 @@ export async function submitPendingVehicleConflicts(userId: string, baselineRevi
     const vehicleId = String(payload.vehicleId ?? op.recordId ?? '').trim();
     const plate = plateOf(vehicle) || plateOf(payload);
     const action = String(payload.movementType ?? op.action ?? 'other').toLowerCase();
-    const actionType = action === 'assign' || action === 'create' ? 'assign'
+    // Vehicle update with a destination is a parking operation, not an unknown action.
+    // Prefer the movement journal for exact source/destination when available.
+    const hasDestination = typeof payload.locationId === 'string' && payload.locationId.trim().length > 0;
+    const actionType = action === 'assign' || action === 'create' || (action === 'update' && hasDestination) ? 'assign'
       : action === 'transfer' ? 'transfer'
       : action === 'release' ? 'release'
       : action === 'deliver' ? 'deliver' : 'other';
     if (!vehicleId || !plate || !/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(op.id)) continue;
-    const proposed = { ...payload, ...snapshot, vehicle, operationId: op.id };
+    const proposed = { ...payload, ...snapshot, vehicle, operationId: op.id, clientRecordedAt: op.createdAt ?? op.queuedAt ?? null, sourceJournalEntity: op.entity, sourceJournalAction: op.action };
     const { error } = await supabase.rpc('vplm_submit_sync_conflict', {
       p_operation_id: op.id,
       p_device_id: String(op.sessionId ?? 'unknown-device'),
