@@ -918,6 +918,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const [portalTransfer, setPortalTransfer] = useState<{ vehicleId: string; zone: string } | null>(null);
   const [portalDestinationId, setPortalDestinationId] = useState('');
 
+  const supportsNativeParkingDrag = typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
   const [garageZoneFilter, setGarageZoneFilter] = useState('all');
   const [openedParkingZone, setOpenedParkingZone] = useState<string | null>(null);
   const [showOtherParkingAreas, setShowOtherParkingAreas] = useState(false);
@@ -1354,18 +1355,25 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         const reserved = bayManagement.reservations.some((item: BayReservation) => item.bayId === slotId && item.status !== 'Released');
                         const maintenance = bayManagement.maintenance.some((item: BayMaintenance) => item.bayId === slotId && item.status === 'Active');
                         const status = xVehicle ? 'Occupied' : maintenance ? 'Maintenance' : reserved ? 'Reserved' : 'Available';
-                        return <button key={`x-parking-${bay.id}`} id={xVehicle ? `garage-vehicle-${xVehicle.id}` : undefined} type="button"
+                        return <button key={`x-parking-${bay.id}`} id={xVehicle ? `garage-vehicle-${xVehicle.id}` : undefined} type="button" data-parking-bay-id={bay.id} data-parking-is-x="true"
                           className={`vplm-bay-chip vplm-bay-chip-x ${bayStyle(status)}${isHighlightedBay(bay.id, true) ? ' garage-located-bay' : ''}`}
-                          draggable={Boolean(xVehicle && canTransferVehicle)}
-                          onDragStart={() => { if (xVehicle && canTransferVehicle) setDraggedVehicleId(xVehicle.id); }}
-                          onDragEnd={() => setDraggedVehicleId(undefined)}
-                          onDragOver={(event: React.DragEvent<HTMLButtonElement>) => { if (status === 'Available') event.preventDefault(); }}
+                          draggable={Boolean(xVehicle && canTransferVehicle && supportsNativeParkingDrag)}
+                          style={{ touchAction: xVehicle && canTransferVehicle ? 'none' : 'manipulation' }}
+                          onDragStart={(event) => { if (xVehicle) beginNativeParkingDrag(event, xVehicle); }}
+                          onDragEnd={finishNativeParkingDrag}
+                          onPointerDown={(event) => { if (xVehicle) beginTouchParkingDrag(event, xVehicle); }}
+                          onPointerMove={updateTouchParkingDrag}
+                          onPointerUp={(event) => finishTouchParkingDrag(event, true)}
+                          onPointerCancel={(event) => finishTouchParkingDrag(event, false)}
+                          onDragOver={(event: React.DragEvent<HTMLButtonElement>) => { if (status === 'Available') { event.preventDefault(); trackParkingDrag(event.clientX, event.clientY); } }}
                           onDrop={(event: React.DragEvent<HTMLButtonElement>) => {
                             event.preventDefault();
-                            if (draggedVehicleId && status === 'Available' && canTransferVehicle) transferVehicle(draggedVehicleId, bay.id, true);
-                            setDraggedVehicleId(undefined);
+                            const id = activeDragVehicleRef.current;
+                            if (id && status === 'Available' && canTransferVehicle) transferVehicle(id, bay.id, true);
+                            finishNativeParkingDrag();
                           }}
                           onClick={() => {
+                            if (suppressDragClick.current) { suppressDragClick.current = false; return; }
                             setSelectedBayId(undefined);
                             if (xVehicle) { setSelectedXParkingBayId(undefined); setOverviewVehicleId(xVehicle.id); }
                             else { setOverviewVehicleId(undefined); setSelectedXParkingBayId(bay.id); }
@@ -1388,14 +1396,19 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                       const displayVehicle = vehicle;
                       const vehicleRoadTest = displayVehicle ? currentRoadTests.find((test: RoadTestRecord) => test.vehicleId === displayVehicle.id) : undefined;
                       const displayStatus: ParkingLocation['status'] = vehicle ? 'Occupied' : bay.status === 'Occupied' ? 'Available' : bay.status;
-                      return <motion.button id={vehicle ? `garage-vehicle-${vehicle.id}` : undefined} key={bay.id} type="button"
-                        draggable={Boolean(displayVehicle && canTransferVehicle)}
+                      return <motion.button id={vehicle ? `garage-vehicle-${vehicle.id}` : undefined} key={bay.id} type="button" data-parking-bay-id={bay.id} data-parking-is-x="false"
+                        draggable={Boolean(displayVehicle && canTransferVehicle && supportsNativeParkingDrag)}
+                        style={{ touchAction: displayVehicle && canTransferVehicle ? 'none' : 'manipulation' }}
                         initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: Math.min(index, 12) * 0.025, ease: 'easeOut' as const }}
-                        onDragStart={() => vehicle && setDraggedVehicleId(vehicle.id)}
-                        onDragEnd={() => setDraggedVehicleId(undefined)}
-                        onDragOver={(event: React.DragEvent<HTMLButtonElement>) => event.preventDefault()}
-                        onDrop={() => { if (draggedVehicleId && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(draggedVehicleId, bay.id); setDraggedVehicleId(undefined); }}
-                        onClick={() => { setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }}
+                        onDragStart={(event) => { if (vehicle) beginNativeParkingDrag(event, vehicle); }}
+                        onDragEnd={finishNativeParkingDrag}
+                        onPointerDown={(event) => { if (vehicle) beginTouchParkingDrag(event, vehicle); }}
+                        onPointerMove={updateTouchParkingDrag}
+                        onPointerUp={(event) => finishTouchParkingDrag(event, true)}
+                        onPointerCancel={(event) => finishTouchParkingDrag(event, false)}
+                        onDragOver={(event: React.DragEvent<HTMLButtonElement>) => { event.preventDefault(); trackParkingDrag(event.clientX, event.clientY); }}
+                        onDrop={(event) => { event.preventDefault(); const id = activeDragVehicleRef.current; if (id && !vehicle && bay.status !== 'Reserved' && bay.status !== 'Maintenance' && (!isLiveGarageContainer(bay) || containerCanAccept(bay))) transferVehicle(id, bay.id); finishNativeParkingDrag(); }}
+                        onClick={() => { if (suppressDragClick.current) { suppressDragClick.current = false; return; } setSelectedXParkingBayId(undefined); if (displayVehicle) { setSelectedBayId(undefined); setOverviewVehicleId(displayVehicle.id); } else { setOverviewVehicleId(undefined); setSelectedBayId(bay.id); } }}
                         className={`vplm-bay-chip ${bayStyle(displayStatus)}${isHighlightedBay(bay.id) ? ' garage-located-bay' : ''}`}
                         aria-label={`${isLiveGarageContainer(bay) ? 'Container' : 'Bay ' + bay.bayNumber}, ${zoneDisplayName(bay.zone)}, ${displayStatus}${vehicle ? `, vehicle ${vehicle.plateNumber}` : ''}${xParkingVehicle ? `, X-Parked vehicle ${xParkingVehicle.plateNumber}` : ''}`}>
                         <span className="vplm-bay-chip-head"><strong>{isLiveGarageContainer(bay) ? bay.zone : `${bay.zone === 'Reception' ? 'R ' : bay.zone === 'Workshop' ? 'W ' : bay.zone}-${bay.bayNumber}`}</strong><span className="vplm-bay-chip-state">{displayStatus === 'Available' ? 'Vacant' : displayStatus}</span></span>
@@ -1419,11 +1432,11 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         : bays[0]?.direction === 'Two-way' ? '↕' : bays[0]?.direction === 'Reverse' ? '↓' : '↑';
                     const zonePortalBar = canTransferVehicle ? <div className="rounded-xl border bg-background/95 p-2 my-3">
                       <p className="text-xs font-semibold mb-2">Move to another zone · drag a vehicle onto a portal, or select a vehicle and choose a zone</p>
-                      <div className="flex gap-2 overflow-x-auto pb-2" aria-label="Transfer zone portals">
-                        {portalZones.map((zone: string) => <button key={zone} type="button"
+                      <div className="vplm-zone-portal-scroll flex gap-2 overflow-x-auto pb-2" aria-label="Transfer zone portals">
+                        {portalZones.map((zone: string) => <button key={zone} type="button" data-portal-zone={zone}
                           className="shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-accent"
-                          onDragOver={(event) => { if (draggedVehicleId) event.preventDefault(); }}
-                          onDrop={(event) => { event.preventDefault(); if (draggedVehicleId) openZonePortal(draggedVehicleId, zone); }}
+                          onDragOver={(event) => { if (activeDragVehicleRef.current) { event.preventDefault(); trackParkingDrag(event.clientX, event.clientY); } }}
+                          onDrop={(event) => { event.preventDefault(); const id = activeDragVehicleRef.current; if (id) openZonePortal(id, zone); finishNativeParkingDrag(); }}
                           onClick={() => { const selected = draggedVehicleId ?? overviewVehicleId; if (selected) openZonePortal(selected, zone); else toast.info('Select a vehicle first, then choose a destination zone.'); }}>
                           {parkingZoneLabel(zone)}
                         </button>)}
@@ -1452,14 +1465,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                             </div>
                             <div className="vplm-oriented-horizontal-scroll" role="region" tabIndex={0}
                               style={{ marginTop: 12, paddingTop: 8 }}
-                              onDragOver={(event) => {
-                                if (!draggedVehicleId) return;
-                                const bounds = event.currentTarget.getBoundingClientRect();
-                                const edge = 72;
-                                const offset = event.clientX - bounds.left;
-                                if (offset < edge) event.currentTarget.scrollLeft -= Math.max(8, (edge - offset) / 2);
-                                else if (offset > bounds.width - edge) event.currentTarget.scrollLeft += Math.max(8, (offset - (bounds.width - edge)) / 2);
-                              }}
+                              onDragOver={(event) => { if (activeDragVehicleRef.current) trackParkingDrag(event.clientX, event.clientY); }}
                               aria-label={`Scroll bays horizontally: ${firstLane}${secondLane ? ` and ${secondLane}` : ''}`}>
                               <div className="vplm-oriented-track"
                                 style={{ gridTemplateColumns: `repeat(${columns}, minmax(88px, 1fr))`, width: `${columns * 94}px` }}>
@@ -1551,6 +1557,9 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
           <div className="flex justify-end gap-2"><button type="button" className="rounded-lg border px-4 py-2" onClick={() => setPortalTransfer(null)}>Cancel</button><button type="button" className="rounded-lg bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50" disabled={!portalDestinationId} onClick={confirmPortalTransfer}>Confirm transfer</button></div>
         </div>
       </div>}
+      {touchGhost && createPortal(<div ref={touchGhostRef} className="pointer-events-none fixed left-0 top-0 z-[160] flex items-center gap-2 rounded-xl border border-primary bg-background/95 px-3 py-2 text-sm font-bold text-primary shadow-lg"
+        style={{ transform: `translate3d(${touchGhost.x + 13}px, ${touchGhost.y - 45}px, 0)` }}><CarFront className="h-4 w-4" />{touchGhost.plate}</div>, document.body)}
+      {physicsOpen && <VehiclePhysicsSimulator locations={locations} vehicles={vehicles} initialZone={openedParkingZone ?? undefined} onClose={() => setPhysicsOpen(false)} />}
     </div>
   );
 }
