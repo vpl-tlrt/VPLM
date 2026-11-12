@@ -1400,7 +1400,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                         draggable={Boolean(displayVehicle && canTransferVehicle && supportsNativeParkingDrag)}
                         style={{ touchAction: displayVehicle && canTransferVehicle ? 'none' : 'manipulation' }}
                         initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: Math.min(index, 12) * 0.025, ease: 'easeOut' as const }}
-                        onDragStart={(event) => { if (vehicle) beginNativeParkingDrag(event, vehicle); }}
+                        onDragStartCapture={(event) => { if (vehicle) beginNativeParkingDrag(event, vehicle); }}
                         onDragEnd={finishNativeParkingDrag}
                         onPointerDown={(event) => { if (vehicle) beginTouchParkingDrag(event, vehicle); }}
                         onPointerMove={updateTouchParkingDrag}
