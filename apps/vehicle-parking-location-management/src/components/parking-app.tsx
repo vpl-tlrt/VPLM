@@ -5,7 +5,6 @@ import { parkingZoneSort, parkingZoneLabel } from '@/lib/parking-data';
 import { ReviewWorkspaceAccess } from '@/components/workspace-access-requests';
 import { useActivePickup } from '@/hooks/use-active-pickup';
 import { useParkingAutoScroll } from '@/hooks/use-parking-auto-scroll';
-import { VehiclePhysicsSimulator } from '@/components/vehicle-physics-simulator';
 import { createPortal } from 'react-dom';
 import { pickupParkingNotice } from '@/lib/pickup-request-data';
 import { TaskManagement } from '@/components/task-management';
@@ -908,7 +907,6 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const [overviewVehicleId, setOverviewVehicleId] = useState<string>();
   const [vehicleActionsDetailsId, setVehicleActionsDetailsId] = useState<string>();
   const [draggedVehicleId, setDraggedVehicleId] = useState<string>();
-  const [physicsOpen, setPhysicsOpen] = useState(false);
   const [touchGhost, setTouchGhost] = useState<{ plate: string; x: number; y: number } | null>(null);
   const touchGhostRef = useRef<HTMLDivElement>(null);
   const activeDragVehicleRef = useRef<string | null>(null);
@@ -1270,7 +1268,6 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div><p className="technical-label flex items-center gap-2"><span className="live-dot" /> Live yard overview</p><h2 className="text-2xl font-black">Parking operations</h2></div>
-        <button type="button" className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-primary/70 px-3 py-2 text-xs font-bold text-primary hover:bg-primary/10" onClick={() => setPhysicsOpen(true)}><CarFront className="h-4 w-4" />Vehicle physics</button>
       </div>
       {!openedParkingZone && <div className="garage-kpi-grid">
         {stats.map(({ label, value, icon: Icon, percent }) => <Card key={label} className={`garage-kpi ${label === 'Vacant' ? vacantColorClass(percent, value) : utilizationColorClass(percent)}`}><CardContent className="flex flex-col p-4"><p className="text-sm font-semibold">{label}</p><div className="flex items-end justify-between"><motion.p key={value} initial={{ opacity: 0, scale: 0.82 }} animate={{ opacity: 1, scale: 1 }} className="text-3xl font-black">{value}</motion.p><div className="garage-kpi-icon"><Icon /></div></div></CardContent></Card>)}
@@ -1559,7 +1556,6 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
       </div>}
       {touchGhost && createPortal(<div ref={touchGhostRef} className="pointer-events-none fixed left-0 top-0 z-[160] flex items-center gap-2 rounded-xl border border-primary bg-background/95 px-3 py-2 text-sm font-bold text-primary shadow-lg"
         style={{ transform: `translate3d(${touchGhost.x + 13}px, ${touchGhost.y - 45}px, 0)` }}><CarFront className="h-4 w-4" />{touchGhost.plate}</div>, document.body)}
-      {physicsOpen && <VehiclePhysicsSimulator locations={locations} vehicles={vehicles} initialZone={openedParkingZone ?? undefined} onClose={() => setPhysicsOpen(false)} />}
     </div>
   );
 }
