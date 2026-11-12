@@ -3,7 +3,6 @@ import { notifyWorkspaceDataChanged } from '@/lib/workspace-sync-events';
 import { appStorageKey, workspaceDataStorage } from '@/lib/local-storage-scope';
 
 const STORAGE_KEY = appStorageKey('vehicle-parking-browser-state-v2');
-const MAX_LOCAL_HISTORY_ITEMS = 500;
 const PHOTO_RETENTION_MS = 10 * 24 * 60 * 60 * 1000;
 
 export type OfflineAuditEvent = {
@@ -75,18 +74,18 @@ export const pruneExpiredAuditEventPhotos = (event: OfflineAuditEvent, now = Dat
   }
 };
 
-const createQuotaSafeState = (state: OfflineState): OfflineState => ({
+// Online-only tab memory has no browser-storage quota. Never truncate MAIN
+// history while preparing the next cloud write.
+const createWorkingState = (state: OfflineState): OfflineState => ({
   ...state,
   vehicles: state.vehicles.map((vehicle: Vehicle) => pruneExpiredVehiclePhotos(vehicle)),
-  movements: state.movements.slice(0, MAX_LOCAL_HISTORY_ITEMS),
-  auditEvents: state.auditEvents.slice(0, MAX_LOCAL_HISTORY_ITEMS),
 });
 
 export const saveOfflineState = (state: OfflineState): boolean => {
   if (typeof window === 'undefined') return false;
 
   try {
-    const savedState = createQuotaSafeState(state);
+    const savedState = createWorkingState(state);
     const previousValue = workspaceDataStorage().getItem(STORAGE_KEY);
     let domainDataChanged = previousValue === null;
     if (previousValue !== null) {
@@ -101,22 +100,7 @@ export const saveOfflineState = (state: OfflineState): boolean => {
     workspaceDataStorage().setItem(STORAGE_KEY, JSON.stringify(savedState));
     if (domainDataChanged) notifyWorkspaceDataChanged();
     return true;
-  } catch (error: unknown) {
-    if (error instanceof DOMException && (error.name === 'QuotaExceededError' || error.code === 22)) {
-      try {
-        const minimalState: OfflineState = {
-          ...createQuotaSafeState(state),
-          movements: state.movements.slice(0, 100),
-          auditEvents: state.auditEvents.slice(0, 100),
-        };
-        // Overwrite atomically; never delete the only local copy before a successful save.
-        workspaceDataStorage().setItem(STORAGE_KEY, JSON.stringify(minimalState));
-        notifyWorkspaceDataChanged();
-        return true;
-      } catch {
-        return false;
-      }
-    }
+  } catch {
     return false;
   }
 };
