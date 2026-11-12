@@ -1583,6 +1583,5 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
     .enterprise-backdrop { display: block; }
     .fluent-header { max-width: calc(100% - 1.5rem); }
     .fluent-header > .flex { min-width: 0; max-width: 100%; }
-    .vplm-app-screen > .grid { grid-template-columns: minmax(0, 1fr); }
   }
 }
