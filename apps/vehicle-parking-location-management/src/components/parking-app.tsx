@@ -1363,7 +1363,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
                           className="shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-accent"
                           onDragOver={(event) => { if (draggedVehicleId) event.preventDefault(); }}
                           onDrop={(event) => { event.preventDefault(); if (draggedVehicleId) openZonePortal(draggedVehicleId, zone); }}
-                          onClick={() => { const selected = draggedVehicleId ?? overviewVehicleId ?? selectedVehicleId; if (selected) openZonePortal(selected, zone); else toast.info('Select a vehicle first, then choose a destination zone.'); }}>
+                          onClick={() => { const selected = draggedVehicleId ?? overviewVehicleId; if (selected) openZonePortal(selected, zone); else toast.info('Select a vehicle first, then choose a destination zone.'); }}>
                           {parkingZoneLabel(zone)}
                         </button>)}
                       </div>
