@@ -673,69 +673,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     if (!window.confirm('Move ALL ' + target.length + ' parked vehicles into Unassigned Bay? Their original bays will be released and a movement recorded for each.')) return;
     commitParkingBatch(target.map(v => ({ plate: v.plateNumber })), false, false);
   };
-  const ageDeliveryInFlight = useRef(false);
-  useEffect(() => {
-    const client = supabase;
-    if (!canManage || offlineReadOnly || !hasPublishedSnapshot || !client) return;
-    const run = async () => {
-      if (ageDeliveryInFlight.current) return;
-      const deadline = Date.now() - 10 * 24 * 60 * 60 * 1000;
-      const candidates = vehicles.filter(v => v.status !== 'Delivered' && v.status !== 'Released' &&
-        v.currentLocationId && v.assignedDate && Number.isFinite(Date.parse(v.assignedDate)) &&
-        Date.parse(v.assignedDate) < deadline && v.operationalStatus !== 'Checked Out' &&
-        locations.some(l => parkingRecordKey(l.id) === parkingRecordKey(v.currentLocationId) &&
-          l.zone !== 'Unassigned Bay'));
-      if (!candidates.length) return;
-      ageDeliveryInFlight.current = true;
-      try {
-        const running = new Set(loadRoadTests().filter(t => t.status === 'In Road Test').map(t => t.vehicleId));
-        const { data: pickups, error } = await client.from('pickup_requests').select('vehicle_id,status')
-          .in('status',['Requested','In Transit']);
-        if (error) return; // Never auto-deliver when pickup status cannot be checked.
-        const blocked = new Set((pickups ?? []).map(p => p.vehicle_id));
-        const eligible = candidates.filter(v => !running.has(v.id) && !blocked.has(v.id));
-        if (!eligible.length) return;
-        const timestamp = new Date().toISOString();
-        const ids = new Set(eligible.map(v => v.id));
-        const delivered = vehicles.map(v => ids.has(v.id) ? { ...v, status: 'Delivered' as const,
-          operationalStatus: 'Delivered' as const, deliveredAt: timestamp,
-          deliveredBy: 'VPLM Automatic Delivery (10-day rule)', finalParkingBay: locationLabel(v.currentLocationId),
-          currentLocationId: undefined, checkOutAt: timestamp } : v);
-        const nextLocations = locations.map(loc => {
-          const used = delivered.some(v => v.status !== 'Delivered' && v.status !== 'Released' && v.xParking !== 'Yes' &&
-            parkingRecordKey(v.currentLocationId) === parkingRecordKey(loc.id));
-          return loc.status === 'Reserved' || loc.status === 'Maintenance' ? loc :
-            { ...loc, status: used ? 'Occupied' as const : 'Available' as const };
-        });
-        const nextMovements: Movement[] = eligible.map(v => ({
-          id:'mov-'+createUUID(), vehicleId:v.id, fromLocationId:v.currentLocationId,
-          toLocationId:undefined, movementType:'Delivered', actionDateTime:timestamp,
-          performedBy:'VPLM Automatic Delivery', notes:'Automatically delivered after more than 10 full days in assigned parking bay',
-        }));
-        const events: OfflineAuditEvent[] = eligible.map(v => ({
-          id:'audit-'+createUUID(), action:'Automatic Delivery (10 days)', entity:'Vehicle',
-          detail:v.plateNumber+' · last bay '+locationLabel(v.currentLocationId),
-          actor:'VPLM Automatic Delivery',timestamp,recordId:v.id,fromLocationId:v.currentLocationId,
-        }));
-        if (!saveOfflineState({ vehicles:delivered,locations:nextLocations,
-          movements:[...nextMovements,...movements],reservations,
-          auditEvents:[...events,...auditEvents],pendingChanges:0,savedAt:timestamp }))return;
-        setVehicles(delivered);setLocations(nextLocations);
-        setMovements(old=>[...nextMovements,...old]);setAuditEvents(old=>[...events,...old]);
-        for(const v of eligible){
-          enqueueSync({id:createUUID(),ownerId:queueOwnerId,entity:'Vehicle',action:'update',
-            recordId:v.id,version:1,createdAt:timestamp,
-            payload:{vehicleName:v.vehicleId,plateNumber:v.plateNumber,vin:v.vin,brand:v.brand,model:v.model,
-              color:v.color,locationId:'',ownerId:queueOwnerId,ownerName:v.driverOwner||actor}});
-        }
-        void sync(false);
-        toast.info(eligible.length+' vehicles older than 10 days moved to Delivered Archive.');
-      } finally { ageDeliveryInFlight.current=false; }
-    };
-    void run();
-    const timer=window.setInterval(()=>{void run();},5*60*1000);
-    return ()=>window.clearInterval(timer);
-  },[canManage,offlineReadOnly,hasPublishedSnapshot,vehicles,locations,movements,reservations,auditEvents,queueOwnerId,actor,sync]);
+  // Age-based delivery runs in the production database scheduler.
+  // Avoid competing client-side lifecycle writes from several open tabs.
   const assignFromAssistant = (plateNumber: string, targetBayId: string): boolean => {
     if (!canAssignVehicle) return false;
     const normalizedPlate = plateNumber.trim().toUpperCase();
