@@ -170,6 +170,16 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
   const [confirmed,setConfirmed]=useState(false);
   const zoneNames=[...new Set(locations.map(loc=>loc.zone))].filter(name=>name!=='Unassigned Bay');
   const update=(i:number,patch:Partial<Draft>)=>{setDraft(old=>old.map((row,j)=>i===j?{...row,...patch}:row));setConfirmed(false);};
+  const startManualReview=()=>{
+    if(reading||disabled)return;
+    // Explicit manual fallback: do not mix unfinished photo scan entries with new records.
+    setScanIncomplete(false);
+    setUploadError('');
+    setConfirmed(false);
+    setDraft(old=>old.length ? [...old,{plate:'',zone,bay:'',xParking:false,confidence:'Manual'}] :
+      [{plate:'',zone,bay:'',xParking:false,confidence:'Manual'}]);
+    setScanMessage('Manual review mode: enter the registration and exact bay for every vehicle, then verify and apply.');
+  };
   const ingest=async(e:ChangeEvent<HTMLInputElement>)=>{
     const file=e.target.files?.[0];e.target.value='';if(!file)return;
     setReading(true);setConfirmed(false);setUploadError('');setDraft([]);setScanProgress('');setScanIncomplete(false);setScanMessage('Preparing '+file.name+' for recognition…');
@@ -266,12 +276,13 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
         </select>
       </label>
       <input type="file" accept=".xlsx,.csv,image/png,image/jpeg,image/webp" onChange={e=>void ingest(e)} disabled={disabled||reading} aria-label="Upload parking sheet" />
+      <Button type="button" variant="outline" onClick={startManualReview} disabled={disabled||reading}>Add vehicle manually to review</Button>
     </div>
     <p role="status" className="rounded-md border p-3 text-sm font-medium">{reading ? (scanProgress||scanMessage) : scanMessage}</p>
     {uploadError&&<p role="alert" className="rounded border border-red-400 bg-red-950/20 p-3 text-sm text-red-600 dark:text-red-300">{uploadError} {draft.length>0?'These partial readings are shown for review only; import is disabled until a complete rescan.':'Existing parking records remain unchanged.'}</p>}
-    {draft.length===0 && !reading && <p className="text-sm text-muted-foreground">No registrations are ready for review yet. Upload a completed sheet, or use the Excel/CSV import. The Apply button appears only after registrations are available.</p>}
+    {draft.length===0 && !reading && <p className="text-sm text-muted-foreground">No registrations are ready for review yet. Upload a completed sheet, use Excel/CSV, or select Add vehicle manually to review. Nothing is saved until approved.</p>}
     {draft.length>0&&<>
-      <p className="text-sm font-medium" id="parking-import-review">Step 2 — Review {draft.length} registrations. {invalid.length} require correction. Duplicate readings must be corrected or removed. Manual entries must use Unassigned Bay.</p>
+      <p className="text-sm font-medium" id="parking-import-review">Step 2 — Review {draft.length} registrations. {invalid.length} require correction. Duplicate readings must be corrected or removed. Entries with no known parking bay must use Unassigned Bay.</p>
       <div className="max-h-96 overflow-auto rounded border">
         <table className="w-full min-w-[580px] text-left text-sm"><thead><tr className="bg-muted">
           <th className="p-2">Vehicle</th><th className="p-2">Zone</th><th className="p-2">Bay</th><th className="p-2">X</th><th className="p-2">Reading</th><th className="p-2"></th>
