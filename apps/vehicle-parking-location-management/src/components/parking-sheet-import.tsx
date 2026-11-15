@@ -162,6 +162,7 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
   const [zone,setZone]=useState('A');
   const [reading,setReading]=useState(false);
   const [scanProgress,setScanProgress]=useState('');
+  const [scanIncomplete,setScanIncomplete]=useState(false);
   const [scanMode,setScanMode]=useState<'sections'|'single'>('sections');
   const [uploadError,setUploadError]=useState('');
   const [moveOccupants,setMoveOccupants]=useState(true);
@@ -170,7 +171,7 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
   const update=(i:number,patch:Partial<Draft>)=>{setDraft(old=>old.map((row,j)=>i===j?{...row,...patch}:row));setConfirmed(false);};
   const ingest=async(e:ChangeEvent<HTMLInputElement>)=>{
     const file=e.target.files?.[0];e.target.value='';if(!file)return;
-    setReading(true);setConfirmed(false);setUploadError('');setDraft([]);setScanProgress('');
+    setReading(true);setConfirmed(false);setUploadError('');setDraft([]);setScanProgress('');setScanIncomplete(false);
     try{
       if(/\.csv$/i.test(file.name)){
         const imported=csvRows(await file.text());
@@ -185,11 +186,13 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
         // Previously Full photo sent the raw camera file and could exceed request limits.
         const regions = await imageToRegions(file, scanMode);
         const collected:Draft[]=[];
+        const unique=new Map<string,Draft>();
         for(let i=0;i<regions.length;i++){
           const region=regions[i];
           setScanProgress('Scanning '+region.label+' section ('+(i+1)+'/'+regions.length+')');
           const {data,error}=await supabase.functions.invoke('parking-sheet-ocr',{
-            body:{image:region.image,mimeType:'image/jpeg',zone}
+            body:{image:region.image,mimeType:'image/jpeg',zone},
+            signal:AbortSignal.timeout(50000)
           });
           if(error){
             const context=error as {context?:Response;message?:string};
@@ -207,20 +210,23 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
           collected.push(...(data.rows as Array<{plate:string;zone?:string;bay?:string;xParking?:boolean;confidence?:string}>)
             .map(item=>({plate:String(item.plate||''),zone:asZone(item.zone||zone),bay:String(item.bay||''),
               xParking:Boolean(item.xParking),confidence:item.confidence})));
-        }
-        // Adjacent crops overlap. Only remove identical repeated registrations in
-        // the same destination; conflicting reads remain visible for human review.
-        const unique=new Map<string,Draft>();
-        for(const row of collected){
-          const key=normalize(row.plate)+'|'+row.zone+'|'+row.bay+'|'+String(row.xParking);
-          const previous=unique.get(key);
-          if(!previous || (previous.confidence==='low' && row.confidence!=='low'))unique.set(key,row);
+          // Surface each completed section immediately instead of making the user
+          // wait for every section; never save anything until the review is approved.
+          for(const row of collected){
+            const key=normalize(row.plate)+'|'+row.zone+'|'+row.bay+'|'+String(row.xParking);
+            const previous=unique.get(key);
+            if(!previous || (previous.confidence==='low' && row.confidence!=='low'))unique.set(key,row);
+          }
+          setDraft([...unique.values()]);
+          setScanProgress(region.label+' complete: '+unique.size+' vehicles found. '+(regions.length-i-1)+' sections remaining.');
+
         }
         if(!unique.size)throw new Error('No clear registration readings. Try a better photo or import the Excel register. No vehicles changed.');
         setDraft([...unique.values()]);
       }else throw new Error('Use JPG, PNG, CSV, or the VPLM XLSX template.');
     }catch(err){
       const message=err instanceof Error?err.message:'Could not read the parking sheet.';
+      setScanIncomplete(true);
       setUploadError(message);toast.error(message);
     }
     finally{setReading(false);setScanProgress('');}
@@ -236,7 +242,7 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
   const invalid=draft.filter(row=>!isPlate(row.plate) || duplicatePlates.has(normalize(row.plate)) ||
     (row.zone!=='Unassigned Bay' && (!zoneNames.includes(row.zone) || !resolveBay(row))));
   const apply=()=>{
-    if(disabled||!confirmed||invalid.length)return;
+    if(disabled||!confirmed||invalid.length||scanIncomplete||reading)return;
     const rows=draft.map(row=>({plate:normalize(row.plate),bayId:resolveBay(row),xParking:row.xParking}));
     if(onApply(rows,moveOccupants)){setDraft([]);setConfirmed(false);}
   };
@@ -257,7 +263,7 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
       <input type="file" accept=".xlsx,.csv,image/png,image/jpeg,image/webp" onChange={e=>void ingest(e)} disabled={disabled||reading} aria-label="Upload parking sheet" />
     </div>
     {reading&&<p role="status">{scanProgress||'Preparing the sheet…'}</p>}
-    {uploadError&&<p role="alert" className="rounded border border-red-400 bg-red-950/20 p-3 text-sm text-red-600 dark:text-red-300">{uploadError} Existing parking records remain unchanged.</p>}
+    {uploadError&&<p role="alert" className="rounded border border-red-400 bg-red-950/20 p-3 text-sm text-red-600 dark:text-red-300">{uploadError} {draft.length>0?'These partial readings are shown for review only; import is disabled until a complete rescan.':'Existing parking records remain unchanged.'}</p>}
     {draft.length>0&&<>
       <p className="text-sm font-medium">{draft.length} entries scanned. {invalid.length} require correction. Duplicated vehicle readings must be corrected or removed. Manual entries must use Unassigned Bay.</p>
       <div className="max-h-96 overflow-auto rounded border">
@@ -277,7 +283,7 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
       {!moveOccupants&&<p className="text-xs">Occupied bays will be rejected during validation.</p>}
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
         I have verified vehicle registrations, bays, X positions and authorization for {draft.length} updates.</label>
-      <Button type="button" disabled={disabled||!confirmed||invalid.length>0} onClick={apply}>Apply reviewed parking updates</Button>
+      <Button type="button" disabled={disabled||!confirmed||invalid.length>0||scanIncomplete||reading} onClick={apply}>Apply reviewed parking updates</Button>
     </>}
   </CardContent></Card>;
 }
