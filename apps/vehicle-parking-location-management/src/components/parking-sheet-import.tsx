@@ -79,7 +79,10 @@ async function parseTemplateXlsx(file: File): Promise<Draft[]> {
       for(const cell of Array.from(row.getElementsByTagName('c'))){
         const ref=cell.getAttribute('r')||'';
         const rawValue=cell.getElementsByTagName('v')[0]?.textContent||'';
-        cells.set(ref.replace(/[0-9]/g,''),cell.getAttribute('t')==='s'?shared[Number(rawValue)]||'':rawValue);
+        // Excel and openpyxl can write labels or entered registrations as inline strings.
+        const inlineValue=cell.getElementsByTagName('is')[0]?.textContent||'';
+        cells.set(ref.replace(/[0-9]/g,''),cell.getAttribute('t')==='s'?shared[Number(rawValue)]||'':
+          cell.getAttribute('t')==='inlineStr'?inlineValue:rawValue);
       }
       if((cells.get('A')||'').includes('MANUAL ENTRY'))manualStart=number+2;
       const push=(plate:string,zone:string,bay:string,xParking=false)=>{
@@ -117,16 +120,19 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
   const [draft,setDraft]=useState<Draft[]>([]);
   const [zone,setZone]=useState('A');
   const [reading,setReading]=useState(false);
+  const [uploadError,setUploadError]=useState('');
   const [moveOccupants,setMoveOccupants]=useState(true);
   const [confirmed,setConfirmed]=useState(false);
   const zoneNames=[...new Set(locations.map(loc=>loc.zone))].filter(name=>name!=='Unassigned Bay');
   const update=(i:number,patch:Partial<Draft>)=>{setDraft(old=>old.map((row,j)=>i===j?{...row,...patch}:row));setConfirmed(false);};
   const ingest=async(e:ChangeEvent<HTMLInputElement>)=>{
     const file=e.target.files?.[0];e.target.value='';if(!file)return;
-    setReading(true);setConfirmed(false);
+    setReading(true);setConfirmed(false);setUploadError('');setDraft([]);
     try{
       if(/\.csv$/i.test(file.name)){
-        setDraft(csvRows(await file.text()));
+        const imported=csvRows(await file.text());
+        if(!imported.length)throw new Error('No vehicle registration rows found in the CSV.');
+        setDraft(imported);
       }else if(/\.xlsx$/i.test(file.name)){
         setDraft(await parseTemplateXlsx(file));
       }else if(file.type.startsWith('image/')){
@@ -141,14 +147,26 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
         const { data,error }=await supabase.functions.invoke('parking-sheet-ocr',{
           body:{ image:base64,mimeType:file.type,zone },
         });
-        if(error)throw error;
+        if(error) {
+          const context=error as {context?:Response;message?:string};
+          let detail='';
+          if(context.context && typeof context.context.json==='function') {
+            try { const responseBody=await context.context.json() as {error?:string};detail=responseBody.error||''; }
+            catch { /* Preserve original network error below. */ }
+          }
+          throw new Error(detail||context.message||'Photo scanning failed. Check your connection or use Excel.');
+        }
         if(data?.error)throw new Error(String(data.error));
         const rows=(data?.rows??[]) as Array<{plate:string;zone?:string;bay?:string;xParking?:boolean;confidence?:string}>;
         if(!Array.isArray(rows))throw new Error('AI returned an invalid sheet scan.');
+        if(!rows.length)throw new Error('AI could not identify vehicle registrations. Use a clearer photo or an Excel sheet. No records were changed.');
         setDraft(rows.map(item=>({plate:String(item.plate||''),zone:asZone(item.zone||zone),bay:String(item.bay||''),
           xParking:Boolean(item.xParking),confidence:item.confidence})));
       }else throw new Error('Use JPG, PNG, CSV, or the VPLM XLSX template.');
-    }catch(err){toast.error(err instanceof Error?err.message:'Could not read the parking sheet.');}
+    }catch(err){
+      const message=err instanceof Error?err.message:'Could not read the parking sheet.';
+      setUploadError(message);toast.error(message);
+    }
     finally{setReading(false);}
   };
   const resolveBay=(row:Draft)=>{
@@ -175,6 +193,7 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
       <input type="file" accept=".xlsx,.csv,image/png,image/jpeg,image/webp" onChange={e=>void ingest(e)} disabled={disabled||reading} aria-label="Upload parking sheet" />
     </div>
     {reading&&<p role="status">Reading the sheet…</p>}
+    {uploadError&&<p role="alert" className="rounded border border-red-400 bg-red-950/20 p-3 text-sm text-red-600 dark:text-red-300">{uploadError} Existing parking records remain unchanged.</p>}
     {draft.length>0&&<>
       <p className="text-sm font-medium">{draft.length} entries scanned. {invalid.length} require correction. Manual-entry vehicles must use the Unassigned Bay zone.</p>
       <div className="max-h-96 overflow-auto rounded border">
