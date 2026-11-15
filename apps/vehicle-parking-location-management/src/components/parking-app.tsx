@@ -30,6 +30,7 @@ import { getVehicleRoadTest, loadRoadTestAudit, loadRoadTests, type RoadTestReco
 import {
   mapParkingLocationId,
   parkingLocationLabel,
+  initialLocations,
   isLiveGarageContainer,
   reconcileParkingLayout,
   supportsXParkingLocation,
@@ -250,35 +251,33 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     const link = document.createElement('a'); link.href = url; link.download = 'vplm-all-vehicle-parking.csv'; link.click(); URL.revokeObjectURL(url);
   };
   const downloadCurrentVehicleLocations = () => {
-    const currentVehicles = vehicles.filter((vehicle: Vehicle) => vehicle.status !== 'Delivered' && vehicle.status !== 'Released');
-    const columns = ['Vehicle Number', 'Vehicle ID', 'Brand', 'Model', 'Color', 'Current Parking Zone', 'Current Bay Number', 'Full Current Location', 'Vehicle Status', 'Operational Status', 'X Parking', 'Assigned Date / Last Updated', 'Assigned By', 'Driver Owner', 'Check-in Time', 'Check-out Time'];
-    const excelCell = (value: unknown) => {
-      const raw = String(value ?? '');
-      const safe = /^[=+@\-\t\r]/.test(raw) ? "'" + raw : raw;
-      return '"' + safe.replace(/"/g, '""') + '"';
-    };
-    const rows = currentVehicles
-      .sort((a: Vehicle, b: Vehicle) => a.plateNumber.localeCompare(b.plateNumber, undefined, { numeric: true }))
+    // Two-column, Excel-compatible export; use the zone-qualified bay label
+    // so Workshop 01 and Accommodation A01 cannot be confused.
+    const quote = (value: string) => '"' + (/^[=+@\\-\\t\\r]/.test(value) ? "'" + value : value).replace(/"/g, '""') + '"';
+    const locationFor = (vehicle: Vehicle) => locations.find((item: ParkingLocation) =>
+      parkingRecordKey(item.id) === parkingRecordKey(vehicle.currentLocationId));
+    const rows = vehicles
+      .filter((vehicle: Vehicle) => vehicle.status !== 'Delivered' && vehicle.status !== 'Released')
       .map((vehicle: Vehicle) => {
-        const location = locations.find((item: ParkingLocation) => parkingRecordKey(item.id) === parkingRecordKey(vehicle.currentLocationId));
-        const zoneName = location ? parkingZoneLabel(location.zone) : 'Unassigned Bay';
-        return [
-          vehicle.plateNumber, vehicle.vehicleId, vehicle.brand, vehicle.model, vehicle.color,
-          zoneName, location?.bayNumber ?? '', location ? parkingLocationLabel(location) : 'Unassigned Bay',
-          vehicle.status, vehicle.operationalStatus, vehicle.xParking ?? 'No',
-          vehicle.assignedDate, vehicle.assignedBy, vehicle.driverOwner, vehicle.checkInAt, vehicle.checkOutAt,
-        ].map(excelCell).join(',');
-      });
-    const csv = '\uFEFF' + [columns.map(excelCell).join(','), ...rows].join('\r\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `vplm-current-vehicle-locations-${format(new Date(), 'yyyy-MM-dd-HHmm')}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
+        const location = locationFor(vehicle);
+        const bayLabel = location
+          ? parkingLocationLabel(location) + (vehicle.xParking === 'Yes' ? ' X' : '')
+          : 'Unassigned Bay';
+        return { bayLabel, plate: vehicle.plateNumber };
+      })
+      .sort((a, b) => a.bayLabel.localeCompare(b.bayLabel, undefined, { numeric: true }) ||
+        a.plate.localeCompare(b.plate, undefined, { numeric: true }));
+    const content = '\\uFEFF' + ['Bay Number,Vehicle Number',
+      ...rows.map(row => [quote(row.bayLabel), quote(row.plate)].join(','))].join('\\r\\n');
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'VPLM-Current-Vehicle-Locations-' + format(new Date(), 'yyyy-MM-dd-HHmm') + '.csv';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    toast.success(`Exported ${currentVehicles.length} current vehicle locations for Excel.`);
+    toast.success('Downloaded ' + rows.length + ' vehicle locations with Bay Number and Vehicle Number only.');
   };
   const [zone, setZone] = useState('Unassigned Bay');
   const [assignmentVehicle, setAssignmentVehicle] = useState<VehicleFormData>(emptyVehicleForm);
@@ -932,7 +931,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
             ? <TaskManagement actor={actor} vehicles={vehicles} locations={locations} reservations={reservations}
               setVehicles={setVehicles} setLocations={setLocations} setReservations={setReservations} logAudit={logAudit} onClose={() => setManageTasks(false)} />
             : <div className="space-y-4"><Button variant="outline" onClick={() => setManageTasks(true)}>Manage tasks</Button>
-              <ManagementScreen role={role} locations={locations} setLocations={setLocations} vehicles={vehicles} setVehicles={setVehicles} movements={movements} auditEvents={auditEvents} setAuditEvents={setAuditEvents} logAudit={logAudit} actorId={queueOwnerId} garageLayout={garageLayout} setGarageLayout={setGarageLayout} />
+              <ManagementScreen role={role} locations={locations} setLocations={setLocations} vehicles={vehicles} setVehicles={setVehicles} movements={movements} auditEvents={auditEvents} setAuditEvents={setAuditEvents} logAudit={logAudit} actorId={queueOwnerId} garageLayout={garageLayout} setGarageLayout={setGarageLayout} reservations={reservations} changesDisabled={offlineReadOnly} />
             </div>)}
           {screen === 'settings' && isAdministrator && <SettingsScreen users={onlineUsers} connected={presenceConnected} auditEvents={auditEvents} currentVehicleCount={vehicles.filter((vehicle: Vehicle) => vehicle.status !== 'Delivered' && vehicle.status !== 'Released').length} onDownloadVehicleLocations={downloadCurrentVehicleLocations} />}
           {screen === 'backup-playback' && isAdministrator && <Suspense fallback={<p className="p-3 text-sm">Loading backup screen…</p>}><BackupPlayback /></Suspense>}
@@ -1628,7 +1627,7 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
 
 type AuditEvent = { id: string; action: string; entity: string; detail: string; actor: string; timestamp: string; archived?: boolean };
 
-function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles, movements, auditEvents, setAuditEvents, logAudit, actorId, garageLayout, setGarageLayout }: { role: Role; locations: ParkingLocation[]; setLocations: React.Dispatch<React.SetStateAction<ParkingLocation[]>>; vehicles: Vehicle[]; setVehicles: React.Dispatch<React.SetStateAction<Vehicle[]>>; movements: Movement[]; auditEvents: AuditEvent[]; setAuditEvents: React.Dispatch<React.SetStateAction<AuditEvent[]>>; logAudit: (action: string, entity: string, detail: string) => void; actorId: string; garageLayout: GarageLayoutItem[]; setGarageLayout: React.Dispatch<React.SetStateAction<GarageLayoutItem[]>> }) {
+function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles, movements, auditEvents, setAuditEvents, logAudit, actorId, garageLayout, setGarageLayout, reservations, changesDisabled }: { role: Role; locations: ParkingLocation[]; setLocations: React.Dispatch<React.SetStateAction<ParkingLocation[]>>; vehicles: Vehicle[]; setVehicles: React.Dispatch<React.SetStateAction<Vehicle[]>>; movements: Movement[]; auditEvents: AuditEvent[]; setAuditEvents: React.Dispatch<React.SetStateAction<AuditEvent[]>>; logAudit: (action: string, entity: string, detail: string) => void; actorId: string; garageLayout: GarageLayoutItem[]; setGarageLayout: React.Dispatch<React.SetStateAction<GarageLayoutItem[]>>; reservations: Reservation[]; changesDisabled: boolean }) {
   const [draggedBay, setDraggedBay] = useState<string>();
   const [layoutZone, setLayoutZone] = useState('A');
   const [draggedLayoutItemId, setDraggedLayoutItemId] = useState<string>();
@@ -1887,6 +1886,40 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
     setGarageLayout((current: GarageLayoutItem[]) => current.filter((item: GarageLayoutItem) => item.zone !== zoneCode));
     logAudit('Archive', 'Parking zone', `Zone ${zoneCode}`); setIsZoneEditorOpen(false); toast.success(`Zone ${zoneCode} removed.`);
   };
+  const removeIndividualBay = (id: string) => {
+    if (changesDisabled || !navigator.onLine) return toast.error('MAIN must be online and idle to remove a bay.');
+    if (role !== 'Administrator' && role !== 'Supervisor') return toast.error('Administrator or Supervisor permission required.');
+    const bay = locations.find(item => item.id === id);
+    if (!bay) return toast.error('Parking bay not found.');
+    if (initialLocations.some(item => item.id === id)) {
+      return toast.error('This is a built-in VPLM bay and is automatically restored. Set it to Maintenance to take it out of service.');
+    }
+    const bayKey = parkingRecordKey(id);
+    if (vehicles.some(vehicle => vehicle.status !== 'Delivered' && vehicle.status !== 'Released' &&
+      parkingRecordKey(vehicle.currentLocationId) === bayKey)) {
+      return toast.error('Move all vehicles, including X Parking occupants, before removing this bay.');
+    }
+    if (bay.status === 'Reserved' || bay.status === 'Maintenance' ||
+      reservations.some(item => parkingRecordKey(item.locationId) === bayKey &&
+        (item.status === 'Active' || item.status === 'Upcoming'))) {
+      return toast.error('Release reservations and maintenance before removing this bay.');
+    }
+    const management = loadBayManagementState();
+    if (management.reservations.some(item => item.status !== 'Released' &&
+      (item.bayId === id || item.bayId === xParkingSlotId(id))) ||
+      management.maintenance.some(item => item.status === 'Active' &&
+      (item.bayId === id || item.bayId === xParkingSlotId(id)))) {
+      return toast.error('This bay has an active reservation or maintenance entry.');
+    }
+    if (!window.confirm('Remove custom bay ' + parkingLocationLabel(bay) +
+      '? This cannot be undone automatically. Vehicle records and history will remain unchanged.')) return;
+    setLocations(current => current.filter(item => item.id !== id));
+    logAudit('Remove', 'Parking bay', parkingLocationLabel(bay));
+    setIsBayEditorOpen(false);
+    setEditingBayId(undefined);
+    setBayDraft(undefined);
+    toast.success('Custom bay removed. Existing vehicles and movement history were preserved.');
+  };
   const saveBay = () => {
     if (!editingBayId || !bayDraft) return;
     const zoneName = bayDraft.zone.trim().toUpperCase();
@@ -2079,7 +2112,10 @@ function ManagementScreen({ role, locations, setLocations, vehicles, setVehicles
           <div className="space-y-2"><Label>Status</Label><Select value={bayDraft.status} onValueChange={(value: ParkingLocation['status']) => setBayDraft({ ...bayDraft, status: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(['Available','Occupied','Reserved','Maintenance'] as ParkingLocation['status'][]).filter((item: ParkingLocation['status']) => item).map((item: ParkingLocation['status']) => <SelectItem key={item} value={item}>{item === 'Available' ? 'Vacant' : item}</SelectItem>)}</SelectContent></Select></div>
           <div className="space-y-2 sm:col-span-2"><Label htmlFor="management-bay-remarks">Remarks</Label><Textarea id="management-bay-remarks" value={bayDraft.remarks ?? ''} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setBayDraft({ ...bayDraft, remarks: event.target.value })} /></div>
         </div>}
-        <DialogFooter><Button variant="outline" onClick={() => setIsBayEditorOpen(false)}>Cancel</Button><Button onClick={() => { saveBay(); setIsBayEditorOpen(false); }}><Save /> Save bay</Button></DialogFooter>
+        <DialogFooter className="gap-2 sm:justify-between">
+          <Button variant="destructive" disabled={changesDisabled} onClick={() => editingBayId && removeIndividualBay(editingBayId)}><Trash2 /> Remove bay</Button>
+          <div className="flex gap-2"><Button variant="outline" onClick={() => setIsBayEditorOpen(false)}>Cancel</Button><Button onClick={() => { saveBay(); setIsBayEditorOpen(false); }}><Save /> Save bay</Button></div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   </TabsContent>
@@ -2130,7 +2166,7 @@ function SettingsScreen({ users, connected, auditEvents, currentVehicleCount, on
   const [showFlow, setShowFlow] = useState(false);
   return <div className="mx-auto max-w-6xl space-y-5">
     <div><p className="technical-label">Administrator only</p><h2 className="text-2xl font-black">System settings</h2><p className="text-muted-foreground">Live user monitoring</p></div>
-    <Card><CardHeader><CardTitle>Current vehicle location list</CardTitle><CardDescription>Download all currently active vehicles with their full parking location, zone, bay number, and assignment details. Opens in Microsoft Excel; delivered and released vehicles are excluded.</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onDownloadVehicleLocations}><Download /> Download current vehicle locations ({currentVehicleCount})</Button></CardContent></Card>\n    <Card><CardHeader><CardTitle>Recent user activities</CardTitle><CardDescription>Latest synchronized workspace audit entries. Pending offline device actions appear only after synchronization; use the sync inbox for reported conflicts.</CardDescription></CardHeader><CardContent className="max-h-96 space-y-2 overflow-y-auto">{[...auditEvents].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)).slice(0, 100).map(event => <div key={event.id} className="rounded-lg border p-3 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong>{event.actor} · {event.action} · {event.entity}</strong><time className="text-muted-foreground">{new Date(event.timestamp).toLocaleString()}</time></div><p className="break-words text-muted-foreground">{event.detail}</p></div>)}{auditEvents.length === 0 && <p className="text-sm text-muted-foreground">No synchronized activity records available.</p>}</CardContent></Card>
+    <Card><CardHeader><CardTitle>Current vehicle location list</CardTitle><CardDescription>Download a standard two-column, Excel-compatible list: Bay Number and Vehicle Number. Bay labels include the zone and X Parking indicator; delivered and released vehicles are excluded.</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onDownloadVehicleLocations}><Download /> Download current vehicle locations ({currentVehicleCount})</Button></CardContent></Card>\n    <Card><CardHeader><CardTitle>Recent user activities</CardTitle><CardDescription>Latest synchronized workspace audit entries. Pending offline device actions appear only after synchronization; use the sync inbox for reported conflicts.</CardDescription></CardHeader><CardContent className="max-h-96 space-y-2 overflow-y-auto">{[...auditEvents].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)).slice(0, 100).map(event => <div key={event.id} className="rounded-lg border p-3 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong>{event.actor} · {event.action} · {event.entity}</strong><time className="text-muted-foreground">{new Date(event.timestamp).toLocaleString()}</time></div><p className="break-words text-muted-foreground">{event.detail}</p></div>)}{auditEvents.length === 0 && <p className="text-sm text-muted-foreground">No synchronized activity records available.</p>}</CardContent></Card>
     <Button variant="outline" onClick={() => setShowFlow(value => !value)}>{showFlow ? 'Close live flow' : 'View live application flow'}</Button>
     {showFlow && <Suspense fallback={<p className="p-3 text-sm">Loading live flow…</p>}><ApplicationLiveFlow /></Suspense>}
     <Card>
