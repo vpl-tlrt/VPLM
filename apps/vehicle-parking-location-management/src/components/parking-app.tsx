@@ -22,6 +22,8 @@ import { BayInformationDialog } from '@/components/bay-information-dialog';
 import { VehicleOverviewDialog } from '@/components/vehicle-overview-dialog';
 import { VehicleModelManagement } from '@/components/vehicle-model-management';
 import AiAssistant from '@/components/ai-assistant';
+import { ParkingSheetImport } from '@/components/parking-sheet-import';
+import { planParkingBatch, type ParkingImportRow } from '@/lib/parking-batch';
 import { emptyVehicleForm, VehicleFormFields, vehicleColorClass, type VehicleFormData } from '@/components/vehicle-form-fields';
 import { loadBayManagementState, saveBayManagementState, type BayAuditEntry, type BayMaintenance, type BayReservation, xParkingSlotId } from '@/lib/bay-management-data';
 import { getVehicleRoadTest, loadRoadTestAudit, loadRoadTests, type RoadTestRecord } from '@/lib/road-test-data';
@@ -409,10 +411,12 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       return changed ? next : current;
     });
   }, [linkedVehicleLocationIds]);
-  const occupied = locations.filter((item: ParkingLocation) => linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
-  const available = locations.filter((item: ParkingLocation) => item.status === 'Available' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
-  const reserved = locations.filter((item: ParkingLocation) => item.status === 'Reserved' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
-  const utilization = locations.length > 0 ? Math.round((occupied / locations.length) * 100) : 0;
+  // Holding slots in Unassigned Bay are not workshop parking KPIs.
+  const countedLocations = locations.filter((item: ParkingLocation) => item.zone !== 'Unassigned Bay');
+  const occupied = countedLocations.filter((item: ParkingLocation) => linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
+  const available = countedLocations.filter((item: ParkingLocation) => item.status === 'Available' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
+  const reserved = countedLocations.filter((item: ParkingLocation) => item.status === 'Reserved' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
+  const utilization = countedLocations.length > 0 ? Math.round((occupied / countedLocations.length) * 100) : 0;
   const availableBays = locations.filter((item: ParkingLocation) => item.zone === zone && (containerCanAccept(item) || (item.status === 'Available' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id)))));
   const selectedVehicle = activeVehicles.find((item: Vehicle) => item.id === selectedVehicleId);
   const normalizedSearch = searchQuery.trim().toLowerCase();
@@ -606,16 +610,141 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     setScreen('assignment');
     return true;
   };
+  const commitParkingBatch = (rows: ParkingImportRow[], allowCreate = false, relocateOccupants = true): boolean => {
+    if (offlineReadOnly || !hasPublishedSnapshot || !navigator.onLine) {
+      toast.error('Cloud MAIN must be connected and idle before a bulk update.'); return false;
+    }
+    try {
+      const result = planParkingBatch(rows, vehicles, locations, actor, { allowCreate, relocateOccupants });
+      if (!result.changes.length) { toast.info('No parking changes are needed.'); return true; }
+      const eventTime = new Date().toISOString();
+      const events: OfflineAuditEvent[] = result.changes.map((change) => ({
+        id: 'audit-' + createUUID(), action: change.action === 'Transfer' ? 'Bulk Transfer' : 'Bulk Assignment',
+        entity: 'Vehicle', detail: change.vehicle.plateNumber + ': ' +
+          (change.previousBay ? locationLabel(change.previousBay) : 'Unassigned Bay') + ' → ' +
+          (change.nextBay ? locationLabel(change.nextBay) : 'Unassigned Bay'),
+        actor, timestamp: eventTime, recordId: change.vehicle.id,
+        fromLocationId: change.previousBay, toLocationId: change.nextBay,
+      }));
+      if (!saveOfflineState({ vehicles: result.vehicles, locations: result.locations,
+        movements: [...result.movements, ...movements], reservations,
+        auditEvents: [...events, ...auditEvents], pendingChanges: 0, savedAt: eventTime })) {
+        toast.error('Could not stage the complete update. No vehicle was changed.'); return false;
+      }
+      setVehicles(result.vehicles);
+      setLocations(result.locations);
+      setMovements(old => [...result.movements, ...old]);
+      setAuditEvents(old => [...events, ...old]);
+      for (const change of result.changes) {
+        const vehicle = change.vehicle;
+        enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'Vehicle',
+          action: change.previous ? 'update' : 'create', recordId: vehicle.id, version: 1, createdAt: eventTime,
+          payload: { vehicleName: vehicle.vehicleId, plateNumber: vehicle.plateNumber, vin: vehicle.vin,
+            brand: vehicle.brand, model: vehicle.model, color: vehicle.color,
+            locationId: vehicle.currentLocationId ?? '', ownerId: queueOwnerId, ownerName: vehicle.driverOwner || actor } });
+      }
+      for (const movement of result.movements) {
+        enqueueSync({ id: createUUID(), ownerId: queueOwnerId, entity: 'VehicleMovement',
+          action: 'create', recordId: movement.id, version: 1, createdAt: eventTime,
+          payload: { name: movement.movementType + ' ' + movement.vehicleId,
+            vehicleId: movement.vehicleId, vehicleName: result.vehicles.find(v => v.id === movement.vehicleId)?.vehicleId ?? movement.vehicleId,
+            fromLocationId: movement.fromLocationId, toLocationId: movement.toLocationId,
+            movementType: movement.movementType, movementDate: eventTime,
+            notes: JSON.stringify({ notes: movement.notes, snapshot: movement.snapshot }),
+            actorId: queueOwnerId, actorName: actor } });
+      }
+      void sync(false);
+      toast.success(result.changes.length + ' parking changes staged for MAIN cloud save. Verify MAIN live status.');
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Invalid parking batch. No records changed.');
+      return false;
+    }
+  };
+  const handleBulkUnassign = () => {
+    if (!canManage || !canTransferVehicle) return toast.error('Only Admin or Supervisor can perform a bulk transfer.');
+    const target = activeVehicles.filter(v => v.status !== 'Released' &&
+      v.currentLocationId && locations.find(l => parkingRecordKey(l.id) === parkingRecordKey(v.currentLocationId))?.zone !== 'Unassigned Bay');
+    if (!target.length) return toast.info('No parked vehicles need transfer.');
+    const running = new Set(loadRoadTests().filter(t => t.status === 'In Road Test').map(t => t.vehicleId));
+    if (target.some(v => running.has(v.id) || v.operationalStatus === 'Checked Out')) {
+      return toast.error('Some vehicles are in a road test or checked out. Complete those workflows first.');
+    }
+    if (!window.confirm('Move ALL ' + target.length + ' parked vehicles into Unassigned Bay? Their original bays will be released and a movement recorded for each.')) return;
+    commitParkingBatch(target.map(v => ({ plate: v.plateNumber })), false, false);
+  };
+  const ageDeliveryInFlight = useRef(false);
+  useEffect(() => {
+    if (!canManage || offlineReadOnly || !hasPublishedSnapshot || !supabase) return;
+    const run = async () => {
+      if (ageDeliveryInFlight.current) return;
+      const deadline = Date.now() - 10 * 24 * 60 * 60 * 1000;
+      const candidates = vehicles.filter(v => v.status !== 'Delivered' && v.status !== 'Released' &&
+        v.currentLocationId && v.assignedDate && Number.isFinite(Date.parse(v.assignedDate)) &&
+        Date.parse(v.assignedDate) < deadline && v.operationalStatus !== 'Checked Out' &&
+        locations.some(l => parkingRecordKey(l.id) === parkingRecordKey(v.currentLocationId) &&
+          l.zone !== 'Unassigned Bay'));
+      if (!candidates.length) return;
+      ageDeliveryInFlight.current = true;
+      try {
+        const running = new Set(loadRoadTests().filter(t => t.status === 'In Road Test').map(t => t.vehicleId));
+        const { data: pickups, error } = await supabase.from('pickup_requests').select('vehicle_id,status')
+          .in('status',['Requested','In Transit']);
+        if (error) return; // Never auto-deliver when pickup status cannot be checked.
+        const blocked = new Set((pickups ?? []).map(p => p.vehicle_id));
+        const eligible = candidates.filter(v => !running.has(v.id) && !blocked.has(v.id));
+        if (!eligible.length) return;
+        const timestamp = new Date().toISOString();
+        const ids = new Set(eligible.map(v => v.id));
+        const delivered = vehicles.map(v => ids.has(v.id) ? { ...v, status: 'Delivered' as const,
+          operationalStatus: 'Delivered' as const, deliveredAt: timestamp,
+          deliveredBy: 'VPLM Automatic Delivery (10-day rule)', finalParkingBay: locationLabel(v.currentLocationId),
+          currentLocationId: undefined, checkOutAt: timestamp } : v);
+        const nextLocations = locations.map(loc => {
+          const used = delivered.some(v => v.status !== 'Delivered' && v.status !== 'Released' && v.xParking !== 'Yes' &&
+            parkingRecordKey(v.currentLocationId) === parkingRecordKey(loc.id));
+          return loc.status === 'Reserved' || loc.status === 'Maintenance' ? loc :
+            { ...loc, status: used ? 'Occupied' as const : 'Available' as const };
+        });
+        const nextMovements: Movement[] = eligible.map(v => ({
+          id:'mov-'+createUUID(), vehicleId:v.id, fromLocationId:v.currentLocationId,
+          toLocationId:undefined, movementType:'Delivered', actionDateTime:timestamp,
+          performedBy:'VPLM Automatic Delivery', notes:'Automatically delivered after more than 10 full days in assigned parking bay',
+        }));
+        const events: OfflineAuditEvent[] = eligible.map(v => ({
+          id:'audit-'+createUUID(), action:'Automatic Delivery (10 days)', entity:'Vehicle',
+          detail:v.plateNumber+' · last bay '+locationLabel(v.currentLocationId),
+          actor:'VPLM Automatic Delivery',timestamp,recordId:v.id,fromLocationId:v.currentLocationId,
+        }));
+        if (!saveOfflineState({ vehicles:delivered,locations:nextLocations,
+          movements:[...nextMovements,...movements],reservations,
+          auditEvents:[...events,...auditEvents],pendingChanges:0,savedAt:timestamp }))return;
+        setVehicles(delivered);setLocations(nextLocations);
+        setMovements(old=>[...nextMovements,...old]);setAuditEvents(old=>[...events,...old]);
+        for(const v of eligible){
+          enqueueSync({id:createUUID(),ownerId:queueOwnerId,entity:'Vehicle',action:'update',
+            recordId:v.id,version:1,createdAt:timestamp,
+            payload:{vehicleName:v.vehicleId,plateNumber:v.plateNumber,vin:v.vin,brand:v.brand,model:v.model,
+              color:v.color,locationId:'',ownerId:queueOwnerId,ownerName:v.driverOwner||actor}});
+        }
+        void sync(false);
+        toast.info(eligible.length+' vehicles older than 10 days moved to Delivered Archive.');
+      } finally { ageDeliveryInFlight.current=false; }
+    };
+    void run();
+    const timer=window.setInterval(()=>{void run();},5*60*1000);
+    return ()=>window.clearInterval(timer);
+  },[canManage,offlineReadOnly,hasPublishedSnapshot,vehicles,locations,movements,reservations,auditEvents,queueOwnerId,actor,sync]);
   const assignFromAssistant = (plateNumber: string, targetBayId: string): boolean => {
     if (!canAssignVehicle) return false;
     const normalizedPlate = plateNumber.trim().toUpperCase();
     const existing = activeVehicles.find((item: Vehicle) => item.plateNumber.trim().toUpperCase() === normalizedPlate);
-    if (existing?.currentLocationId) return false;
-    const draft: VehicleFormData = existing
-      ? { plateNumber: existing.plateNumber, vin: existing.vin, brand: existing.brand, model: existing.model, color: existing.color, customerName: existing.customerName, driverOwner: existing.driverOwner, department: existing.department, xParking: existing.xParking ?? 'No' }
-      : { ...emptyVehicleForm, plateNumber: normalizedPlate };
-    // Use the same validation, occupancy checks, audit and persistence as manual Assign.
-    return handleAssign(targetBayId, false, undefined, draft);
+    if (existing?.currentLocationId && !canTransferVehicle) {
+      toast.error('Transfer permission is required to move an already parked vehicle.');return false;
+    }
+    // AI-only occupied-bay resolution: relocate the occupant and place the requested
+    // vehicle together in one revision-controlled workspace snapshot.
+    return commitParkingBatch([{ plate: normalizedPlate, bayId: targetBayId }], true, true);
   };
   const handleRoadTestLocationChange = (vehicleId: string, fromId: string | undefined, toId: string | undefined, out: boolean) => {
     const vehicle = vehicles.find((item: Vehicle) => item.id === vehicleId);
@@ -833,6 +962,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
           {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage && !offlineReadOnly} canEditVehicle={canEditVehicle && !offlineReadOnly} canTransferVehicle={canTransferVehicle && !offlineReadOnly} canAssignVehicle={canAssignVehicle && !offlineReadOnly} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onMoveVehicle={(vehicleId: string) => { setSelectedVehicleId(vehicleId); setNewLocationId(''); setNotes(''); setScreen('transfer'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} assignSelectedBay={(selectedBayId?: string, vehicleForm?: VehicleFormData) => handleAssign(selectedBayId, false, undefined, vehicleForm)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
           {screen === 'assignment' && canManage && <div className="mb-3 flex justify-end"><Button variant="outline" onClick={exportVehicleBayData}><Download /> Download all vehicle / bay data</Button></div>}
+          {screen === 'assignment' && canManage && <div className="mb-4"><ParkingSheetImport locations={locations} disabled={offlineReadOnly} onApply={rows => commitParkingBatch(rows,true,true)} /></div>}
+          {screen === 'management' && canManage && <div className="mb-3"><Button variant="destructive" disabled={offlineReadOnly} onClick={handleBulkUnassign}>Transfer all vehicles to Unassigned Bay</Button></div>}
           {screen === 'assignment' && <Assignment assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} zone={zone} setZone={setZone} bayId={bayId} setBayId={setBayId} availableBays={availableBays} locations={locations} vehicles={activeVehicles} zoneNames={zoneNames} handleAssign={(targetBayId?: string, occupant?: XParkingOccupant) => handleAssign(targetBayId, zone === 'Unassigned Bay', occupant)} handleAssignUnassigned={() => handleAssign(undefined, true)} handleRelease={handleRelease} handleOcr={handleOcr} fileRef={fileRef} />}
           {screen === 'search' && <SearchScreen onRecoverDeliveredVehicle={canRecoverDeliveredVehicle ? recoverDeliveredVehicle : undefined} archiveOnSearchMiss={role === 'TechnicalLeader' || role === 'TechnicalAdvisor' || role === 'Drivers' || role === 'Technician'} query={searchQuery} setQuery={setSearchQuery} result={searchQuery ? searchResult : undefined} locationLabel={locationLabel} locations={locations} vehicles={vehicles} movements={movements} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} />}
           {screen === 'layout' && <LayoutScreen locations={locations} zoneFilter={zoneFilter} setZoneFilter={setZoneFilter} zoneStats={zoneStats} />}
@@ -1012,9 +1143,10 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     if (count < 10) return 'usage-coral-red';
     return utilizationColorClass(100 - percent);
   };
-  const totalBays = Math.max(locations.length, 1);
+  const countedBayTotal = locations.filter((item: ParkingLocation) => item.zone !== 'Unassigned Bay').length;
+  const totalBays = Math.max(countedBayTotal, 1);
   const stats = [
-    { label: 'Total bays', value: locations.length, icon: CircleParking, percent: utilization },
+    { label: 'Total bays', value: countedBayTotal, icon: CircleParking, percent: utilization },
     { label: 'Vacant', value: available, icon: MapPin, percent: Math.round((available / totalBays) * 100) },
     { label: 'Occupied', value: occupied, icon: CarFront, percent: utilization },
     { label: 'Reserved', value: reserved, icon: CalendarDays, percent: Math.round((reserved / totalBays) * 100) },
