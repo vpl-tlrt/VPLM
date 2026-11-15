@@ -675,7 +675,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   };
   const ageDeliveryInFlight = useRef(false);
   useEffect(() => {
-    if (!canManage || offlineReadOnly || !hasPublishedSnapshot || !supabase) return;
+    const client = supabase;
+    if (!canManage || offlineReadOnly || !hasPublishedSnapshot || !client) return;
     const run = async () => {
       if (ageDeliveryInFlight.current) return;
       const deadline = Date.now() - 10 * 24 * 60 * 60 * 1000;
@@ -688,7 +689,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       ageDeliveryInFlight.current = true;
       try {
         const running = new Set(loadRoadTests().filter(t => t.status === 'In Road Test').map(t => t.vehicleId));
-        const { data: pickups, error } = await supabase.from('pickup_requests').select('vehicle_id,status')
+        const { data: pickups, error } = await client.from('pickup_requests').select('vehicle_id,status')
           .in('status',['Requested','In Transit']);
         if (error) return; // Never auto-deliver when pickup status cannot be checked.
         const blocked = new Set((pickups ?? []).map(p => p.vehicle_id));
