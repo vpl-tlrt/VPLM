@@ -368,9 +368,9 @@ export default function AiAssistant({
     }
   };
 
+  // VPLM AI may propose occupied bays; the batch planner safely relocates the occupant on confirmation.
   const assignmentOptions = assignmentDraft ? locations.filter(location =>
-    location.status === 'Available'
-    && !vehicles.some(vehicle => vehicle.status !== 'Delivered' && normalizeLocation(vehicle.currentLocationId ?? '') === normalizeLocation(location.id))
+    location.zone !== 'Unassigned Bay' && location.status !== 'Reserved' && location.status !== 'Maintenance'
   ) : [];
   const assignmentMatches = assignmentOptions.filter(location =>
     !assignmentDraft?.search || normalize(`${location.zone} ${location.bayNumber} ${location.id}`).includes(normalize(assignmentDraft.search))
@@ -383,7 +383,7 @@ export default function AiAssistant({
       return;
     }
     if (onAssignToBay(assignmentDraft.plate, selected.id)) {
-      addAssistantMessage(`${assignmentDraft.plate} assigned to ${selected.zone}-${selected.bayNumber} successfully.`);
+      addAssistantMessage(`${assignmentDraft.plate} parking update staged for ${selected.zone}-${selected.bayNumber}. Verify MAIN cloud save status.`);
       setAssignmentDraft(undefined);
     } else {
       addAssistantMessage('Assignment could not be saved. Check the vehicle details and bay availability. You can use the full Add / Assign form to correct any missing details.');
