@@ -661,8 +661,9 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       return false;
     }
   };
-  const handleBulkUnassign = () => {
+  const handleBulkUnassign = async () => {
     if (!canManage || !canTransferVehicle) return toast.error('Only Admin or Supervisor can perform a bulk transfer.');
+    if (!supabase || offlineReadOnly) return toast.error('MAIN cloud must be connected and idle.');
     const target = activeVehicles.filter(v => v.status !== 'Released' &&
       v.currentLocationId && locations.find(l => parkingRecordKey(l.id) === parkingRecordKey(v.currentLocationId))?.zone !== 'Unassigned Bay');
     if (!target.length) return toast.info('No parked vehicles need transfer.');
@@ -670,6 +671,11 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     if (target.some(v => running.has(v.id) || v.operationalStatus === 'Checked Out')) {
       return toast.error('Some vehicles are in a road test or checked out. Complete those workflows first.');
     }
+    const { data: pickups, error } = await supabase.from('pickup_requests').select('vehicle_id,status')
+      .in('status',['Requested','Accepted','In Transit']);
+    if (error) return toast.error('Could not verify pending pickups. No vehicles moved.');
+    const pending = new Set((pickups ?? []).map(p => p.vehicle_id));
+    if (target.some(v => pending.has(v.id))) return toast.error('Some vehicles have active pickup requests. Finish or cancel them before transferring all.');
     if (!window.confirm('Move ALL ' + target.length + ' parked vehicles into Unassigned Bay? Their original bays will be released and a movement recorded for each.')) return;
     commitParkingBatch(target.map(v => ({ plate: v.plateNumber })), false, false);
   };
