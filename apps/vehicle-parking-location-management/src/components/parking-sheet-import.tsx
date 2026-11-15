@@ -112,7 +112,7 @@ async function parseTemplateXlsx(file: File): Promise<Draft[]> {
 }
 
 export function ParkingSheetImport({ locations,onApply,disabled=false }:{
-  locations: ParkingLocation[]; onApply:(rows:ParkingImportRow[])=>boolean; disabled?:boolean;
+  locations: ParkingLocation[]; onApply:(rows:ParkingImportRow[],relocateOccupants:boolean)=>boolean; disabled?:boolean;
 }){
   const [draft,setDraft]=useState<Draft[]>([]);
   const [zone,setZone]=useState('A');
@@ -161,7 +161,7 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
   const apply=()=>{
     if(disabled||!confirmed||invalid.length)return;
     const rows=draft.map(row=>({plate:normalize(row.plate),bayId:resolveBay(row),xParking:row.xParking}));
-    if(onApply(rows)){setDraft([]);setConfirmed(false);}
+    if(onApply(rows,moveOccupants)){setDraft([]);setConfirmed(false);}
   };
   return <Card><CardHeader><CardTitle>Photo / Excel Parking Import</CardTitle>
     <CardDescription>Admin and Supervisor only. Scan a photographed sheet, upload the VPLM XLSX register, or import CSV (vehicle,zone,bay,x). Review every row before changing MAIN.</CardDescription>
