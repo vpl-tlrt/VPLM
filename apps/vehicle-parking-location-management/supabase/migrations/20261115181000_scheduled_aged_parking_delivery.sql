@@ -56,7 +56,7 @@ begin
             where rt.value->>'vehicleId' = v->>'id' and rt.value->>'status' = 'In Road Test')
         then
           area := loc->>'zone';
-          bay_label := area || case when coalesce(loc->>'bayNumber','')='' then '' else '-' || loc->>'bayNumber' end;
+          bay_label := area || case when coalesce(loc->>'bayNumber','')='' then '' else '-' || (loc->>'bayNumber') end;
           new_movements := new_movements || jsonb_build_array(jsonb_build_object(
             'id','mov-'||gen_random_uuid()::text,'vehicleId',v->>'id',
             'fromLocationId',v->>'currentLocationId','movementType','Delivered',
