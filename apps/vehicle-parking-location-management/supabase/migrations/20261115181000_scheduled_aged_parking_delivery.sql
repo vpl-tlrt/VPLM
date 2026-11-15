@@ -53,7 +53,7 @@ begin
           and not exists (select 1 from public.pickup_requests p where
             p.vehicle_id = v->>'id' and p.status in ('Requested','Accepted','In Transit'))
           and not exists (select 1 from jsonb_array_elements(road_tests) rt
-            where rt->>'vehicleId' = v->>'id' and rt->>'status' = 'In Road Test')
+            where rt.value->>'vehicleId' = v->>'id' and rt.value->>'status' = 'In Road Test')
         then
           area := loc->>'zone';
           bay_label := area || case when coalesce(loc->>'bayNumber','')='' then '' else '-' || loc->>'bayNumber' end;
