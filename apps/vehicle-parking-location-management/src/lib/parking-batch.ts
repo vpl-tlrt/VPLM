@@ -6,93 +6,111 @@ export type ParkingChange = { vehicle: Vehicle; previous?: Vehicle; previousBay?
 export type ParkingBatchResult = { vehicles: Vehicle[]; locations: ParkingLocation[]; changes: ParkingChange[]; movements: Movement[] };
 
 const plateKey = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-const occupied = (vehicle: Vehicle) => vehicle.status !== 'Delivered' && vehicle.status !== 'Released';
-const unassigned = (vehicle: Vehicle, locations: ParkingLocation[]) =>
-  occupied(vehicle) && (!vehicle.currentLocationId || locations.some(loc => loc.zone === 'Unassigned Bay' && parkingRecordKey(loc.id) === parkingRecordKey(vehicle.currentLocationId)));
+const active = (v: Vehicle) => v.status !== 'Delivered' && v.status !== 'Released';
+const locationKey = (id?: string) => parkingRecordKey(id);
+type Target = { plate: string; key: string; destination?: ParkingLocation; xParking: boolean; displaced: boolean };
 
-// Pure all-or-nothing planner: never partially mutate live workspace state.
+// Validate the complete requested final parking state before changing any live records.
 export function planParkingBatch(
   rows: ParkingImportRow[], vehicles: Vehicle[], locations: ParkingLocation[], actor: string,
   options: { relocateOccupants?: boolean; allowCreate?: boolean } = {},
 ): ParkingBatchResult {
-  const next = vehicles.map(v => ({ ...v }));
-  const changes: ParkingChange[] = [];
-  const seen = new Set<string>();
-  for (const row of rows) {
-    const key = plateKey(row.plate);
-    if (seen.has(key)) throw new Error('Duplicate vehicle in import: ' + key);
-    seen.add(key);
-  }
-  const unassignedCapacity = locations.filter(loc => loc.zone === 'Unassigned Bay').length;
   if (!rows.length) throw new Error('No vehicle entries were supplied.');
   if (rows.length > 1000) throw new Error('Import exceeds the 1,000-entry safety limit.');
+  const byId = new Map(locations.map(loc => [locationKey(loc.id), loc]));
+  const requested = new Set<string>(), reservedSlots = new Set<string>(), targets: Target[] = [];
+  const find = (key: string) => vehicles.find(v => plateKey(v.plateNumber) === key && active(v))
+    ?? vehicles.find(v => plateKey(v.plateNumber) === key);
+  for (const row of rows) {
+    const key = plateKey(row.plate);
+    if (key.length < 3 || key.length > 20) throw new Error('Invalid registration: ' + row.plate);
+    if (requested.has(key)) throw new Error('Duplicate vehicle in import: ' + key);
+    requested.add(key);
+    if (!find(key) && !options.allowCreate) throw new Error('Vehicle ' + key + ' is not registered.');
+    let destination = row.bayId ? byId.get(locationKey(row.bayId)) : undefined;
+    if (row.bayId && !destination) throw new Error('Unknown destination for ' + key);
+    if (destination?.zone === 'Unassigned Bay') destination = undefined;
+    const xParking = Boolean(row.xParking);
+    if (destination && ['Reserved','Maintenance'].includes(destination.status))
+      throw new Error('Destination is reserved or under maintenance: ' + destination.zone + '-' + destination.bayNumber);
+    if (xParking && !supportsXParkingLocation(destination))
+      throw new Error('X Parking is unavailable at the requested location for ' + key);
+    if (!destination && xParking) throw new Error('X Parking requires a numbered destination.');
+    if (destination && !isLiveGarageContainer(destination)) {
+      const slot = locationKey(destination.id) + (xParking ? ':X' : ':regular');
+      if (reservedSlots.has(slot)) throw new Error('Two imported vehicles target the same parking position: ' + destination.zone + '-' + destination.bayNumber);
+      reservedSlots.add(slot);
+    }
+    targets.push({plate:key,key,destination,xParking,displaced:false});
+  }
+  // Existing occupants absent from the sheet are moved to Unassigned Bay only
+  // when a reviewed import explicitly permits collision relocation.
+  const extra = new Set<string>();
+  for (const target of targets) {
+    if (!target.destination || isLiveGarageContainer(target.destination)) continue;
+    const occupants = vehicles.filter(v => active(v) && plateKey(v.plateNumber) !== target.key &&
+      locationKey(v.currentLocationId) === locationKey(target.destination?.id) &&
+      (v.xParking === 'Yes') === target.xParking);
+    for (const occupant of occupants) {
+      const key = plateKey(occupant.plateNumber);
+      if (requested.has(key) || extra.has(key)) continue; // The sheet supplies their final destination.
+      if (!options.relocateOccupants) throw new Error('Destination occupied by ' + occupant.plateNumber);
+      extra.add(key);
+      targets.push({plate:key,key,destination:undefined,xParking:false,displaced:true});
+    }
+  }
   const now = new Date().toISOString();
-  const find = (key: string) => next.find(v => plateKey(v.plateNumber) === key && occupied(v))
-    ?? next.find(v => plateKey(v.plateNumber) === key);
-  const currentOccupants = (bayId: string, x: boolean) =>
-    next.filter(v => occupied(v) && parkingRecordKey(v.currentLocationId) === parkingRecordKey(bayId) && (v.xParking === 'Yes') === x);
-  const place = (plate: string, bayId: string | undefined, x: boolean) => {
-    const key = plateKey(plate);
-    if (!key || key.length < 3 || key.length > 20) throw new Error('Invalid vehicle registration: ' + plate);
-    const existing = find(key);
-    if (!existing && !options.allowCreate) throw new Error('Vehicle ' + key + ' is not registered. Review its details before importing.');
-    const location = bayId ? locations.find(loc => parkingRecordKey(loc.id) === parkingRecordKey(bayId)) : undefined;
-    if (bayId && !location) throw new Error('Unknown bay for ' + key);
-    if (location && (location.status === 'Reserved' || location.status === 'Maintenance'))
-      throw new Error('Bay ' + location.zone + '-' + location.bayNumber + ' is blocked.');
-    if (x && (!location || !supportsXParkingLocation(location)))
-      throw new Error('X Parking is not available for ' + key + '.');
-    if (location?.zone === 'Unassigned Bay') { bayId = undefined; x = false; }
-    if (location && !isLiveGarageContainer(location)) {
-      const occupants = currentOccupants(location.id, x).filter(v => v.id !== existing?.id);
-      if (occupants.length) {
-        if (!options.relocateOccupants) throw new Error('Bay occupied by ' + occupants.map(v => v.plateNumber).join(', '));
-        for (const occupant of occupants) place(occupant.plateNumber, undefined, false);
-      }
-    }
-    if (location && isLiveGarageContainer(location)) {
-      const count = next.filter(v => occupied(v) && parkingRecordKey(v.currentLocationId) === parkingRecordKey(location.id) && v.id !== existing?.id).length;
-      if (count >= location.capacity) throw new Error('Container ' + location.zone + ' is full.');
-    }
-    const previousBay = existing?.currentLocationId;
-    if (existing && parkingRecordKey(previousBay) === parkingRecordKey(bayId) &&
-        (existing.xParking === 'Yes') === x) return;
-    if (!bayId && next.filter(v => unassigned(v, locations)).length >= unassignedCapacity && !unassigned(existing ?? {status:'Delivered'} as Vehicle, locations))
-      throw new Error('Unassigned Bay is full (' + unassignedCapacity + ' slots).');
-    const updated: Vehicle = existing ? { ...existing, currentLocationId: bayId, xParking: x ? 'Yes' : 'No',
-      status: previousBay ? 'Transferred' : 'Assigned', assignedDate: now, assignedBy: actor,
-      operationalStatus: existing.operationalStatus === 'Delivered' || existing.operationalStatus === 'Checked Out' ? 'Checked In' : existing.operationalStatus,
-      deliveredAt: undefined, deliveredBy: undefined, finalParkingBay: undefined,
-      xParkingOccupantPlateNumber: undefined, xParkingOccupantModel: undefined }
-      : { id: 'veh-' + createUUID(), vehicleId: 'VH-' + createUUID().slice(0,8),
-        plateNumber: key, vin: '', brand: '', model: '', color: '', customerName: 'Not provided',
-        status: 'Assigned', currentLocationId: bayId, assignedDate: now, assignedBy: actor,
-        driverOwner: actor, department: 'Workshop intake', xParking: x ? 'Yes' : 'No',
-        operationalStatus: 'Checked In', photoUrls: [], geofenceStatus: 'Unknown', geofenceAlertEnabled: false };
-    if (existing) next.splice(next.findIndex(v => v.id === existing.id), 1, updated);
-    else next.push(updated);
-    changes.push({ vehicle: updated, previous: existing, previousBay, nextBay: bayId,
-      action: existing && previousBay ? 'Transfer' : 'Assign' });
-    // Auto-relocated vehicles may also have a later requested destination in the sheet.
-  };
-  for (const row of rows) place(row.plate, row.bayId, Boolean(row.xParking));
-  const locationsNext = locations.map(loc => {
+  const next = [...vehicles];
+  const changes: ParkingChange[] = [];
+  for (const target of targets) {
+    const previous = find(target.key), bayId = target.destination?.id;
+    if (previous && locationKey(previous.currentLocationId) === locationKey(bayId) &&
+      (previous.xParking === 'Yes') === target.xParking) continue;
+    const nextVehicle: Vehicle = previous
+      ? { ...previous, currentLocationId: bayId, xParking: target.xParking ? 'Yes' : 'No',
+          status: previous.currentLocationId ? 'Transferred' : 'Assigned',
+          operationalStatus: previous.operationalStatus === 'Delivered' || previous.operationalStatus === 'Checked Out'
+            ? 'Checked In' : previous.operationalStatus,
+          assignedDate: now, assignedBy: actor, deliveredAt: undefined, deliveredBy: undefined, finalParkingBay: undefined,
+          xParkingOccupantPlateNumber: undefined, xParkingOccupantModel: undefined }
+      : { id:'veh-'+createUUID(), vehicleId:'VH-'+createUUID().slice(0,8),plateNumber:target.plate,
+          vin:'',brand:'',model:'',color:'',customerName:'Not provided',status:'Assigned',
+          currentLocationId:bayId,assignedDate:now,assignedBy:actor,driverOwner:actor,department:'Workshop intake',
+          xParking:target.xParking ? 'Yes' : 'No',operationalStatus:'Checked In',
+          photoUrls:[],geofenceStatus:'Unknown',geofenceAlertEnabled:false };
+    if (previous) next.splice(next.findIndex(v=>v.id===previous.id),1,nextVehicle);
+    else next.push(nextVehicle);
+    changes.push({vehicle:nextVehicle,previous,previousBay:previous?.currentLocationId,
+      nextBay:bayId,action:previous?.currentLocationId ? 'Transfer' : 'Assign'});
+  }
+  const unassignedCount = next.filter(v => active(v) &&
+    (!v.currentLocationId || byId.get(locationKey(v.currentLocationId))?.zone === 'Unassigned Bay')).length;
+  const unassignedCapacity = locations.filter(loc => loc.zone === 'Unassigned Bay').length;
+  if (unassignedCount > unassignedCapacity)
+    throw new Error('Unassigned Bay capacity exceeded: ' + unassignedCount + ' / ' + unassignedCapacity);
+  for (const loc of locations.filter(isLiveGarageContainer)) {
+    const count = next.filter(v => active(v) && locationKey(v.currentLocationId)===locationKey(loc.id)).length;
+    if (count > loc.capacity) throw new Error(loc.zone + ' container capacity exceeded (' + count + '/' + loc.capacity + ').');
+  }
+  const nextLocations = locations.map(loc => {
     if (loc.status === 'Reserved' || loc.status === 'Maintenance') return loc;
-    const hasVehicle = next.some(v => occupied(v) && v.xParking !== 'Yes' && parkingRecordKey(v.currentLocationId) === parkingRecordKey(loc.id));
+    const hasVehicle = next.some(v => active(v) && v.xParking !== 'Yes' &&
+      locationKey(v.currentLocationId) === locationKey(loc.id));
     return { ...loc, status: hasVehicle ? 'Occupied' as const : 'Available' as const };
   });
-  const movements: Movement[] = changes.map(change => {
-    const from = locations.find(loc => parkingRecordKey(loc.id) === parkingRecordKey(change.previousBay));
-    const to = locations.find(loc => parkingRecordKey(loc.id) === parkingRecordKey(change.nextBay));
-    const label = (loc?: ParkingLocation) => !loc ? 'Unassigned Bay' : loc.zone + (loc.bayNumber ? '-' + loc.bayNumber : '');
-    return { id: 'mov-' + createUUID(), vehicleId: change.vehicle.id,
-      fromLocationId: change.previousBay, toLocationId: change.nextBay,
-      movementType: change.action, actionDateTime: now, performedBy: actor,
-      notes: 'Parking register / batch update',
-      snapshot: { vehicle: { ...change.vehicle, photoUrls: [], photoUploadedAt: undefined },
-        locationLabel: label(to), fromLocationLabel: label(from), toLocationLabel: label(to),
-        assignment: { assignedDate: now, assignedBy: actor, currentLocationId: change.nextBay },
-        action: change.action, fromLocationId: change.previousBay, toLocationId: change.nextBay } };
-  });
-  return { vehicles: next, locations: locationsNext, changes, movements };
+  const label = (id?: string) => {
+    const loc = id ? byId.get(locationKey(id)) : undefined;
+    return loc ? loc.zone + (loc.bayNumber ? '-' + loc.bayNumber : '') : 'Unassigned Bay';
+  };
+  const movements: Movement[] = changes.map(change => ({
+    id:'mov-'+createUUID(),vehicleId:change.vehicle.id,fromLocationId:change.previousBay,
+    toLocationId:change.nextBay,movementType:change.action,actionDateTime:now,performedBy:actor,
+    notes:'Reviewed parking sheet / bulk operation',
+    snapshot:{vehicle:{...change.vehicle,photoUrls:[],photoUploadedAt:undefined},
+      locationLabel:label(change.nextBay),fromLocationLabel:label(change.previousBay),
+      toLocationLabel:label(change.nextBay),assignment:{assignedDate:now,assignedBy:actor,
+        currentLocationId:change.nextBay},action:change.action,
+      fromLocationId:change.previousBay,toLocationId:change.nextBay},
+  }));
+  return {vehicles:next,locations:nextLocations,changes,movements};
 }
