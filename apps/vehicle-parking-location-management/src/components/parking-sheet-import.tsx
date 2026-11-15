@@ -20,6 +20,47 @@ const asZone = (v: string) => {
     unassigned:'Unassigned Bay', unassignedbay:'Unassigned Bay' } as Record<string,string>)[normalized] ?? v;
 };
 const isPlate = (v: string) => /^[A-Z0-9]{3,20}$/.test(normalize(v));
+
+type ScannedRegion = { label: string; image: string };
+async function imageToRegions(file: File): Promise<ScannedRegion[]> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    // High-resolution sections keep individual handwritten registrations legible
+    // and prevent long model responses from being truncated.
+    const landscape = bitmap.width > bitmap.height;
+    const count = landscape ? 3 : 2;
+    const regions: ScannedRegion[] = [];
+    for (let i = 0; i < count; i++) {
+      const axis = landscape ? bitmap.width : bitmap.height;
+      const margin = Math.round(axis * 0.035);
+      const start = Math.max(0, Math.floor(i * axis / count) - margin);
+      const end = Math.min(axis, Math.ceil((i + 1) * axis / count) + margin);
+      const sourceWidth = landscape ? end - start : bitmap.width;
+      const sourceHeight = landscape ? bitmap.height : end - start;
+      const scale = Math.min(1, 2200 / Math.max(sourceWidth, sourceHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+      canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Your browser could not prepare the photograph.');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, landscape ? start : 0, landscape ? 0 : start,
+        sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(value => value ? resolve(value) : reject(new Error('Photo conversion failed.')), 'image/jpeg', 0.86));
+      const data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+        reader.onerror = () => reject(new Error('Could not prepare the photo section.'));
+        reader.readAsDataURL(blob);
+      });
+      regions.push({ label: (landscape ? ['Left', 'Centre', 'Right'] : ['Top', 'Bottom'])[i], image: data });
+    }
+    return regions;
+  } finally { bitmap.close(); }
+}
+
 const csvRows = (text: string): Draft[] => {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   return lines.slice(1).map(line => {
@@ -120,6 +161,8 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
   const [draft,setDraft]=useState<Draft[]>([]);
   const [zone,setZone]=useState('A');
   const [reading,setReading]=useState(false);
+  const [scanProgress,setScanProgress]=useState('');
+  const [scanMode,setScanMode]=useState<'sections'|'single'>('sections');
   const [uploadError,setUploadError]=useState('');
   const [moveOccupants,setMoveOccupants]=useState(true);
   const [confirmed,setConfirmed]=useState(false);
@@ -127,7 +170,7 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
   const update=(i:number,patch:Partial<Draft>)=>{setDraft(old=>old.map((row,j)=>i===j?{...row,...patch}:row));setConfirmed(false);};
   const ingest=async(e:ChangeEvent<HTMLInputElement>)=>{
     const file=e.target.files?.[0];e.target.value='';if(!file)return;
-    setReading(true);setConfirmed(false);setUploadError('');setDraft([]);
+    setReading(true);setConfirmed(false);setUploadError('');setDraft([]);setScanProgress('');
     try{
       if(/\.csv$/i.test(file.name)){
         const imported=csvRows(await file.text());
@@ -136,38 +179,54 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
       }else if(/\.xlsx$/i.test(file.name)){
         setDraft(await parseTemplateXlsx(file));
       }else if(file.type.startsWith('image/')){
-        if(file.size>4*1024*1024)throw new Error('Image too large. Use a photo smaller than 4 MB.');
         if(!supabase)throw new Error('AI scanning requires a live cloud connection.');
-        const base64=await new Promise<string>((resolve,reject)=>{
-          const reader=new FileReader();
-          reader.onload=()=>resolve(String(reader.result).split(',')[1]||'');
-          reader.onerror=()=>reject(new Error('Could not open the image.'));
-          reader.readAsDataURL(file);
-        });
-        const { data,error }=await supabase.functions.invoke('parking-sheet-ocr',{
-          body:{ image:base64,mimeType:file.type,zone },
-        });
-        if(error) {
-          const context=error as {context?:Response;message?:string};
-          let detail='';
-          if(context.context && typeof context.context.json==='function') {
-            try { const responseBody=await context.context.json() as {error?:string};detail=responseBody.error||''; }
-            catch { /* Preserve original network error below. */ }
+        if(file.size>18*1024*1024)throw new Error('Photo too large. Use an image smaller than 18 MB.');
+        const regions = scanMode === 'sections' ? await imageToRegions(file) : [{
+          label:'Full photo', image: await new Promise<string>((resolve,reject)=>{
+            const reader=new FileReader();
+            reader.onload=()=>resolve(String(reader.result).split(',')[1]||'');
+            reader.onerror=()=>reject(new Error('Could not open the image.'));
+            reader.readAsDataURL(file);
+          })
+        }];
+        const collected:Draft[]=[];
+        for(let i=0;i<regions.length;i++){
+          const region=regions[i];
+          setScanProgress('Scanning '+region.label+' section ('+(i+1)+'/'+regions.length+')');
+          const {data,error}=await supabase.functions.invoke('parking-sheet-ocr',{
+            body:{image:region.image,mimeType:scanMode==='sections'?'image/jpeg':file.type,zone}
+          });
+          if(error){
+            const context=error as {context?:Response;message?:string};
+            let detail='';
+            if(context.context && typeof context.context.json==='function'){
+              try { const body=await context.context.json() as {error?:string};detail=body.error||''; }
+              catch { /* Use the original error below. */ }
+            }
+            throw new Error(region.label+': '+(detail||context.message||'Photo recognition failed.'));
           }
-          throw new Error(detail||context.message||'Photo scanning failed. Check your connection or use Excel.');
+          if(data?.error)throw new Error(region.label+': '+String(data.error));
+          if(!Array.isArray(data?.rows))throw new Error(region.label+': Image scanner returned an invalid result.');
+          collected.push(...(data.rows as Array<{plate:string;zone?:string;bay?:string;xParking?:boolean;confidence?:string}>)
+            .map(item=>({plate:String(item.plate||''),zone:asZone(item.zone||zone),bay:String(item.bay||''),
+              xParking:Boolean(item.xParking),confidence:item.confidence})));
         }
-        if(data?.error)throw new Error(String(data.error));
-        const rows=(data?.rows??[]) as Array<{plate:string;zone?:string;bay?:string;xParking?:boolean;confidence?:string}>;
-        if(!Array.isArray(rows))throw new Error('AI returned an invalid sheet scan.');
-        if(!rows.length)throw new Error('AI could not identify vehicle registrations. Use a clearer photo or an Excel sheet. No records were changed.');
-        setDraft(rows.map(item=>({plate:String(item.plate||''),zone:asZone(item.zone||zone),bay:String(item.bay||''),
-          xParking:Boolean(item.xParking),confidence:item.confidence})));
+        // Adjacent crops overlap. Only remove identical repeated registrations in
+        // the same destination; conflicting reads remain visible for human review.
+        const unique=new Map<string,Draft>();
+        for(const row of collected){
+          const key=normalize(row.plate)+'|'+row.zone+'|'+row.bay+'|'+String(row.xParking);
+          const previous=unique.get(key);
+          if(!previous || (previous.confidence==='low' && row.confidence!=='low'))unique.set(key,row);
+        }
+        if(!unique.size)throw new Error('No clear registration readings. Try a better photo or import the Excel register. No vehicles changed.');
+        setDraft([...unique.values()]);
       }else throw new Error('Use JPG, PNG, CSV, or the VPLM XLSX template.');
     }catch(err){
       const message=err instanceof Error?err.message:'Could not read the parking sheet.';
       setUploadError(message);toast.error(message);
     }
-    finally{setReading(false);}
+    finally{setReading(false);setScanProgress('');}
   };
   const resolveBay=(row:Draft)=>{
     if(row.zone==='Unassigned Bay')return undefined;
@@ -175,8 +234,10 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
       (row.bay.trim() ? loc.bayNumber===row.bay.trim().padStart(2,'0') :
         isLiveGarageContainer(loc)))?.id;
   };
-  const invalid=draft.filter(row=>!isPlate(row.plate) || (row.zone!=='Unassigned Bay' &&
-    (!zoneNames.includes(row.zone) || !resolveBay(row))));
+  const duplicatePlates=new Set(draft.filter((row,i)=>draft.some((other,j)=>j!==i &&
+    normalize(other.plate)===normalize(row.plate))).map(row=>normalize(row.plate)));
+  const invalid=draft.filter(row=>!isPlate(row.plate) || duplicatePlates.has(normalize(row.plate)) ||
+    (row.zone!=='Unassigned Bay' && (!zoneNames.includes(row.zone) || !resolveBay(row))));
   const apply=()=>{
     if(disabled||!confirmed||invalid.length)return;
     const rows=draft.map(row=>({plate:normalize(row.plate),bayId:resolveBay(row),xParking:row.xParking}));
@@ -190,12 +251,18 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
         {zoneNames.map(name=><option value={name} key={name}>{parkingZoneLabel(name)}</option>)}
         <option value="Unassigned Bay">Unassigned Bay</option>
       </select></label>
+      <label className="text-sm">Photo scanning
+        <select className="ml-2 rounded border p-2" value={scanMode} onChange={e=>setScanMode(e.target.value as 'sections'|'single')}>
+          <option value="sections">Read in sections (recommended)</option>
+          <option value="single">Read entire photo</option>
+        </select>
+      </label>
       <input type="file" accept=".xlsx,.csv,image/png,image/jpeg,image/webp" onChange={e=>void ingest(e)} disabled={disabled||reading} aria-label="Upload parking sheet" />
     </div>
-    {reading&&<p role="status">Reading the sheet…</p>}
+    {reading&&<p role="status">{scanProgress||'Preparing the sheet…'}</p>}
     {uploadError&&<p role="alert" className="rounded border border-red-400 bg-red-950/20 p-3 text-sm text-red-600 dark:text-red-300">{uploadError} Existing parking records remain unchanged.</p>}
     {draft.length>0&&<>
-      <p className="text-sm font-medium">{draft.length} entries scanned. {invalid.length} require correction. Manual-entry vehicles must use the Unassigned Bay zone.</p>
+      <p className="text-sm font-medium">{draft.length} entries scanned. {invalid.length} require correction. Duplicated vehicle readings must be corrected or removed. Manual entries must use Unassigned Bay.</p>
       <div className="max-h-96 overflow-auto rounded border">
         <table className="w-full min-w-[580px] text-left text-sm"><thead><tr className="bg-muted">
           <th className="p-2">Vehicle</th><th className="p-2">Zone</th><th className="p-2">Bay</th><th className="p-2">X</th><th className="p-2">Reading</th><th className="p-2"></th>
