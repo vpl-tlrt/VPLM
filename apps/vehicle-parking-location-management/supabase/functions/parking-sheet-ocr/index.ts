@@ -41,6 +41,8 @@ Deno.serve(async req=>{
     const models=[...new Set([
       Deno.env.get('GEMINI_MODEL')||'gemini-2.5-flash',
       Deno.env.get('GEMINI_FALLBACK_MODEL')||'gemini-3.1-flash-lite',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
     ])];
     const instruction = [
       'Read this handwritten VPLM parking sheet carefully. Return JSON only: {"rows":[{"plate":"...","zone":"...","bay":"...","xParking":false,"confidence":"high|medium|low"}]} .',
@@ -66,7 +68,7 @@ Deno.serve(async req=>{
         console.warn('Parking OCR model unavailable:',model,response.status);
       }catch(error){ console.warn('Parking OCR model network failure:',model,error instanceof Error?error.message:'Unknown'); }
     }
-    if(!response?.ok) return reply({error:'Image recognition is unavailable; upload XLSX/CSV or retry.'},502);
+    if(!response?.ok) return reply({error:'Google image recognition is temporarily unavailable (upstream model errors). Retry the photo later or import XLSX/CSV now. No parking records were changed.'},503);
     const result=await response.json() as {candidates?:Array<{content?:{parts?:Array<{text?:string}>}}>};
     const raw=(result.candidates?.[0]?.content?.parts??[]).map(p=>p.text||'').join('');
     const parsed=JSON.parse(raw) as {rows?:unknown};
