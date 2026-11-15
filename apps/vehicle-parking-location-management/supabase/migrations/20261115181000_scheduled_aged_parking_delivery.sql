@@ -4,6 +4,16 @@
 create schema if not exists vplm_internal;
 revoke all on schema vplm_internal from public, anon, authenticated;
 
+-- Keep a private pre-change snapshot for every automatic delivery run.
+create table if not exists vplm_internal.delivery_run_backups (
+  run_id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  affected_count integer not null,
+  workspace_revision bigint not null,
+  before_state jsonb not null
+);
+revoke all on vplm_internal.delivery_run_backups from public, anon, authenticated;
+
 create or replace function vplm_internal.deliver_overdue_parked_vehicles()
 returns integer
 language plpgsql security definer
@@ -11,6 +21,7 @@ set search_path = pg_catalog
 as $fn$
 declare
   record_state jsonb;
+  previous_revision bigint;
   workspace jsonb;
   vehicles jsonb;
   locations jsonb;
@@ -27,7 +38,7 @@ declare
   stay_since timestamptz;
   count_delivered integer := 0;
 begin
-  select state into record_state
+  select state, revision into record_state, previous_revision
     from public.workspace_state where id = 1 for update;
   if record_state is null or record_state->>'vehicle-parking-browser-state-v2' is null then
     return 0;
@@ -95,6 +106,8 @@ begin
     'movements',new_movements || coalesce(workspace->'movements','[]'::jsonb),
     'auditEvents',new_audits || coalesce(workspace->'auditEvents','[]'::jsonb),
     'savedAt',at_time);
+  insert into vplm_internal.delivery_run_backups(affected_count, workspace_revision, before_state)
+    values (count_delivered, previous_revision, record_state);
   record_state := jsonb_set(record_state,'{vehicle-parking-browser-state-v2}',to_jsonb(workspace::text),true);
   update public.workspace_state set state=record_state, revision=revision+1, updated_at=now()
     where id=1;
