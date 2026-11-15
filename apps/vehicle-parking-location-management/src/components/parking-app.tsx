@@ -424,7 +424,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     item.plateNumber.toLowerCase().includes(normalizedSearch) || item.vin.toLowerCase().includes(normalizedSearch)) : undefined;
 
   const zoneNames = useMemo(() => Array.from(new Set([...locations.map((item: ParkingLocation) => item.zone), 'Unassigned Bay'])).sort(parkingZoneSort), [locations]);
-  const zoneStats = useMemo(() => zoneNames.map((zoneName: string) => {
+  const zoneStats = useMemo(() => zoneNames.filter(zoneName => zoneName !== 'Unassigned Bay').map((zoneName: string) => {
     const bays = locations.filter((item: ParkingLocation) => item.zone === zoneName);
     const used = bays.filter((item: ParkingLocation) => linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
     const percent = bays.length ? Math.round((used / bays.length) * 100) : 0;
