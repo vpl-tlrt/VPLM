@@ -409,10 +409,12 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       return changed ? next : current;
     });
   }, [linkedVehicleLocationIds]);
-  const occupied = locations.filter((item: ParkingLocation) => linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
-  const available = locations.filter((item: ParkingLocation) => item.status === 'Available' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
-  const reserved = locations.filter((item: ParkingLocation) => item.status === 'Reserved' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
-  const utilization = locations.length > 0 ? Math.round((occupied / locations.length) * 100) : 0;
+  // Unassigned slots are overflow holding spaces, not counted in workshop bay KPIs.
+  const countedLocations = locations.filter((item: ParkingLocation) => item.zone !== 'Unassigned Bay');
+  const occupied = countedLocations.filter((item: ParkingLocation) => linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
+  const available = countedLocations.filter((item: ParkingLocation) => item.status === 'Available' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
+  const reserved = countedLocations.filter((item: ParkingLocation) => item.status === 'Reserved' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id))).length;
+  const utilization = countedLocations.length > 0 ? Math.round((occupied / countedLocations.length) * 100) : 0;
   const availableBays = locations.filter((item: ParkingLocation) => item.zone === zone && (containerCanAccept(item) || (item.status === 'Available' && !linkedVehicleLocationIds.has(parkingRecordKey(item.id)))));
   const selectedVehicle = activeVehicles.find((item: Vehicle) => item.id === selectedVehicleId);
   const normalizedSearch = searchQuery.trim().toLowerCase();
@@ -1012,9 +1014,10 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     if (count < 10) return 'usage-coral-red';
     return utilizationColorClass(100 - percent);
   };
-  const totalBays = Math.max(locations.length, 1);
+  const countedBayTotal = locations.filter((item: ParkingLocation) => item.zone !== 'Unassigned Bay').length;
+  const totalBays = Math.max(countedBayTotal, 1);
   const stats = [
-    { label: 'Total bays', value: locations.length, icon: CircleParking, percent: utilization },
+    { label: 'Total bays', value: countedBayTotal, icon: CircleParking, percent: utilization },
     { label: 'Vacant', value: available, icon: MapPin, percent: Math.round((available / totalBays) * 100) },
     { label: 'Occupied', value: occupied, icon: CarFront, percent: utilization },
     { label: 'Reserved', value: reserved, icon: CalendarDays, percent: Math.round((reserved / totalBays) * 100) },
