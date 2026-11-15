@@ -40,7 +40,9 @@ Deno.serve(async req=>{
     if(!apiKey)return reply({error:'GEMINI_API_KEY is not configured. Please use Excel/CSV import.'},503);
     // Fixed bounded model list: a single slow custom model must never make the
     // browser wait through multiple 30-second attempts.
-    const models=['gemini-2.5-flash-lite','gemini-2.5-flash'] as const;
+    // Gemini 2.5 generation is restricted for newer projects and returns 404.
+    // Use current supported models; keep bounded failover for upstream timeouts.
+    const models=['gemini-3.5-flash-lite','gemini-3.8-flash'] as const;
     // Compact line records avoid the large repeated JSON keys that caused truncated
     // model responses on full parking sheets. Reject incomplete output, never partially import.
     const instruction = [
