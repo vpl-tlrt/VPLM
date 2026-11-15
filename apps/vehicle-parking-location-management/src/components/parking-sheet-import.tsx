@@ -22,13 +22,13 @@ const asZone = (v: string) => {
 const isPlate = (v: string) => /^[A-Z0-9]{3,20}$/.test(normalize(v));
 
 type ScannedRegion = { label: string; image: string };
-async function imageToRegions(file: File): Promise<ScannedRegion[]> {
+async function imageToRegions(file: File, mode: 'sections'|'single'): Promise<ScannedRegion[]> {
   const bitmap = await createImageBitmap(file);
   try {
     // High-resolution sections keep individual handwritten registrations legible
     // and prevent long model responses from being truncated.
     const landscape = bitmap.width > bitmap.height;
-    const count = landscape ? 3 : 2;
+    const count = mode === 'single' ? 1 : landscape ? 3 : 2;
     const regions: ScannedRegion[] = [];
     for (let i = 0; i < count; i++) {
       const axis = landscape ? bitmap.width : bitmap.height;
@@ -37,7 +37,7 @@ async function imageToRegions(file: File): Promise<ScannedRegion[]> {
       const end = Math.min(axis, Math.ceil((i + 1) * axis / count) + margin);
       const sourceWidth = landscape ? end - start : bitmap.width;
       const sourceHeight = landscape ? bitmap.height : end - start;
-      const scale = Math.min(1, 2200 / Math.max(sourceWidth, sourceHeight));
+      const scale = Math.min(1, (mode === 'single' ? 1900 : 2200) / Math.max(sourceWidth, sourceHeight));
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.round(sourceWidth * scale));
       canvas.height = Math.max(1, Math.round(sourceHeight * scale));
@@ -55,7 +55,7 @@ async function imageToRegions(file: File): Promise<ScannedRegion[]> {
         reader.onerror = () => reject(new Error('Could not prepare the photo section.'));
         reader.readAsDataURL(blob);
       });
-      regions.push({ label: (landscape ? ['Left', 'Centre', 'Right'] : ['Top', 'Bottom'])[i], image: data });
+      regions.push({ label: mode === 'single' ? 'Full photo' : (landscape ? ['Left', 'Centre', 'Right'] : ['Top', 'Bottom'])[i], image: data });
     }
     return regions;
   } finally { bitmap.close(); }
@@ -181,20 +181,15 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
       }else if(file.type.startsWith('image/')){
         if(!supabase)throw new Error('AI scanning requires a live cloud connection.');
         if(file.size>18*1024*1024)throw new Error('Photo too large. Use an image smaller than 18 MB.');
-        const regions = scanMode === 'sections' ? await imageToRegions(file) : [{
-          label:'Full photo', image: await new Promise<string>((resolve,reject)=>{
-            const reader=new FileReader();
-            reader.onload=()=>resolve(String(reader.result).split(',')[1]||'');
-            reader.onerror=()=>reject(new Error('Could not open the image.'));
-            reader.readAsDataURL(file);
-          })
-        }];
+        // Always resize/compress before invoking Edge Function, including Full photo.
+        // Previously Full photo sent the raw camera file and could exceed request limits.
+        const regions = await imageToRegions(file, scanMode);
         const collected:Draft[]=[];
         for(let i=0;i<regions.length;i++){
           const region=regions[i];
           setScanProgress('Scanning '+region.label+' section ('+(i+1)+'/'+regions.length+')');
           const {data,error}=await supabase.functions.invoke('parking-sheet-ocr',{
-            body:{image:region.image,mimeType:scanMode==='sections'?'image/jpeg':file.type,zone}
+            body:{image:region.image,mimeType:'image/jpeg',zone}
           });
           if(error){
             const context=error as {context?:Response;message?:string};
@@ -203,7 +198,9 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
               try { const body=await context.context.json() as {error?:string};detail=body.error||''; }
               catch { /* Use the original error below. */ }
             }
-            throw new Error(region.label+': '+(detail||context.message||'Photo recognition failed.'));
+            throw new Error(region.label+': '+(detail||(/Failed to send a request/i.test(context.message||'') ?
+              'Network request failed before a response. The photo was compressed; check connectivity and try Read in sections.' :
+              context.message||'Photo recognition failed.')));
           }
           if(data?.error)throw new Error(region.label+': '+String(data.error));
           if(!Array.isArray(data?.rows))throw new Error(region.label+': Image scanner returned an invalid result.');
