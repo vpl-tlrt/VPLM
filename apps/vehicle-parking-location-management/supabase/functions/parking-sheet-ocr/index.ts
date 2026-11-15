@@ -42,6 +42,16 @@ Deno.serve(async req=>{
       Deno.env.get('GEMINI_MODEL')||'gemini-2.5-flash',
       Deno.env.get('GEMINI_FALLBACK_MODEL')||'gemini-3.1-flash-lite',
     ])];
+    const instruction = [
+      'Read this handwritten VPLM parking sheet carefully. Return JSON only: {"rows":[{"plate":"...","zone":"...","bay":"...","xParking":false,"confidence":"high|medium|low"}]} .',
+      'Each handwritten vehicle number is a registration plate. Never invent or complete unreadable characters; omit unreadable entries.',
+      'Printed bay numbers identify destinations, not vehicle registrations. The handwritten plate beside a numbered bay belongs to that bay.',
+      'If the sheet has an X Parking column, a plate in that column uses the same numbered bay with xParking=true.',
+      'Any handwritten registration in a MANUAL ENTRY area must have zone="Unassigned Bay", bay="", xParking=false.',
+      'For ordinary rows use the supplied zone unless the sheet explicitly names a different zone. Zone supplied: ' + zone,
+      'Ignore headings, dates, row indices, blank cells and printed example text. Never treat section headings as parking zones.',
+      'Return one row per clearly visible vehicle registration. Set confidence=low for uncertain readings and require human verification.'
+    ].join(' ');
     const requestBody=JSON.stringify({contents:[{role:'user',parts:[{text:instruction},
       {inlineData:{mimeType,data:image}}]}],
       generationConfig:{temperature:0,maxOutputTokens:5000,responseMimeType:'application/json'}});
