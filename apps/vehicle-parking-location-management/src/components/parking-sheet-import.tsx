@@ -1,7 +1,7 @@
 import { useState, type ChangeEvent } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import { parkingZoneLabel, type ParkingLocation } from '@/lib/parking-data';
+import { isLiveGarageContainer, parkingZoneLabel, type ParkingLocation } from '@/lib/parking-data';
 import { type ParkingImportRow } from '@/lib/parking-batch';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -152,12 +152,13 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
     finally{setReading(false);}
   };
   const resolveBay=(row:Draft)=>{
-    if(row.zone==='Unassigned Bay'||!row.bay.trim())return undefined;
+    if(row.zone==='Unassigned Bay')return undefined;
     return locations.find(loc=>loc.zone===row.zone &&
-      (loc.bayNumber===row.bay.trim().padStart(2,'0') || (!loc.bayNumber && !row.bay.trim())))?.id;
+      (row.bay.trim() ? loc.bayNumber===row.bay.trim().padStart(2,'0') :
+        isLiveGarageContainer(loc)))?.id;
   };
   const invalid=draft.filter(row=>!isPlate(row.plate) || (row.zone!=='Unassigned Bay' &&
-    (!zoneNames.includes(row.zone) || (row.bay.trim() && !resolveBay(row)))));
+    (!zoneNames.includes(row.zone) || !resolveBay(row))));
   const apply=()=>{
     if(disabled||!confirmed||invalid.length)return;
     const rows=draft.map(row=>({plate:normalize(row.plate),bayId:resolveBay(row),xParking:row.xParking}));
@@ -175,7 +176,7 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
     </div>
     {reading&&<p role="status">Reading the sheet…</p>}
     {draft.length>0&&<>
-      <p className="text-sm font-medium">{draft.length} entries scanned. {invalid.length} require correction. Empty bay = Unassigned Bay.</p>
+      <p className="text-sm font-medium">{draft.length} entries scanned. {invalid.length} require correction. Manual-entry vehicles must use the Unassigned Bay zone.</p>
       <div className="max-h-96 overflow-auto rounded border">
         <table className="w-full min-w-[580px] text-left text-sm"><thead><tr className="bg-muted">
           <th className="p-2">Vehicle</th><th className="p-2">Zone</th><th className="p-2">Bay</th><th className="p-2">X</th><th className="p-2">Reading</th><th className="p-2"></th>
