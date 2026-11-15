@@ -81,7 +81,7 @@ const createParkingLayout = (): ParkingLocation[] => {
     remarks: name === 'Workshop Centre Bay' ? 'Urgent / Top Priority Vehicles Only; no bay number.' : name === 'Manager Parking' ? 'Manager Parking · 10 spaces; no bay numbers.' : 'Live Parking Garage container; no bay number.',
   }));
 
-  const unassignedSlots: ParkingLocation[] = Array.from({ length: 40 }, (_, index) => ({
+  const unassignedSlots: ParkingLocation[] = Array.from({ length: 200 }, (_, index) => ({
     id: `loc-unassigned-slot-${String(index + 1).padStart(2, '0')}`,
     zone: 'Unassigned Bay',
     bayNumber: '',
