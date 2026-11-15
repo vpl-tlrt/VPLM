@@ -38,12 +38,9 @@ Deno.serve(async req=>{
     if(zone.length>80)return reply({error:'Invalid parking zone.'},400);
     const apiKey=Deno.env.get('GEMINI_API_KEY');
     if(!apiKey)return reply({error:'GEMINI_API_KEY is not configured. Please use Excel/CSV import.'},503);
-    const models=[...new Set([
-      Deno.env.get('GEMINI_MODEL')||'gemini-2.5-flash',
-      Deno.env.get('GEMINI_FALLBACK_MODEL')||'gemini-3.1-flash-lite',
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
-    ])];
+    // Fixed bounded model list: a single slow custom model must never make the
+    // browser wait through multiple 30-second attempts.
+    const models=['gemini-2.5-flash-lite','gemini-2.5-flash'] as const;
     // Compact line records avoid the large repeated JSON keys that caused truncated
     // model responses on full parking sheets. Reject incomplete output, never partially import.
     const instruction = [
@@ -63,17 +60,25 @@ Deno.serve(async req=>{
       {inlineData:{mimeType,data:image}}]}],
       generationConfig:{temperature:0,maxOutputTokens:12000,responseMimeType:'text/plain'}});
     let response:Response|null=null;
+    let lastFailure='No response';
+    const deadline=Date.now()+35000;
     for(const model of models){
+      const remaining=deadline-Date.now();
+      if(remaining<2500)break;
       try{
         response=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent',{
           method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},
-          body:requestBody,signal:AbortSignal.timeout(30000),
+          body:requestBody,signal:AbortSignal.timeout(Math.min(18000,remaining)),
         });
         if(response.ok)break;
+        lastFailure=model+' returned HTTP '+response.status;
         console.warn('Parking OCR model unavailable:',model,response.status);
-      }catch(error){ console.warn('Parking OCR model network failure:',model,error instanceof Error?error.message:'Unknown'); }
+      }catch(error){
+        lastFailure=model+' timed out or could not connect';
+        console.warn('Parking OCR model network failure:',model,error instanceof Error?error.message:'Unknown');
+      }
     }
-    if(!response?.ok) return reply({error:'Google image recognition is temporarily unavailable (upstream model errors). Retry the photo later or import XLSX/CSV now. No parking records were changed.'},503);
+    if(!response?.ok) return reply({error:'OCR service unavailable: '+lastFailure+'. Try Read in sections or Excel import. No vehicle records changed.'},503);
     const result=await response.json() as {candidates?:Array<{
       finishReason?:string; content?:{parts?:Array<{text?:string}>}
     }>};
