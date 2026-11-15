@@ -253,7 +253,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const downloadCurrentVehicleLocations = () => {
     // Two-column, Excel-compatible export; use the zone-qualified bay label
     // so Workshop 01 and Accommodation A01 cannot be confused.
-    const quote = (value: string) => '"' + (/^[=+@\\-\\t\\r]/.test(value) ? "'" + value : value).replace(/"/g, '""') + '"';
+    const quote = (value: string) => '"' + (/^[=+@\-\t\r]/.test(value) ? "'" + value : value).replace(/"/g, '""') + '"';
     const locationFor = (vehicle: Vehicle) => locations.find((item: ParkingLocation) =>
       parkingRecordKey(item.id) === parkingRecordKey(vehicle.currentLocationId));
     const rows = vehicles
@@ -267,8 +267,8 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       })
       .sort((a, b) => a.bayLabel.localeCompare(b.bayLabel, undefined, { numeric: true }) ||
         a.plate.localeCompare(b.plate, undefined, { numeric: true }));
-    const content = '\\uFEFF' + ['Bay Number,Vehicle Number',
-      ...rows.map(row => [quote(row.bayLabel), quote(row.plate)].join(','))].join('\\r\\n');
+    const content = '\uFEFF' + ['Bay Number,Vehicle Number',
+      ...rows.map(row => [quote(row.bayLabel), quote(row.plate)].join(','))].join('\r\n');
     const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8;' }));
     const link = document.createElement('a');
     link.href = url;
