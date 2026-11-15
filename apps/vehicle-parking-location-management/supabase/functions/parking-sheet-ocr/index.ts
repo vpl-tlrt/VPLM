@@ -83,9 +83,9 @@ Deno.serve(async req=>{
       return reply({error:'The sheet contains too many entries for one photo. Photograph each half separately and upload both. No parking data was changed.'},422);
     }
     const rows:Array<{plate:string;zone:string;bay:string;xParking:boolean;confidence:string}> = [];
-    for(const line of raw.split(/\\r?\\n/)) {
+    for(const line of raw.split(/\r?\n/)) {
       if(!line.trim())continue;
-      const fields=line.replace(/^[-*]\\s*/, '').trim().split('|').map(value=>value.trim());
+      const fields=line.replace(/^[-*]\s*/, '').trim().split('|').map(value=>value.trim());
       if(fields.length!==5 || !/^[A-Za-z0-9 -]{3,30}$/.test(fields[0]))continue;
       if(!/^(YES|NO)$/i.test(fields[3]))continue;
       if(!/^(high|medium|low)$/i.test(fields[4]))continue;
