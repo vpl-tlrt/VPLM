@@ -422,7 +422,34 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
           <td className="p-1">{row.confidence||'Review'}</td>
           <td className="p-1"><button type="button" onClick={()=>{setDraft(old=>old.filter((_,j)=>i!==j));setConfirmed(false);}}>Remove</button></td>
         </tr>)}</tbody></table></div>
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={moveOccupants} onChange={e=>setMoveOccupants(e.target.checked)}/> Relocate occupied-bay vehicles to Unassigned Bay</label>
+      <div className="space-y-3 rounded-md border p-3 text-sm">
+        <p className="font-semibold">Live parking reconciliation preview</p>
+        <p>{suggestions.filter(item=>item.exact.length>0).length} exact registrations · {suggestions.filter(item=>item.similar.length>0).length} possible OCR mismatches · {new Set(destinationOccupants.map(item=>item.id)).size} destination occupants not on the list</p>
+        {suggestions.map((entry,i)=>entry.similar.length>0&&<div key={i} className="flex flex-wrap items-center gap-2 rounded border p-2">
+          <span className="font-mono font-semibold">OCR: {draft[i].plate}</span>
+          <label className="sr-only" htmlFor={'ocr-match-'+i}>Review OCR registration {draft[i].plate}</label>
+          <select id={'ocr-match-'+i} className="max-w-full rounded border bg-background p-2"
+            value={reviewedSuggestions.has(i)?'reviewed':''}
+            onChange={e=>{
+              const value=e.target.value;
+              if(value==='reviewed'){setReviewedSuggestions(old=>new Set(old).add(i));setConfirmed(false);}
+              else if(value){update(i,{plate:value});setReviewedSuggestions(old=>new Set(old).add(i));}
+            }}>
+            <option value="">Choose possible existing match…</option>
+            {entry.similar.map(item=><option key={item.id} value={item.plateNumber}>Use {item.plateNumber} ({item.currentLocationId||'Unassigned Bay'})</option>)}
+            <option value="reviewed">Keep OCR number; no match</option>
+          </select>
+        </div>)}
+        {destinationOccupants.length>0&&<p>Occupied destination vehicles for proposed relocation: {Array.from(new Set(destinationOccupants.map(item=>item.plateNumber))).join(', ')}</p>}
+        <label className="flex items-start gap-2">
+          <input type="checkbox" checked={completeZone} onChange={e=>{setCompleteZone(e.target.checked);setConfirmed(false);}} />
+          <span><strong>Complete-zone reconciliation</strong> — I confirm this OCR list contains every parked vehicle in the selected source zone. Propose moving unlisted vehicles to Unassigned Bay.</span>
+        </label>
+        <p>{missingFromZone.length} currently parked vehicle(s) in {parkingZoneLabel(zone)} do not appear in this OCR list. {completeZone?'These will be added to the transfer proposal.':'These will NOT be moved.'}</p>
+        {completeZone&&missingFromZone.length>0&&<p className="break-words font-mono text-xs">Missing: {missingFromZone.map(item=>item.plateNumber).join(', ')}</p>}
+        {completeZone&&draft.some(item=>item.zone!==zone)&&<p role="alert" className="font-medium text-destructive">Complete-zone mode requires every OCR row to use the selected source zone.</p>}
+      </div>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={moveOccupants} onChange={e=>{setMoveOccupants(e.target.checked);setConfirmed(false);}}/> Relocate occupied-bay vehicles to Unassigned Bay</label>
       {!moveOccupants&&<p className="text-xs">Occupied bays will be rejected during validation.</p>}
       <p className="text-sm font-semibold">Step 3 — Confirm and apply only after checking every row.</p>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
