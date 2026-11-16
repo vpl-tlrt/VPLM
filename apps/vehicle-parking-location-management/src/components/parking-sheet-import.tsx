@@ -1,7 +1,7 @@
 import { useState, type ChangeEvent } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import { isLiveGarageContainer, parkingZoneLabel, type ParkingLocation } from '@/lib/parking-data';
+import { isLiveGarageContainer, parkingZoneLabel, parkingRecordKey, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import { type ParkingImportRow } from '@/lib/parking-batch';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -155,10 +155,13 @@ async function parseTemplateXlsx(file: File): Promise<Draft[]> {
   return output;
 }
 
-export function ParkingSheetImport({ locations,onApply,disabled=false }:{
-  locations: ParkingLocation[]; onApply:(rows:ParkingImportRow[],relocateOccupants:boolean)=>boolean; disabled?:boolean;
+export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }:{
+  locations: ParkingLocation[]; vehicles: Vehicle[]; onApply:(rows:ParkingImportRow[],relocateOccupants:boolean)=>boolean; disabled?:boolean;
 }){
   const [draft,setDraft]=useState<Draft[]>([]);
+  const [pastedText,setPastedText]=useState('');
+  const [completeZone,setCompleteZone]=useState(false);
+  const [reviewedSuggestions,setReviewedSuggestions]=useState<Set<number>>(new Set());
   const [zone,setZone]=useState('A');
   const [reading,setReading]=useState(false);
   const [scanProgress,setScanProgress]=useState('');
@@ -169,7 +172,28 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
   const [moveOccupants,setMoveOccupants]=useState(true);
   const [confirmed,setConfirmed]=useState(false);
   const zoneNames=[...new Set(locations.map(loc=>loc.zone))].filter(name=>name!=='Unassigned Bay');
-  const update=(i:number,patch:Partial<Draft>)=>{setDraft(old=>old.map((row,j)=>i===j?{...row,...patch}:row));setConfirmed(false);};
+  const update=(i:number,patch:Partial<Draft>)=>{setDraft(old=>old.map((row,j)=>i===j?{...row,...patch}:row));setConfirmed(false);setReviewedSuggestions(old=>{const n=new Set(old);n.delete(i);return n;});};
+  const parseCopiedList=()=>{
+    const lines=pastedText.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
+    const result:Draft[]=[];
+    for(const line of lines){
+      if (/vehicle\s*(number|no)|parking\s*slot/i.test(line)) continue;
+      const columns=line.split(/\t+|\s{2,}|\s*[,;|]\s*/).map(s=>s.trim()).filter(Boolean);
+      let plate=columns[0], bay=columns[1];
+      if (columns.length===1) {
+        const matched=line.match(/^([A-Z0-9-]+)\s+(\d{1,3})$/i);
+        if(matched){plate=matched[1];bay=matched[2];}
+      }
+      if(!plate || !bay || !/^\d+$/.test(bay)) {
+        toast.error('Unrecognized line: '+line.slice(0,60)+'. Use Vehicle Number and Parking Slot columns.');return;
+      }
+      result.push({plate:normalize(plate),zone,bay,xParking:false,confidence:'Copied OCR'});
+    }
+    if(!result.length)return toast.error('Paste vehicle numbers and parking slots first.');
+    setDraft(result);setScanIncomplete(false);setUploadError('');setConfirmed(false);setCompleteZone(false);
+    setReviewedSuggestions(new Set());setMoveOccupants(true);
+    setScanMessage(result.length+' copied OCR rows ready. Review matches and displaced vehicles before applying.');
+  };
   const startManualReview=()=>{
     if(reading||disabled)return;
     // Explicit manual fallback: do not mix unfinished photo scan entries with new records.
@@ -252,16 +276,51 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
       (row.bay.trim() ? loc.bayNumber===row.bay.trim().padStart(2,'0') :
         isLiveGarageContainer(loc)))?.id;
   };
+  const activeInZone=vehicles.filter(v=>v.status!=='Delivered' && v.status!=='Released' &&
+    locations.some(loc=>loc.zone===zone && parkingRecordKey(loc.id)===parkingRecordKey(v.currentLocationId)));
+  const normalizedPlates=new Set(draft.map(r=>normalize(r.plate)));
+  const missingFromZone=activeInZone.filter(v=>!normalizedPlates.has(normalize(v.plateNumber)));
+  const similarity=(a:string,b:string)=>{
+    if(a===b)return 0;
+    const d=Array.from({length:b.length+1},(_,i)=>i);
+    for(let i=1;i<=a.length;i++){
+      let prev=d[0];d[0]=i;
+      for(let j=1;j<=b.length;j++){const saved=d[j];d[j]=Math.min(d[j]+1,d[j-1]+1,prev+(a[i-1]===b[j-1]?0:1));prev=saved;}
+    }
+    return d[b.length];
+  };
+  const suggestions=draft.map(row=>{
+    const p=normalize(row.plate);
+    const exact=vehicles.filter(v=>normalize(v.plateNumber)===p && v.status!=='Delivered');
+    if(exact.length)return {exact,similar:[] as Vehicle[]};
+    const similar=vehicles.filter(v=>v.status!=='Delivered' && similarity(p,normalize(v.plateNumber))<=2)
+      .sort((a,b)=>similarity(p,normalize(a.plateNumber))-similarity(p,normalize(b.plateNumber))).slice(0,5);
+    return {exact,similar};
+  });
+  const unresolvedMatches=suggestions.some((s,i)=>s.similar.length>0 && !reviewedSuggestions.has(i));
+  const destinationOccupants=draft.flatMap(row=>{
+    const id=resolveBay(row);
+    if(!id)return [];
+    return vehicles.filter(v=>v.status!=='Delivered' && v.status!=='Released' &&
+      parkingRecordKey(v.currentLocationId)===parkingRecordKey(id) && normalize(v.plateNumber)!==normalize(row.plate) &&
+      (v.xParking==='Yes')===row.xParking && !normalizedPlates.has(normalize(v.plateNumber)));
+  });
   const duplicatePlates=new Set(draft.filter((row,i)=>draft.some((other,j)=>j!==i &&
     normalize(other.plate)===normalize(row.plate))).map(row=>normalize(row.plate)));
   const invalid=draft.filter(row=>!isPlate(row.plate) || duplicatePlates.has(normalize(row.plate)) ||
     (row.zone!=='Unassigned Bay' && (!zoneNames.includes(row.zone) || !resolveBay(row))));
   const apply=()=>{
     if(disabled||!confirmed||invalid.length||scanIncomplete||reading||!draft.length)return;
-    const rows=draft.map(row=>({plate:normalize(row.plate),bayId:resolveBay(row),xParking:row.xParking}));
+    if(unresolvedMatches)return toast.error('Review every possible OCR match first.');
+    const additions=completeZone ? missingFromZone.map(v=>({plate:normalize(v.plateNumber)})) : [];
+    if(completeZone && draft.some(row=>row.zone!==zone))return toast.error('A complete-zone reconciliation can only include the selected zone.');
+    const rows=[...draft.map(row=>({plate:normalize(row.plate),bayId:resolveBay(row),xParking:row.xParking})),...additions];
+    if(completeZone && !window.confirm('COMPLETE ZONE CONFIRMATION: Move '+missingFromZone.length+
+      ' vehicles missing from the OCR list in '+parkingZoneLabel(zone)+' to Unassigned Bay, in addition to the '+draft.length+
+      ' reviewed entries? This requires a verified complete zone list.'))return;
     if(onApply(rows,moveOccupants)){setDraft([]);setConfirmed(false);setScanMessage('Parking updates were staged. Verify their cloud status on the live parking map.');}
   };
-  return <Card><CardHeader><CardTitle>Photo / Excel Parking Import</CardTitle>
+  return <Card><CardHeader><CardTitle>Photo / Excel / Copilot OCR Parking Import</CardTitle>
     <CardDescription>Admin and Supervisor only. Scan a photographed sheet, upload the VPLM XLSX register, or import CSV (vehicle,zone,bay,x). Review every row before changing MAIN.</CardDescription>
     </CardHeader><CardContent className="space-y-3">
     <div className="flex flex-wrap items-center gap-3">
@@ -301,7 +360,7 @@ export function ParkingSheetImport({ locations,onApply,disabled=false }:{
       <p className="text-sm font-semibold">Step 3 — Confirm and apply only after checking every row.</p>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
         I have verified vehicle registrations, bays, X positions and authorization for {draft.length} updates.</label>
-      <Button type="button" disabled={disabled||!confirmed||invalid.length>0||scanIncomplete||reading||!draft.length} onClick={apply}>Apply reviewed parking updates</Button>
+      <Button type="button" disabled={disabled||!confirmed||invalid.length>0||unresolvedMatches||scanIncomplete||reading||!draft.length} onClick={apply}>Apply reviewed parking updates</Button>
     </>}
   </CardContent></Card>;
 }
