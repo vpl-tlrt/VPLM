@@ -679,7 +679,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     if (!window.confirm('Move ALL ' + target.length + ' parked vehicles into Unassigned Bay? Their original bays will be released and a movement recorded for each.')) return;
     commitParkingBatch(target.map(v => ({ plate: v.plateNumber })), false, false);
   };
-  const bulkTransferZones = Array.from(new Set(locations.filter(l => l.zone !== 'Unassigned Bay' && isLiveGarageContainer(l)).map(l => l.zone))).sort(parkingZoneSort);
+  const bulkTransferZones = Array.from(new Set(locations.filter(l => l.zone !== 'Unassigned Bay').map(l => l.zone))).sort(parkingZoneSort);
   const zoneBulkTargets = activeVehicles.filter(v => v.status !== 'Released' && v.currentLocationId &&
     locations.some(l => parkingRecordKey(l.id) === parkingRecordKey(v.currentLocationId) && l.zone === bulkTransferZone));
   const handleZoneBulkUnassign = async () => {
