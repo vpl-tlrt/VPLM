@@ -280,6 +280,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     toast.success('Downloaded ' + rows.length + ' vehicle locations with Bay Number and Vehicle Number only.');
   };
   const [zone, setZone] = useState('Unassigned Bay');
+  const [bulkTransferZone, setBulkTransferZone] = useState('');
   const [assignmentVehicle, setAssignmentVehicle] = useState<VehicleFormData>(emptyVehicleForm);
   const [bayId, setBayId] = useState('');
   const [selectedVehicleId, setSelectedVehicleId] = useState('');
@@ -678,6 +679,28 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
     if (!window.confirm('Move ALL ' + target.length + ' parked vehicles into Unassigned Bay? Their original bays will be released and a movement recorded for each.')) return;
     commitParkingBatch(target.map(v => ({ plate: v.plateNumber })), false, false);
   };
+  const bulkTransferZones = Array.from(new Set(locations.filter(l => l.zone !== 'Unassigned Bay' && isLiveGarageContainer(l)).map(l => l.zone))).sort(parkingZoneSort);
+  const zoneBulkTargets = activeVehicles.filter(v => v.status !== 'Released' && v.currentLocationId &&
+    locations.some(l => parkingRecordKey(l.id) === parkingRecordKey(v.currentLocationId) && l.zone === bulkTransferZone));
+  const handleZoneBulkUnassign = async () => {
+    if (!canManage || !canTransferVehicle) return toast.error('Only Admin or Supervisor can perform a bulk transfer.');
+    if (!bulkTransferZone || !bulkTransferZones.includes(bulkTransferZone)) return toast.error('Choose a valid source zone.');
+    if (!supabase || offlineReadOnly || !hasPublishedSnapshot || !navigator.onLine) return toast.error('MAIN cloud must be connected and idle.');
+    const target = zoneBulkTargets;
+    if (!target.length) return toast.info('No parked vehicles in this zone need transfer.');
+    const running = new Set(loadRoadTests().filter(t => t.status === 'In Road Test').map(t => t.vehicleId));
+    if (target.some(v => running.has(v.id) || v.operationalStatus === 'Checked Out')) {
+      return toast.error('Some vehicles in this zone are in a road test or checked out. Complete those workflows first.');
+    }
+    const { data: pickups, error } = await supabase.from('pickup_requests').select('vehicle_id,status')
+      .in('status', ['Requested', 'Accepted', 'In Transit']);
+    if (error) return toast.error('Could not verify pending pickups. No vehicles moved.');
+    const pending = new Set((pickups ?? []).map(p => p.vehicle_id));
+    if (target.some(v => pending.has(v.id))) return toast.error('Some vehicles in this zone have active pickup requests. Finish or cancel them first.');
+    if (!window.confirm('Transfer ' + target.length + ' vehicles from ' + bulkTransferZone +
+      ' to Unassigned Bay? Their current bays will be released and each movement recorded. Other zones will not be changed.')) return;
+    commitParkingBatch(target.map(v => ({ plate: v.plateNumber })), false, false);
+  };
   // Age-based delivery runs in the production database scheduler.
   // Avoid competing client-side lifecycle writes from several open tabs.
   const assignFromAssistant = (plateNumber: string, targetBayId: string): boolean => {
@@ -908,7 +931,21 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage && !offlineReadOnly} canEditVehicle={canEditVehicle && !offlineReadOnly} canTransferVehicle={canTransferVehicle && !offlineReadOnly} canAssignVehicle={canAssignVehicle && !offlineReadOnly} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onMoveVehicle={(vehicleId: string) => { setSelectedVehicleId(vehicleId); setNewLocationId(''); setNotes(''); setScreen('transfer'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} assignSelectedBay={(selectedBayId?: string, vehicleForm?: VehicleFormData) => handleAssign(selectedBayId, false, undefined, vehicleForm)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
           {screen === 'assignment' && canManage && <div className="mb-3 flex justify-end"><Button variant="outline" onClick={exportVehicleBayData}><Download /> Download all vehicle / bay data</Button></div>}
           {screen === 'assignment' && canManage && <div className="mb-4"><ParkingSheetImport locations={locations} disabled={offlineReadOnly} onApply={(rows,relocate) => commitParkingBatch(rows,true,relocate)} /></div>}
-          {screen === 'management' && canManage && <div className="mb-3"><Button variant="destructive" disabled={offlineReadOnly} onClick={handleBulkUnassign}>Transfer all vehicles to Unassigned Bay</Button></div>}
+          {screen === 'management' && canManage && <div className="mb-3 space-y-3">
+            <Button variant="destructive" disabled={offlineReadOnly} onClick={handleBulkUnassign}>Transfer all vehicles to Unassigned Bay</Button>
+            <Card><CardHeader><CardTitle className="text-base">Transfer vehicles by zone</CardTitle><CardDescription>Admin / Supervisor only. Move parked vehicles from one selected zone to Unassigned Bay.</CardDescription></CardHeader>
+              <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="w-full min-w-0 sm:max-w-sm"><Label htmlFor="bulk-transfer-zone">Source zone</Label>
+                  <Select value={bulkTransferZones.includes(bulkTransferZone) ? bulkTransferZone : ''} onValueChange={setBulkTransferZone}>
+                    <SelectTrigger id="bulk-transfer-zone"><SelectValue placeholder="Select zone" /></SelectTrigger>
+                    <SelectContent>{bulkTransferZones.map(name => <SelectItem key={name} value={name}>{parkingZoneLabel(name)}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <Button variant="outline" disabled={offlineReadOnly || !bulkTransferZones.includes(bulkTransferZone) || !zoneBulkTargets.length} onClick={handleZoneBulkUnassign}>
+                  Transfer {zoneBulkTargets.length} vehicle{zoneBulkTargets.length === 1 ? '' : 's'} to Unassigned Bay
+                </Button>
+              </CardContent></Card>
+          </div>}
           {screen === 'assignment' && <Assignment assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} zone={zone} setZone={setZone} bayId={bayId} setBayId={setBayId} availableBays={availableBays} locations={locations} vehicles={activeVehicles} zoneNames={zoneNames} handleAssign={(targetBayId?: string, occupant?: XParkingOccupant) => handleAssign(targetBayId, zone === 'Unassigned Bay', occupant)} handleAssignUnassigned={() => handleAssign(undefined, true)} handleRelease={handleRelease} handleOcr={handleOcr} fileRef={fileRef} />}
           {screen === 'search' && <SearchScreen onRecoverDeliveredVehicle={canRecoverDeliveredVehicle ? recoverDeliveredVehicle : undefined} archiveOnSearchMiss={role === 'TechnicalLeader' || role === 'TechnicalAdvisor' || role === 'Drivers' || role === 'Technician'} query={searchQuery} setQuery={setSearchQuery} result={searchQuery ? searchResult : undefined} locationLabel={locationLabel} locations={locations} vehicles={vehicles} movements={movements} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} />}
           {screen === 'layout' && <LayoutScreen locations={locations} zoneFilter={zoneFilter} setZoneFilter={setZoneFilter} zoneStats={zoneStats} />}
