@@ -100,13 +100,51 @@ async function xlsxMembers(buffer: ArrayBuffer): Promise<Map<string,string>> {
   }
   return members;
 }
-async function parseTemplateXlsx(file: File): Promise<Draft[]> {
+async function parseTemplateXlsx(file: File, selectedZone: string): Promise<Draft[]> {
   const members=await xlsxMembers(await file.arrayBuffer());
   const sharedXml=members.get('xl/sharedStrings.xml');
   const xmlParser=new DOMParser();
   const shared=sharedXml?Array.from(xmlParser.parseFromString(sharedXml,'application/xml').getElementsByTagName('si'))
     .map(si=>si.textContent||''):[];
   const output: Draft[]=[];
+  // Copilot and ordinary Excel exports often contain two columns instead of the
+  // seven-sheet VPLM printable template. Detect that layout by its header.
+  const rawFirst=members.get('xl/worksheets/sheet1.xml');
+  if (rawFirst) {
+    const firstXml=xmlParser.parseFromString(rawFirst,'application/xml');
+    const firstRows=Array.from(firstXml.getElementsByTagName('row'));
+    const getCells=(row:Element)=>{
+      const cells=new Map<string,string>();
+      for(const cell of Array.from(row.getElementsByTagName('c'))){
+        const col=(cell.getAttribute('r')||'').replace(/[0-9]/g,'');
+        const value=cell.getElementsByTagName('v')[0]?.textContent||'';
+        const inline=cell.getElementsByTagName('is')[0]?.textContent||'';
+        cells.set(col,cell.getAttribute('t')==='s'?(shared[Number(value)]||''):
+          cell.getAttribute('t')==='inlineStr'?inline:value);
+      }
+      return cells;
+    };
+    const header=firstRows[0]&&getCells(firstRows[0]);
+    if(header && /vehicle\s*(number|no\.?|registration)/i.test(header.get('A')||'') &&
+      /(parking\s*)?(slot|bay)/i.test(header.get('B')||'')) {
+      for(const line of firstRows.slice(1)){
+        const cells=getCells(line);
+        const plate=normalize((cells.get('A')||'').trim());
+        const slot=(cells.get('B')||'').trim();
+        if(!plate && !slot)continue;
+        if(!isPlate(plate)||!/^\d{1,3}$/.test(slot)){
+          throw new Error('Invalid vehicle or parking slot on Excel row '+line.getAttribute('r')+'. Please correct the workbook.');
+        }
+        const num=Number(slot);
+        // The combined accommodation register covers A 1-46, B 47-90 and C 91-107.
+        // Other ranges use the administrator's chosen source zone.
+        const mappedZone=num>=1&&num<=46?'A':num<=90&&num>=47?'B':num<=107&&num>=91?'C':selectedZone;
+        output.push({plate,zone:mappedZone,bay:slot,xParking:false,confidence:'Excel row '+line.getAttribute('r')});
+      }
+      if(!output.length)throw new Error('The two-column Excel sheet contains no vehicle entries.');
+      return output;
+    }
+  }
   const zoneBySheet=['A','B','C','Workshop','Reception','Other Zones','Unassigned Bay'];
   for(let sheet=1;sheet<=7;sheet++){
     const raw=members.get('xl/worksheets/sheet'+sheet+'.xml');
@@ -233,7 +271,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         setDraft(imported);setStatus('review',100,imported.length+' CSV entries ready. Check the table below and confirm before applying.');
       }else if(/\.xlsx$/i.test(file.name)){
         setStatus('preparing',30,'Reading Excel workbook locally…');
-        const imported=await parseTemplateXlsx(file);
+        const imported=await parseTemplateXlsx(file,zone);
         setDraft(imported);setStatus('review',100,imported.length+' Excel entries ready. Check the table below and confirm before applying.');
       }else if(file.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(file.name)){
         if(!supabase)throw new Error('AI scanning requires a live cloud connection.');
@@ -372,11 +410,13 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
           <option value="single">Read entire photo</option>
         </select>
       </label>
-      <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-primary px-4 py-2 text-sm font-semibold text-primary">
-        Select photo / Excel / CSV
-        <input type="file" className="sr-only" accept=".xlsx,.csv,image/png,image/jpeg,image/webp"
+      <div className="flex min-w-0 flex-col gap-1">
+        <label htmlFor="vplm-parking-file" className="text-sm font-semibold">Select parking file (Android / Excel / Photo)</label>
+        <input id="vplm-parking-file" type="file" className="block w-full max-w-full rounded-md border border-primary bg-background p-2 text-sm"
+          accept=".xlsx,.csv,image/png,image/jpeg,image/webp,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          onClick={()=>{if(!reading&&!applying)setStatus('idle',0,'File picker opened. Select the XLSX workbook or a photo.');}}
           onChange={e=>void ingest(e)} disabled={reading||applying} aria-label="Upload parking sheet" />
-      </label>
+      </div>
       <Button type="button" variant="outline" onClick={startManualReview} disabled={disabled||reading||applying}>Add vehicle manually to review</Button>
     </div>
     <section role="status" aria-live="polite" className="space-y-2 rounded-md border-2 border-primary/50 p-3" data-import-version="ocr-status-v3">
