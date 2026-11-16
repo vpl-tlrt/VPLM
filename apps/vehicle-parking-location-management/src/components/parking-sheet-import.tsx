@@ -164,6 +164,16 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   const [reviewedSuggestions,setReviewedSuggestions]=useState<Set<number>>(new Set());
   const [zone,setZone]=useState('A');
   const [reading,setReading]=useState(false);
+  const [applying,setApplying]=useState(false);
+  const [progress,setProgress]=useState(0);
+  const [phase,setPhase]=useState<'idle'|'preparing'|'recognizing'|'review'|'applying'|'staged'|'error'>('idle');
+  const [completedSections,setCompletedSections]=useState(0);
+  const [totalSections,setTotalSections]=useState(0);
+  const [lastFile,setLastFile]=useState('');
+  const [lastEventAt,setLastEventAt]=useState('');
+  const setStatus=(next:typeof phase,pct:number,detail:string)=>{
+    setPhase(next);setProgress(pct);setScanMessage(detail);setLastEventAt(new Date().toLocaleTimeString());
+  };
   const [scanProgress,setScanProgress]=useState('');
   const [scanIncomplete,setScanIncomplete]=useState(false);
   const [scanMessage,setScanMessage]=useState('Select a photograph to start. No parking data changes until you confirm.');
@@ -192,7 +202,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     if(!result.length)return toast.error('Paste vehicle numbers and parking slots first.');
     setDraft(result);setScanIncomplete(false);setUploadError('');setConfirmed(false);setCompleteZone(false);
     setReviewedSuggestions(new Set());setMoveOccupants(true);
-    setScanMessage(result.length+' copied OCR rows ready. Review matches and displaced vehicles before applying.');
+    setStatus('review',100,result.length+' copied OCR rows ready. Review matches and displaced vehicles before applying.');
   };
   const startManualReview=()=>{
     if(reading||disabled)return;
@@ -202,30 +212,37 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     setConfirmed(false);
     setDraft(old=>old.length ? [...old,{plate:'',zone,bay:'',xParking:false,confidence:'Manual'}] :
       [{plate:'',zone,bay:'',xParking:false,confidence:'Manual'}]);
-    setScanMessage('Manual review mode: enter the registration and exact bay for every vehicle, then verify and apply.');
+    setStatus('review',100,'Manual review mode: enter the registration and exact bay for every vehicle, then verify and apply.');
   };
   const ingest=async(e:ChangeEvent<HTMLInputElement>)=>{
     const file=e.target.files?.[0];e.target.value='';if(!file)return;
-    setReading(true);setConfirmed(false);setUploadError('');setDraft([]);setScanProgress('');setScanIncomplete(false);setScanMessage('Preparing '+file.name+' for recognition…');
+    setReading(true);setConfirmed(false);setUploadError('');setDraft([]);setScanProgress('');
+    setScanIncomplete(false);setLastFile(file.name);setCompletedSections(0);setTotalSections(0);
+    setStatus('preparing',5,'Preparing '+file.name+' for import…');
     try{
       if(/\.csv$/i.test(file.name)){
         const imported=csvRows(await file.text());
         if(!imported.length)throw new Error('No vehicle registration rows found in the CSV.');
-        setDraft(imported);setScanMessage(imported.length+' CSV entries ready. Check the table below and confirm before applying.');
+        setDraft(imported);setStatus('review',100,imported.length+' CSV entries ready. Check the table below and confirm before applying.');
       }else if(/\.xlsx$/i.test(file.name)){
+        setStatus('preparing',30,'Reading Excel workbook locally…');
         const imported=await parseTemplateXlsx(file);
-        setDraft(imported);setScanMessage(imported.length+' Excel entries ready. Check the table below and confirm before applying.');
+        setDraft(imported);setStatus('review',100,imported.length+' Excel entries ready. Check the table below and confirm before applying.');
       }else if(file.type.startsWith('image/')){
         if(!supabase)throw new Error('AI scanning requires a live cloud connection.');
         if(file.size>18*1024*1024)throw new Error('Photo too large. Use an image smaller than 18 MB.');
         // Always resize/compress before invoking Edge Function, including Full photo.
         // Previously Full photo sent the raw camera file and could exceed request limits.
+        setStatus('preparing',12,'Compressing photo into readable OCR sections…');
         const regions = await imageToRegions(file, scanMode);
+        setTotalSections(regions.length);
+        setStatus('recognizing',20,'Photo prepared. Starting OCR: 0 of '+regions.length+' sections complete.');
         const collected:Draft[]=[];
         const unique=new Map<string,Draft>();
         for(let i=0;i<regions.length;i++){
           const region=regions[i];
-          setScanProgress('Scanning '+region.label+' section ('+(i+1)+'/'+regions.length+')');
+          setScanProgress('OCR service processing '+region.label+' ('+(i+1)+'/'+regions.length+'). Waiting for response…');
+          setStatus('recognizing',20+Math.round(i/regions.length*70),'OCR processing '+region.label+' ('+(i+1)+'/'+regions.length+').');
           const {data,error}=await supabase.functions.invoke('parking-sheet-ocr',{
             body:{image:region.image,mimeType:'image/jpeg',zone},
             signal:AbortSignal.timeout(50000)
@@ -254,18 +271,19 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
             if(!previous || (previous.confidence==='low' && row.confidence!=='low'))unique.set(key,row);
           }
           setDraft([...unique.values()]);
-          setScanMessage(unique.size+' registrations recognized from '+(i+1)+' of '+regions.length+' sections. Review the table below.');
+          setCompletedSections(i+1);
+          setStatus('recognizing',20+Math.round((i+1)/regions.length*70),unique.size+' registrations recognized. '+(i+1)+' of '+regions.length+' OCR sections complete.');
           setScanProgress(region.label+' complete: '+unique.size+' vehicles found. '+(regions.length-i-1)+' sections remaining.');
 
         }
         if(!unique.size)throw new Error('No clear registration readings. Try a better photo or import the Excel register. No vehicles changed.');
         setDraft([...unique.values()]);
-        setScanMessage('Recognition finished: '+unique.size+' registrations ready. Scroll down, correct mistakes and confirm before applying.');
+        setStatus('review',100,'OCR complete: '+unique.size+' registrations ready. Correct mistakes and confirm. No records changed yet.');
       }else throw new Error('Use JPG, PNG, CSV, or the VPLM XLSX template.');
     }catch(err){
       const message=err instanceof Error?err.message:'Could not read the parking sheet.';
       setScanIncomplete(true);
-      setScanMessage('Recognition did not finish. No parking changes were made. You can retry the photo or import an Excel/CSV sheet.');
+      setStatus('error',0,'Import stopped: '+message+'. No parking changes were made. Retry or paste OCR results manually.');
       setUploadError(message);toast.error(message);
     }
     finally{setReading(false);setScanProgress('');}
@@ -310,7 +328,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   const invalid=draft.filter(row=>!isPlate(row.plate) || duplicatePlates.has(normalize(row.plate)) ||
     (row.zone!=='Unassigned Bay' && (!zoneNames.includes(row.zone) || !resolveBay(row))));
   const apply=async()=>{
-    if(disabled||!confirmed||invalid.length||scanIncomplete||reading||!draft.length)return;
+    if(disabled||applying||!confirmed||invalid.length||scanIncomplete||reading||!draft.length)return;
     if(unresolvedMatches)return toast.error('Review every possible OCR match first.');
     const additions=completeZone ? missingFromZone.map(v=>({plate:normalize(v.plateNumber)})) : [];
     if(completeZone && draft.some(row=>row.zone!==zone))return toast.error('A complete-zone reconciliation can only include the selected zone.');
@@ -318,7 +336,20 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     if(completeZone && !window.confirm('COMPLETE ZONE CONFIRMATION: Move '+missingFromZone.length+
       ' vehicles missing from the OCR list in '+parkingZoneLabel(zone)+' to Unassigned Bay, in addition to the '+draft.length+
       ' reviewed entries? This requires a verified complete zone list.'))return;
-    if(await onApply(rows,moveOccupants)){setDraft([]);setConfirmed(false);setScanMessage('Parking updates were staged. Verify their cloud status on the live parking map.');}
+    setApplying(true);setUploadError('');
+    setStatus('applying',15,'Validating parking changes and active requests against MAIN…');
+    try {
+      const applied=await onApply(rows,moveOccupants);
+      if(applied) {
+        setDraft([]);setConfirmed(false);
+        setStatus('staged',100,'Changes submitted to MAIN sync. Cloud save NOT yet verified; check live sync status.');
+      } else {
+        setStatus('review',100,'Update cancelled or blocked. No successful upload confirmed. Review any error message and retry.');
+      }
+    } catch(error) {
+      const message=error instanceof Error?error.message:'Parking update failed.';
+      setUploadError(message);setStatus('error',15,'Update failed: '+message+'. No successful cloud save confirmed.');
+    } finally {setApplying(false);}
   };
   return <Card><CardHeader><CardTitle>Photo / Excel / Copilot OCR Parking Import</CardTitle>
     <CardDescription>Admin and Supervisor only. Scan a photographed sheet, upload the VPLM XLSX register, or import CSV (vehicle,zone,bay,x). Review every row before changing MAIN.</CardDescription>
@@ -334,10 +365,29 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
           <option value="single">Read entire photo</option>
         </select>
       </label>
-      <input type="file" accept=".xlsx,.csv,image/png,image/jpeg,image/webp" onChange={e=>void ingest(e)} disabled={disabled||reading} aria-label="Upload parking sheet" />
-      <Button type="button" variant="outline" onClick={startManualReview} disabled={disabled||reading}>Add vehicle manually to review</Button>
+      <input type="file" accept=".xlsx,.csv,image/png,image/jpeg,image/webp" onChange={e=>void ingest(e)} disabled={disabled||reading||applying} aria-label="Upload parking sheet" />
+      <Button type="button" variant="outline" onClick={startManualReview} disabled={disabled||reading||applying}>Add vehicle manually to review</Button>
     </div>
-    <p role="status" className="rounded-md border p-3 text-sm font-medium">{reading ? (scanProgress||scanMessage) : scanMessage}</p>
+    <section role="status" aria-live="polite" className="space-y-2 rounded-md border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-sm font-semibold">Import status: {{
+          idle:'Ready',preparing:'Preparing file',recognizing:'OCR in progress',review:'Ready for review',
+          applying:'Validating / submitting',staged:'Submitted to sync (unverified)',error:'Error'
+        }[phase]}</span>
+        <span className="text-sm font-semibold tabular-nums">{progress}%</span>
+      </div>
+      <div role="progressbar" aria-label="Parking sheet processing progress" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}
+        className="h-3 w-full overflow-hidden rounded-full bg-muted">
+        <div className={`h-full rounded-full transition-all duration-300 ${phase==='error'?'bg-destructive':'bg-primary'}`} style={{width:progress+'%'}} />
+      </div>
+      <p className="text-sm">{scanMessage}</p>
+      {reading&&scanProgress&&<p className="text-xs text-muted-foreground">{scanProgress}</p>}
+      {totalSections>0&&<p className="text-xs">OCR sections finished: {completedSections}/{totalSections} · {draft.length} recognized rows</p>}
+      {lastFile&&<p className="text-xs text-muted-foreground">File: {lastFile}</p>}
+      {lastEventAt&&<p className="text-xs text-muted-foreground">Last update: {lastEventAt}</p>}
+      {phase==='recognizing'&&<p className="text-xs">The bar advances when OCR sections return, not by network bytes uploaded.</p>}
+      {phase==='staged'&&<p className="text-xs font-medium">This is not proof of a completed cloud save.</p>}
+    </section>
     {uploadError&&<p role="alert" className="rounded border border-red-400 bg-red-950/20 p-3 text-sm text-red-600 dark:text-red-300">{uploadError} {draft.length>0?'These partial readings are shown for review only; import is disabled until a complete rescan.':'Existing parking records remain unchanged.'}</p>}
     {draft.length===0 && !reading && <p className="text-sm text-muted-foreground">No registrations are ready for review yet. Upload a completed sheet, use Excel/CSV, or select Add vehicle manually to review. Nothing is saved until approved.</p>}
     {draft.length>0&&<>
@@ -360,7 +410,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       <p className="text-sm font-semibold">Step 3 — Confirm and apply only after checking every row.</p>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
         I have verified vehicle registrations, bays, X positions and authorization for {draft.length} updates.</label>
-      <Button type="button" disabled={disabled||!confirmed||invalid.length>0||unresolvedMatches||scanIncomplete||reading||!draft.length} onClick={()=>void apply()}>Apply reviewed parking updates</Button>
+      <Button type="button" disabled={disabled||applying||!confirmed||invalid.length>0||unresolvedMatches||scanIncomplete||reading||!draft.length} onClick={()=>void apply()}>{applying?'Validating / submitting…':'Apply reviewed parking updates'}</Button>
     </>}
   </CardContent></Card>;
 }
