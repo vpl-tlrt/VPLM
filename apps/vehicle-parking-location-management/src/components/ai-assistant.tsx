@@ -17,7 +17,7 @@ type ChatMessage = {
   language?: keyof typeof assistantLanguages;
 };
 
-type AssistantFunction = 'find' | 'assign' | 'transfer' | 'road-test' | 'availability' | 'pickup-request';
+type AssistantFunction = 'find' | 'ocr-import' | 'assign' | 'transfer' | 'road-test' | 'availability' | 'pickup-request';
 
 type TransferFlow = {
   vehicleId?: string;
@@ -44,10 +44,12 @@ type AiAssistantProps = {
   locationLabel: (locationId?: string) => string;
   onAssign: (plateNumber: string, vehicle?: Vehicle) => boolean;
   onAssignToBay: (plateNumber: string, bayId: string) => boolean;
+  onOpenOcrImport: () => void;
   onTransfer: (vehicleId: string, destinationId: string, notes: string, toXParking?: boolean) => boolean;
 };
 
 const directory: { id: AssistantFunction | 'help'; key: string; label: string; description: string; example: string; icon: typeof Search }[] = [
+  { id: 'ocr-import', key: 'OCR', label: 'Reconcile OCR list', description: 'Paste Copilot parking numbers, review possible matches and confirm zone changes.', example: 'OCR', icon: BookOpen },
   { id: 'find', key: 'FIND', label: 'Find vehicle', description: 'Look up registration, model, colour, and current bay.', example: 'Find 938848', icon: Search },
   { id: 'assign', key: 'ASSIGN', label: 'Add / Assign', description: 'Open the validated vehicle intake and bay assignment form.', example: 'Assign 938848', icon: CircleParking },
   { id: 'transfer', key: 'TRANSFER', label: 'Transfer', description: 'Guide a confirmed vehicle move to an available bay.', example: 'Transfer 938848', icon: MoveRight },
@@ -85,6 +87,7 @@ export default function AiAssistant({
   locationLabel,
   onAssign,
   onAssignToBay,
+  onOpenOcrImport,
   onTransfer,
 }: AiAssistantProps) {
   // Accept both canonical role IDs and their displayed labels without granting other roles access.
@@ -395,6 +398,11 @@ export default function AiAssistant({
     setActiveFunction(null);
     setRoadTest(undefined);
     setPickupPlate(undefined);
+    if (action === 'ocr-import') {
+      if (!['Administrator','Supervisor'].includes(role)) {addAssistantMessage('OCR reconciliation is available only to Admin and Supervisor.');return;}
+      addAssistantMessage('Opening the reviewed OCR import. Select the correct zone, paste Copilot columns, review potential matches and missing vehicles, then explicitly confirm.');
+      onOpenOcrImport();return;
+    }
     if (action === 'help') {
       addAssistantMessage(`VPLM function directory and shortcuts:\n${shortcutHelp}\n\nYou can click a function or type its shortcut. “Help” and “Directory” show this list.`);
       return;
@@ -560,6 +568,12 @@ export default function AiAssistant({
       return;
     }
     if (busy) return;
+    if (/^(?:ocr|reconcile(?:\s+(?:ocr|parking))?|import\s+ocr)(?:\b|$)/i.test(message)) {
+      setMessages(current=>[...current,{role:'user',content:message}]);
+      setInput('');
+      startFunction('ocr-import');
+      return;
+    }
     const version = ++responseVersion.current;
     setMessages((current) => [...current, { role: 'user', content: message }]);
     setInput('');
