@@ -661,6 +661,32 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
       return false;
     }
   };
+  const applyReviewedParkingImport = async (rows: ParkingImportRow[], relocate: boolean): Promise<boolean> => {
+    if (!canManage || !canTransferVehicle) { toast.error('Admin or Supervisor access required.'); return false; }
+    if (!supabase || offlineReadOnly || !hasPublishedSnapshot || !navigator.onLine) {
+      toast.error('MAIN cloud connection is required to apply an OCR reconciliation.'); return false;
+    }
+    try {
+      const planned = planParkingBatch(rows, vehicles, locations, actor, {allowCreate:true, relocateOccupants:relocate});
+      const affectedIds = new Set(planned.changes.filter(c => c.previous).map(c => c.vehicle.id));
+      const roadTests = new Set(loadRoadTests().filter(t=>t.status==='In Road Test').map(t=>t.vehicleId));
+      if (planned.changes.some(c=>c.previous && (roadTests.has(c.vehicle.id) || c.previous.operationalStatus==='Checked Out'))) {
+        toast.error('Some affected vehicles are in a road test or checked out. Complete their workflows before importing.'); return false;
+      }
+      const {data:pickups,error} = await supabase.from('pickup_requests').select('vehicle_id,status')
+        .in('status',['Requested','Accepted','In Transit']);
+      if(error){toast.error('Could not verify pickup requests. No parking changes made.');return false;}
+      if((pickups??[]).some(p=>affectedIds.has(p.vehicle_id))){
+        toast.error('Affected vehicles have active pickup requests. Complete or cancel them before importing.');return false;
+      }
+      if (!window.confirm('Review final MAIN update: '+planned.changes.length+' vehicle changes, including '+
+        planned.changes.filter(c=>!c.nextBay).length+' moves to Unassigned Bay. Continue?')) return false;
+      return commitParkingBatch(rows,true,relocate);
+    } catch(error) {
+      toast.error(error instanceof Error ? error.message : 'Invalid reconciliation; no changes made.');
+      return false;
+    }
+  };
   const handleBulkUnassign = async () => {
     if (!canManage || !canTransferVehicle) return toast.error('Only Admin or Supervisor can perform a bulk transfer.');
     if (!supabase || offlineReadOnly) return toast.error('MAIN cloud must be connected and idle.');
@@ -930,7 +956,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
           {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage && !offlineReadOnly} canEditVehicle={canEditVehicle && !offlineReadOnly} canTransferVehicle={canTransferVehicle && !offlineReadOnly} canAssignVehicle={canAssignVehicle && !offlineReadOnly} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onMoveVehicle={(vehicleId: string) => { setSelectedVehicleId(vehicleId); setNewLocationId(''); setNotes(''); setScreen('transfer'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} assignSelectedBay={(selectedBayId?: string, vehicleForm?: VehicleFormData) => handleAssign(selectedBayId, false, undefined, vehicleForm)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
           {screen === 'assignment' && canManage && <div className="mb-3 flex justify-end"><Button variant="outline" onClick={exportVehicleBayData}><Download /> Download all vehicle / bay data</Button></div>}
-          {screen === 'assignment' && canManage && <div className="mb-4"><ParkingSheetImport locations={locations} vehicles={activeVehicles} disabled={offlineReadOnly} onApply={(rows,relocate) => commitParkingBatch(rows,true,relocate)} /></div>}
+          {screen === 'assignment' && canManage && <div className="mb-4"><ParkingSheetImport locations={locations} vehicles={activeVehicles} disabled={offlineReadOnly} onApply={applyReviewedParkingImport} /></div>}
           {screen === 'management' && canManage && <div className="mb-3 space-y-3">
             <Button variant="destructive" disabled={offlineReadOnly} onClick={handleBulkUnassign}>Transfer all vehicles to Unassigned Bay</Button>
             <Card><CardHeader><CardTitle className="text-base">Transfer vehicles by zone</CardTitle><CardDescription>Admin / Supervisor only. Move parked vehicles from one selected zone to Unassigned Bay.</CardDescription></CardHeader>
