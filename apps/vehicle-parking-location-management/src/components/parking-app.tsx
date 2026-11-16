@@ -391,6 +391,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const [zoneFilter, setZoneFilter] = useState('all');
   const [historyFilter, setHistoryFilter] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const [vehicleCaptureStatus,setVehicleCaptureStatus] = useState('Ready for one-vehicle plate reading. Parking sheet OCR is a separate tool above.');
   const actor = localGuest ? 'Guest User' : user?.fullName ?? 'Local Operator';
   const { users: onlineUsers, connected: presenceConnected, otherSessions } = useOnlineUsers(!localGuest && !guestPreview && queueOwnerId ? { id: queueOwnerId, name: actor, role } : null);
 
@@ -764,23 +765,34 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
   const handleOcr = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file) return;
+    if (!file) {setVehicleCaptureStatus('Camera selection cancelled.');return;}
+    setVehicleCaptureStatus('Photo selected: '+file.name+'. Checking one-vehicle text recognition…');
     const Detector = (globalThis as typeof globalThis & { TextDetector?: new () => {
       detect: (image: ImageBitmap) => Promise<{ rawValue: string }[]>;
     } }).TextDetector;
-    if (!Detector) return toast.info('Text recognition is unavailable on this browser. Enter the plate manually.');
+    if (!Detector) {
+      setVehicleCaptureStatus('TextDetector is not available on this browser. Use Parking Sheet OCR above for a handwritten parking register.');
+      return toast.info('Single-vehicle reader unavailable. Use Parking Sheet OCR for a register.');
+    }
     try {
+      setVehicleCaptureStatus('Reading single vehicle plate…');
       const bitmap = await createImageBitmap(file);
       try {
         const text = await new Detector().detect(bitmap);
         const candidates = new Set(text.flatMap(item => item.rawValue.match(/(?<!\d)\d{4,7}(?!\d)/g) ?? []));
-        if (candidates.size !== 1) return toast.info('No single plate number could be identified. Enter it manually.');
+        if (candidates.size !== 1) {
+          setVehicleCaptureStatus('No single plate identified. No changes made. Use Parking Sheet OCR above for a vehicle list.');
+          return toast.info('No single plate number identified. Enter manually or use Parking Sheet OCR.');
+        }
         const suggested = [...candidates][0];
+        setVehicleCaptureStatus('Possible plate '+suggested+' found. Waiting for confirmation.');
         if (window.confirm(`Use suggested plate ${suggested}? Check the image before confirming.`)) {
           setAssignmentVehicle(current => ({ ...current, plateNumber: suggested }));
-        }
+          setVehicleCaptureStatus('Plate '+suggested+' filled into form. No assignment saved yet.');
+        } else setVehicleCaptureStatus('Plate suggestion rejected. No changes made.');
       } finally { bitmap.close(); }
     } catch {
+      setVehicleCaptureStatus('Could not read photo. No record changed. Use Parking Sheet OCR for a parking register.');
       toast.info('The plate could not be read. Enter it manually.');
     }
   };
@@ -956,7 +968,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
           {screen === 'road-tests' && !canAccessRoadTests && <Card><CardContent className="p-8 text-center"><p className="font-semibold">Road Tests are unavailable for this role.</p></CardContent></Card>}
           {screen === 'dashboard' && <Dashboard locations={locations} setLocations={setLocations} movements={movements} vehicles={vehicles} setVehicles={setVehicles} zoneStats={zoneStats} occupied={occupied} available={available} reserved={reserved} utilization={utilization} locationLabel={locationLabel} actor={actor} actorId={queueOwnerId} role={role} addMovement={addMovement} canManage={canManage && !offlineReadOnly} canEditVehicle={canEditVehicle && !offlineReadOnly} canTransferVehicle={canTransferVehicle && !offlineReadOnly} canAssignVehicle={canAssignVehicle && !offlineReadOnly} canAccessRoadTests={canAccessRoadTests} logAudit={logAudit} garageLayout={garageLayout} focusedVehicleId={dashboardVehicleId} onFocusedVehicleHandled={() => setDashboardVehicleId(undefined)} onOpenRoadTests={(vehicleId?: string) => { setRoadTestVehicleId(vehicleId); setScreen('road-tests'); }} onMoveVehicle={(vehicleId: string) => { setSelectedVehicleId(vehicleId); setNewLocationId(''); setNotes(''); setScreen('transfer'); }} onAssignUnassignedVehicle={(vehicle: Vehicle) => { setAssignmentVehicle({ plateNumber: vehicle.plateNumber, vin: vehicle.vin, brand: vehicle.brand, model: vehicle.model, color: vehicle.color, customerName: vehicle.customerName, driverOwner: vehicle.driverOwner, department: vehicle.department, xParking: vehicle.xParking ?? 'No' }); setBayId(''); setScreen('assignment'); }} assignSelectedBay={(selectedBayId?: string, vehicleForm?: VehicleFormData) => handleAssign(selectedBayId, false, undefined, vehicleForm)} assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} />}
           {screen === 'assignment' && canManage && <div className="mb-3 flex justify-end"><Button variant="outline" onClick={exportVehicleBayData}><Download /> Download all vehicle / bay data</Button></div>}
-          {screen === 'assignment' && canManage && <div className="mb-4"><ParkingSheetImport locations={locations} vehicles={activeVehicles} disabled={offlineReadOnly} onApply={applyReviewedParkingImport} /></div>}
+          {screen === 'assignment' && canManage && <div id="parking-sheet-import" className="mb-4 scroll-mt-20"><ParkingSheetImport locations={locations} vehicles={activeVehicles} disabled={offlineReadOnly} onApply={applyReviewedParkingImport} /></div>}
           {screen === 'management' && canManage && <div className="mb-3 space-y-3">
             <Button variant="destructive" disabled={offlineReadOnly} onClick={handleBulkUnassign}>Transfer all vehicles to Unassigned Bay</Button>
             <Card><CardHeader><CardTitle className="text-base">Transfer vehicles by zone</CardTitle><CardDescription>Admin / Supervisor only. Move parked vehicles from one selected zone to Unassigned Bay.</CardDescription></CardHeader>
@@ -972,7 +984,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
                 </Button>
               </CardContent></Card>
           </div>}
-          {screen === 'assignment' && <Assignment assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} zone={zone} setZone={setZone} bayId={bayId} setBayId={setBayId} availableBays={availableBays} locations={locations} vehicles={activeVehicles} zoneNames={zoneNames} handleAssign={(targetBayId?: string, occupant?: XParkingOccupant) => handleAssign(targetBayId, zone === 'Unassigned Bay', occupant)} handleAssignUnassigned={() => handleAssign(undefined, true)} handleRelease={handleRelease} handleOcr={handleOcr} fileRef={fileRef} />}
+          {screen === 'assignment' && <Assignment assignmentVehicle={assignmentVehicle} setAssignmentVehicle={setAssignmentVehicle} zone={zone} setZone={setZone} bayId={bayId} setBayId={setBayId} availableBays={availableBays} locations={locations} vehicles={activeVehicles} zoneNames={zoneNames} handleAssign={(targetBayId?: string, occupant?: XParkingOccupant) => handleAssign(targetBayId, zone === 'Unassigned Bay', occupant)} handleAssignUnassigned={() => handleAssign(undefined, true)} handleRelease={handleRelease} handleOcr={handleOcr} fileRef={fileRef} vehicleCaptureStatus={vehicleCaptureStatus} canManageSheetImport={canManage} />}
           {screen === 'search' && <SearchScreen onRecoverDeliveredVehicle={canRecoverDeliveredVehicle ? recoverDeliveredVehicle : undefined} archiveOnSearchMiss={role === 'TechnicalLeader' || role === 'TechnicalAdvisor' || role === 'Drivers' || role === 'Technician'} query={searchQuery} setQuery={setSearchQuery} result={searchQuery ? searchResult : undefined} locationLabel={locationLabel} locations={locations} vehicles={vehicles} movements={movements} onLocateVehicle={(vehicleId: string) => { setDashboardVehicleId(vehicleId); setScreen('dashboard'); }} />}
           {screen === 'layout' && <LayoutScreen locations={locations} zoneFilter={zoneFilter} setZoneFilter={setZoneFilter} zoneStats={zoneStats} />}
           {screen === 'transfer' && <Transfer vehicles={vehicles} locations={locations} movements={movements} selectedVehicleId={selectedVehicleId} setSelectedVehicleId={setSelectedVehicleId} selectedVehicle={selectedVehicle} newLocationId={newLocationId} setNewLocationId={setNewLocationId} notes={notes} setNotes={setNotes} handleTransfer={handleTransfer} locationLabel={locationLabel} canAcceptContainer={containerCanAccept} />}
@@ -1583,7 +1595,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
 }
 
 
-function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, bayId, setBayId, availableBays, locations, vehicles, zoneNames, handleAssign, handleAssignUnassigned, handleRelease, handleOcr, fileRef }: { assignmentVehicle: VehicleFormData; setAssignmentVehicle: React.Dispatch<React.SetStateAction<VehicleFormData>>; zone: string; setZone: (value: string) => void; bayId: string; setBayId: (value: string) => void; availableBays: ParkingLocation[]; locations: ParkingLocation[]; vehicles: Vehicle[]; zoneNames: string[]; handleAssign: (targetBayId?: string, occupant?: XParkingOccupant) => boolean; handleAssignUnassigned: () => boolean; handleRelease: () => void; handleOcr: (event: ChangeEvent<HTMLInputElement>) => void; fileRef: React.RefObject<HTMLInputElement | null> }) {
+function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, bayId, setBayId, availableBays, locations, vehicles, zoneNames, handleAssign, handleAssignUnassigned, handleRelease, handleOcr, fileRef, vehicleCaptureStatus, canManageSheetImport }: { assignmentVehicle: VehicleFormData; setAssignmentVehicle: React.Dispatch<React.SetStateAction<VehicleFormData>>; zone: string; setZone: (value: string) => void; bayId: string; setBayId: (value: string) => void; availableBays: ParkingLocation[]; locations: ParkingLocation[]; vehicles: Vehicle[]; zoneNames: string[]; handleAssign: (targetBayId?: string, occupant?: XParkingOccupant) => boolean; handleAssignUnassigned: () => boolean; handleRelease: () => void; handleOcr: (event: ChangeEvent<HTMLInputElement>) => void; fileRef: React.RefObject<HTMLInputElement | null>; vehicleCaptureStatus: string; canManageSheetImport: boolean }) {
   const [xParkingConfirmationOpen, setXParkingConfirmationOpen] = useState(false);
   const [occupantDetailsOpen, setOccupantDetailsOpen] = useState(false);
   const [occupantPlateNumber, setOccupantPlateNumber] = useState('');
@@ -1641,8 +1653,15 @@ function Assignment({ assignmentVehicle, setAssignmentVehicle, zone, setZone, ba
     <div className="vplm-assignment-screen mx-auto grid w-full min-w-0 max-w-5xl grid-cols-1 gap-4 lg:grid-cols-5">
       <div className="min-w-0 lg:col-span-5"><p className="technical-label">Fast check-in</p><h2 className="text-2xl font-bold">Vehicle assignment</h2></div>
       <Card className="min-w-0 lg:col-span-2">
-        <CardHeader><CardTitle>Capture vehicle</CardTitle><CardDescription>Use the device camera to capture the vehicle, then complete its profile manually.</CardDescription></CardHeader>
-        <CardContent className="grid gap-3"><Button size="lg" onClick={() => fileRef.current?.click()}><Camera /> Open camera</Button><input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleOcr} /></CardContent>
+        <CardHeader><CardTitle>Capture one vehicle plate</CardTitle><CardDescription>Single-plate reading only. This camera button does not scan a parking register.</CardDescription></CardHeader>
+        <CardContent className="grid gap-3">
+          <Button size="lg" onClick={() => {fileRef.current?.click();}}><Camera /> Open single-vehicle camera</Button>
+          <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleOcr} />
+          <p role="status" aria-live="polite" className="rounded border p-2 text-sm">{vehicleCaptureStatus}</p>
+          {canManageSheetImport && <Button variant="outline" onClick={() => document.getElementById('parking-sheet-import')?.scrollIntoView({behavior:'smooth',block:'start'})}>
+            <ScanLine /> Open parking-sheet OCR (multiple vehicles)
+          </Button>}
+        </CardContent>
       </Card>
       <Card className="min-w-0 lg:col-span-3">
         <CardHeader><CardTitle>Vehicle profile</CardTitle><CardDescription>Registration and VIN are checked to prevent duplicate records.</CardDescription></CardHeader>
