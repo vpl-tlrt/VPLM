@@ -156,7 +156,7 @@ async function parseTemplateXlsx(file: File): Promise<Draft[]> {
 }
 
 export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }:{
-  locations: ParkingLocation[]; vehicles: Vehicle[]; onApply:(rows:ParkingImportRow[],relocateOccupants:boolean)=>boolean; disabled?:boolean;
+  locations: ParkingLocation[]; vehicles: Vehicle[]; onApply:(rows:ParkingImportRow[],relocateOccupants:boolean)=>boolean|Promise<boolean>; disabled?:boolean;
 }){
   const [draft,setDraft]=useState<Draft[]>([]);
   const [pastedText,setPastedText]=useState('');
@@ -309,7 +309,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     normalize(other.plate)===normalize(row.plate))).map(row=>normalize(row.plate)));
   const invalid=draft.filter(row=>!isPlate(row.plate) || duplicatePlates.has(normalize(row.plate)) ||
     (row.zone!=='Unassigned Bay' && (!zoneNames.includes(row.zone) || !resolveBay(row))));
-  const apply=()=>{
+  const apply=async()=>{
     if(disabled||!confirmed||invalid.length||scanIncomplete||reading||!draft.length)return;
     if(unresolvedMatches)return toast.error('Review every possible OCR match first.');
     const additions=completeZone ? missingFromZone.map(v=>({plate:normalize(v.plateNumber)})) : [];
@@ -318,7 +318,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     if(completeZone && !window.confirm('COMPLETE ZONE CONFIRMATION: Move '+missingFromZone.length+
       ' vehicles missing from the OCR list in '+parkingZoneLabel(zone)+' to Unassigned Bay, in addition to the '+draft.length+
       ' reviewed entries? This requires a verified complete zone list.'))return;
-    if(onApply(rows,moveOccupants)){setDraft([]);setConfirmed(false);setScanMessage('Parking updates were staged. Verify their cloud status on the live parking map.');}
+    if(await onApply(rows,moveOccupants)){setDraft([]);setConfirmed(false);setScanMessage('Parking updates were staged. Verify their cloud status on the live parking map.');}
   };
   return <Card><CardHeader><CardTitle>Photo / Excel / Copilot OCR Parking Import</CardTitle>
     <CardDescription>Admin and Supervisor only. Scan a photographed sheet, upload the VPLM XLSX register, or import CSV (vehicle,zone,bay,x). Review every row before changing MAIN.</CardDescription>
@@ -360,7 +360,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       <p className="text-sm font-semibold">Step 3 — Confirm and apply only after checking every row.</p>
       <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
         I have verified vehicle registrations, bays, X positions and authorization for {draft.length} updates.</label>
-      <Button type="button" disabled={disabled||!confirmed||invalid.length>0||unresolvedMatches||scanIncomplete||reading||!draft.length} onClick={apply}>Apply reviewed parking updates</Button>
+      <Button type="button" disabled={disabled||!confirmed||invalid.length>0||unresolvedMatches||scanIncomplete||reading||!draft.length} onClick={()=>void apply()}>Apply reviewed parking updates</Button>
     </>}
   </CardContent></Card>;
 }
