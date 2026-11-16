@@ -1,7 +1,7 @@
 import { useState, type ChangeEvent } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import { isLiveGarageContainer, parkingZoneLabel, parkingRecordKey, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
+import { isLiveGarageContainer, parkingZoneLabel, parkingRecordKey, supportsXParkingLocation, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import { type ParkingImportRow } from '@/lib/parking-batch';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -370,8 +370,12 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   });
   const duplicatePlates=new Set(draft.filter((row,i)=>draft.some((other,j)=>j!==i &&
     normalize(other.plate)===normalize(row.plate))).map(row=>normalize(row.plate)));
-  const invalid=draft.filter(row=>!isPlate(row.plate) || duplicatePlates.has(normalize(row.plate)) ||
-    (row.zone!=='Unassigned Bay' && (!zoneNames.includes(row.zone) || !resolveBay(row))));
+  const targetPositions=draft.map(row=>row.zone==='Unassigned Bay'?'':(resolveBay(row)||'invalid')+':'+(row.xParking?'X':'regular'));
+  const duplicateSlots=new Set(targetPositions.filter((key,i)=>key && targetPositions.some((other,j)=>j!==i&&other===key)));
+  const invalid=draft.filter((row,i)=>!isPlate(row.plate) || duplicatePlates.has(normalize(row.plate)) ||
+    duplicateSlots.has(targetPositions[i]) ||
+    (row.zone!=='Unassigned Bay' && (!zoneNames.includes(row.zone) || !resolveBay(row))) ||
+    (row.xParking && !supportsXParkingLocation(locations.find(loc=>loc.id===resolveBay(row)))));
   const apply=async()=>{
     if(disabled||applying||!confirmed||invalid.length||scanIncomplete||reading||!draft.length)return;
     if(unresolvedMatches)return toast.error('Review every possible OCR match first.');
@@ -449,6 +453,9 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     {draft.length===0 && !reading && <p className="text-sm text-muted-foreground">No registrations are ready for review yet. Upload a completed sheet, use Excel/CSV, or select Add vehicle manually to review. Nothing is saved until approved.</p>}
     {draft.length>0&&<>
       <p className="text-sm font-medium" id="parking-import-review">Step 2 — Review {draft.length} registrations. {invalid.length} require correction. Duplicate readings must be corrected or removed. Entries with no known parking bay must use Unassigned Bay.</p>
+      {duplicateSlots.size>0&&<p role="alert" className="rounded border border-amber-500 p-3 text-sm font-medium">
+        {duplicateSlots.size} duplicated parking position(s) need review. Check OCR readings and choose a valid X Parking position if appropriate, correct the bay, or move the extra vehicle to Unassigned Bay. Unsafe assignments are blocked.
+      </p>}
       <div className="max-h-96 overflow-auto rounded border">
         <table className="w-full min-w-[580px] text-left text-sm"><thead><tr className="bg-muted">
           <th className="p-2">Vehicle</th><th className="p-2">Zone</th><th className="p-2">Bay</th><th className="p-2">X</th><th className="p-2">Reading</th><th className="p-2"></th>
