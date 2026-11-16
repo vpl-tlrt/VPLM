@@ -170,9 +170,13 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   const [completedSections,setCompletedSections]=useState(0);
   const [totalSections,setTotalSections]=useState(0);
   const [lastFile,setLastFile]=useState('');
+  const [lastFileSize,setLastFileSize]=useState<number | null>(null);
+  const [activity,setActivity]=useState<string[]>(['Importer ready — choose a photo, Excel/CSV file, or paste OCR text.']);
+  const recordActivity=(message:string)=>setActivity(old=>[...old.slice(-7),new Date().toLocaleTimeString()+' — '+message]);
   const [lastEventAt,setLastEventAt]=useState('');
   const setStatus=(next:typeof phase,pct:number,detail:string)=>{
     setPhase(next);setProgress(pct);setScanMessage(detail);setLastEventAt(new Date().toLocaleTimeString());
+    recordActivity(detail);
   };
   const [scanProgress,setScanProgress]=useState('');
   const [scanIncomplete,setScanIncomplete]=useState(false);
@@ -215,7 +219,10 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     setStatus('review',100,'Manual review mode: enter the registration and exact bay for every vehicle, then verify and apply.');
   };
   const ingest=async(e:ChangeEvent<HTMLInputElement>)=>{
-    const file=e.target.files?.[0];e.target.value='';if(!file)return;
+    const file=e.target.files?.[0];e.target.value='';
+    if(!file){setStatus('idle',0,'File selection cancelled. Choose a photo or spreadsheet to begin.');return;}
+    setLastFileSize(file.size);
+    recordActivity('File selected: '+file.name+' ('+Math.ceil(file.size/1024)+' KB).');
     setReading(true);setConfirmed(false);setUploadError('');setDraft([]);setScanProgress('');
     setScanIncomplete(false);setLastFile(file.name);setCompletedSections(0);setTotalSections(0);
     setStatus('preparing',5,'Preparing '+file.name+' for import…');
@@ -228,7 +235,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         setStatus('preparing',30,'Reading Excel workbook locally…');
         const imported=await parseTemplateXlsx(file);
         setDraft(imported);setStatus('review',100,imported.length+' Excel entries ready. Check the table below and confirm before applying.');
-      }else if(file.type.startsWith('image/')){
+      }else if(file.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(file.name)){
         if(!supabase)throw new Error('AI scanning requires a live cloud connection.');
         if(file.size>18*1024*1024)throw new Error('Photo too large. Use an image smaller than 18 MB.');
         // Always resize/compress before invoking Edge Function, including Full photo.
@@ -286,7 +293,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       setStatus('error',0,'Import stopped: '+message+'. No parking changes were made. Retry or paste OCR results manually.');
       setUploadError(message);toast.error(message);
     }
-    finally{setReading(false);setScanProgress('');}
+    finally{setReading(false);setScanProgress('');recordActivity('File read process ended. Current result is shown above.');}
   };
   const resolveBay=(row:Draft)=>{
     if(row.zone==='Unassigned Bay')return undefined;
@@ -351,7 +358,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       setUploadError(message);setStatus('error',15,'Update failed: '+message+'. No successful cloud save confirmed.');
     } finally {setApplying(false);}
   };
-  return <Card><CardHeader><CardTitle>Photo / Excel / Copilot OCR Parking Import</CardTitle>
+  return <Card><CardHeader><CardTitle>Photo / Excel / Copilot OCR Parking Import · Status v3</CardTitle>
     <CardDescription>Admin and Supervisor only. Scan a photographed sheet, upload the VPLM XLSX register, or import CSV (vehicle,zone,bay,x). Review every row before changing MAIN.</CardDescription>
     </CardHeader><CardContent className="space-y-3">
     <div className="flex flex-wrap items-center gap-3">
@@ -365,10 +372,15 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
           <option value="single">Read entire photo</option>
         </select>
       </label>
-      <input type="file" accept=".xlsx,.csv,image/png,image/jpeg,image/webp" onChange={e=>void ingest(e)} disabled={disabled||reading||applying} aria-label="Upload parking sheet" />
+      <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-primary px-4 py-2 text-sm font-semibold text-primary">
+        Select photo / Excel / CSV
+        <input type="file" className="sr-only" accept=".xlsx,.csv,image/png,image/jpeg,image/webp"
+          onChange={e=>void ingest(e)} disabled={reading||applying} aria-label="Upload parking sheet" />
+      </label>
       <Button type="button" variant="outline" onClick={startManualReview} disabled={disabled||reading||applying}>Add vehicle manually to review</Button>
     </div>
-    <section role="status" aria-live="polite" className="space-y-2 rounded-md border p-3">
+    <section role="status" aria-live="polite" className="space-y-2 rounded-md border-2 border-primary/50 p-3" data-import-version="ocr-status-v3">
+      <p className="text-xs font-semibold">OCR importer diagnostics v3 · read/review can run while cloud saving is temporarily unavailable.</p>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm font-semibold">Import status: {{
           idle:'Ready',preparing:'Preparing file',recognizing:'OCR in progress',review:'Ready for review',
@@ -383,10 +395,15 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       <p className="text-sm">{scanMessage}</p>
       {reading&&scanProgress&&<p className="text-xs text-muted-foreground">{scanProgress}</p>}
       {totalSections>0&&<p className="text-xs">OCR sections finished: {completedSections}/{totalSections} · {draft.length} recognized rows</p>}
-      {lastFile&&<p className="text-xs text-muted-foreground">File: {lastFile}</p>}
+      {lastFile&&<p className="text-xs text-muted-foreground">File: {lastFile}{lastFileSize!==null?' · '+Math.ceil(lastFileSize/1024)+' KB':''}</p>}
       {lastEventAt&&<p className="text-xs text-muted-foreground">Last update: {lastEventAt}</p>}
       {phase==='recognizing'&&<p className="text-xs">The bar advances when OCR sections return, not by network bytes uploaded.</p>}
       {phase==='staged'&&<p className="text-xs font-medium">This is not proof of a completed cloud save.</p>}
+      {disabled&&<p role="alert" className="text-xs font-medium text-amber-700 dark:text-amber-300">MAIN cloud is busy or unavailable. You can read files and review OCR, but Apply remains disabled until the workspace is online and idle.</p>}
+      <details className="rounded border p-2 text-xs" open={phase==='error'}>
+        <summary className="cursor-pointer font-semibold">Recent upload activity ({activity.length})</summary>
+        <ol className="mt-2 space-y-1">{activity.map((message,i)=><li key={i}>{message}</li>)}</ol>
+      </details>
     </section>
     {uploadError&&<p role="alert" className="rounded border border-red-400 bg-red-950/20 p-3 text-sm text-red-600 dark:text-red-300">{uploadError} {draft.length>0?'These partial readings are shown for review only; import is disabled until a complete rescan.':'Existing parking records remain unchanged.'}</p>}
     {draft.length===0 && !reading && <p className="text-sm text-muted-foreground">No registrations are ready for review yet. Upload a completed sheet, use Excel/CSV, or select Add vehicle manually to review. Nothing is saved until approved.</p>}
