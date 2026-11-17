@@ -73,6 +73,15 @@ const csvRows = (text: string): Draft[] => {
 // Read XLSX ZIP members with built-in browser streaming decompression; no extra dependency or cloud upload.
 async function xlsxMembers(buffer: ArrayBuffer): Promise<Map<string,string>> {
   const view = new DataView(buffer), bytes = new Uint8Array(buffer), decoder = new TextDecoder();
+  // Password-protected Excel files use OLE Compound File Binary rather than
+  // ZIP. Detect this explicitly instead of reporting a generic damaged file.
+  const oleSignature=[0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1];
+  if (bytes.length>=8 && oleSignature.every((byte,i)=>bytes[i]===byte)) {
+    throw new Error('This Excel workbook is password-protected/encrypted. Open it in Excel, remove workbook encryption, then Save As a new unprotected .xlsx file and upload that copy. No VPLM data changed.');
+  }
+  if(bytes.length<4 || bytes[0]!==0x50 || bytes[1]!==0x4b) {
+    throw new Error('This file is not a standard unencrypted XLSX workbook. Export a fresh .xlsx or CSV from Excel, then upload. No VPLM data changed.');
+  }
   let eocd = -1;
   for (let i = bytes.length - 22; i >= Math.max(0,bytes.length - 65557); i--) {
     if (view.getUint32(i,true) === 0x06054b50) { eocd=i;break; }
@@ -257,8 +266,9 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     setStatus('review',100,'Manual review mode: enter the registration and exact bay for every vehicle, then verify and apply.');
   };
   const ingest=async(e:ChangeEvent<HTMLInputElement>)=>{
-    const file=e.target.files?.[0];e.target.value='';
-    if(!file){setStatus('idle',0,'File selection cancelled. Choose a photo or spreadsheet to begin.');return;}
+    const file=e.target.files?.[0];
+    if(!file){setStatus('idle',0,'No file was selected by Android. Choose an Excel workbook or photo again.');return;}
+    e.target.value='';
     setLastFileSize(file.size);
     recordActivity('File selected: '+file.name+' ('+Math.ceil(file.size/1024)+' KB).');
     setReading(true);setConfirmed(false);setUploadError('');setDraft([]);setScanProgress('');
@@ -423,6 +433,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       </div>
       <Button type="button" variant="outline" onClick={startManualReview} disabled={disabled||reading||applying}>Add vehicle manually to review</Button>
     </div>
+    <p className="text-xs text-muted-foreground">Password-protected Excel workbooks are not readable. Use an unprotected .xlsx/CSV copy. File selection should immediately show the filename in the status panel.</p>
     <section role="status" aria-live="polite" className="space-y-2 rounded-md border-2 border-primary/50 p-3" data-import-version="ocr-status-v3">
       <p className="text-xs font-semibold">OCR importer diagnostics v3 · read/review can run while cloud saving is temporarily unavailable.</p>
       <div className="flex flex-wrap items-center justify-between gap-2">
