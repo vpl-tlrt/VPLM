@@ -83,7 +83,9 @@ export function DataPixelGlobe({
       const dt = Math.min(Math.max((now - lastTime) / 1000, 0), 0.05);
       lastTime = now;
       const state = latestRef.current;
-      const active = state.connected && !reducedMotion.matches;
+      // The globe is an ambient animation, not a cloud-connection indicator. A
+      // temporary syncing/offline state must never freeze it on its first frame.
+      const active = !reducedMotion.matches;
       if (active) {
         const speed = Math.min(3, Math.max(0.1, state.rotationSpeed));
         const effectiveSpeed = speed * (hovered ? 1.45 : 1) + pulseBoost * 2.2;
@@ -126,7 +128,7 @@ export function DataPixelGlobe({
           intensity,
         };
       }).sort((a, b) => a.z - b.z);
-      const baseRadius = Math.max(0.6, width * 0.0175);
+      const baseRadius = Math.max(0.9, width * 0.022);
       for (const point of projected) {
         const radius = baseRadius * (0.45 + point.depth * 0.65 + point.intensity * 0.35 * point.depth);
         const opacity = Math.min(1, (0.12 + Math.pow(point.depth, 1.5) * 0.78) * (1 + point.intensity * 0.25));
@@ -178,7 +180,7 @@ export function DataPixelGlobe({
       document.removeEventListener('visibilitychange', visibility);
       reducedMotion.removeEventListener('change', requestFrame);
     };
-  }, [connected]);
+  }, []);
 
   // Globe itself is decorative; the wrapping cloud button remains the accessible control.
   const style = {
