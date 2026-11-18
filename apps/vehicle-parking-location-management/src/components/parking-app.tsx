@@ -1403,7 +1403,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div><CardTitle className="flex items-center gap-2"><LayoutGrid className="h-5 w-5 text-primary" />Parking Lot</CardTitle><CardDescription>Choose a zone to view its live parking bays.</CardDescription></div>
               <div className="flex flex-wrap items-center gap-2">
-                {!openedParkingZone && <><Badge>Vacant</Badge><Badge variant="destructive">Occupied</Badge><Badge variant="secondary">Reserved</Badge><Badge variant="outline">Maintenance</Badge></>}
+                
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
