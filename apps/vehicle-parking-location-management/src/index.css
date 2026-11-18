@@ -1714,3 +1714,63 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   font-size: .67rem;
   font-weight: 750;
 }
+
+
+/* TEST-only: glass treatment for dashboard KPIs and parking zone tiles.
+   Preserve live status colours, the OriginKit pixel shader, and all interaction.
+   Keep individual card surfaces sufficiently opaque for white text readability. */
+.garage-kpi {
+  border: 1px solid rgb(255 255 255 / 32%);
+  border-top-color: rgb(255 255 255 / 52%);
+  border-radius: 1rem;
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 18%) 0%, transparent 40%, rgb(255 255 255 / 5%) 100%),
+    linear-gradient(118deg,
+      color-mix(in srgb, var(--kpi-start) 74%, transparent) 0%,
+      color-mix(in srgb, var(--kpi-end) 46%, #071a2c) 100%);
+  backdrop-filter: blur(12px) saturate(138%);
+  -webkit-backdrop-filter: blur(12px) saturate(138%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 28%), 0 8px 20px -16px rgb(0 0 0 / 55%);
+}
+.garage-kpi-connected {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 32%), 0 10px 22px -15px var(--kpi-start);
+}
+.garage-kpi-toolbar {
+  border-bottom-color: rgb(255 255 255 / 22%);
+  background: linear-gradient(100deg, rgb(255 255 255 / 20%), rgb(255 255 255 / 5%));
+}
+.garage-kpi-details, .garage-kpi-toolbar { text-shadow: 0 1px 3px rgb(0 0 0 / 34%); }
+.garage-kpi-originkit-layer { opacity: 0.62; }
+
+.vplm-zone-hero {
+  border: 1px solid rgb(255 255 255 / 46%);
+  border-top-color: rgb(255 255 255 / 70%);
+  background:
+    linear-gradient(140deg, rgb(255 255 255 / 23%) 0%, transparent 42%, rgb(255 255 255 / 7%) 100%),
+    linear-gradient(125deg,
+      color-mix(in srgb, var(--zone-start) 84%, transparent),
+      color-mix(in srgb, var(--zone-end) 88%, transparent));
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 35%), 0 12px 25px -20px rgb(0 0 0 / 64%);
+  text-shadow: 0 1px 3px rgb(0 0 0 / 30%);
+}
+.vplm-zone-hero:hover {
+  border-color: rgb(255 255 255 / 78%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 42%), 0 16px 28px -19px rgb(0 0 0 / 67%);
+}
+.vplm-zone-hero:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 3px;
+}
+.vplm-zone-hero-kicker,
+.vplm-zone-hero-chevron {
+  border: 1px solid rgb(255 255 255 / 33%);
+  background: rgb(255 255 255 / 15%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 20%);
+}
+.vplm-zone-hero-footer { border-top-color: rgb(255 255 255 / 35%); }
+@media (prefers-reduced-transparency: reduce) {
+  .garage-kpi { backdrop-filter: none; -webkit-backdrop-filter: none; background: linear-gradient(118deg, var(--kpi-start), #071a2c); }
+  .vplm-zone-hero { backdrop-filter: none; -webkit-backdrop-filter: none; background: linear-gradient(125deg, var(--zone-start), var(--zone-end)); }
+}
