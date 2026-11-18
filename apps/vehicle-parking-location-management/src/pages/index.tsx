@@ -122,7 +122,7 @@ function AuthScreen() {
           <div className="relative z-10 mt-2 min-h-[295px] flex-1">
             <LoginBrandOrbit />
             <span className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-emerald-300/15 bg-slate-950/40 px-3 py-1 text-[10px] font-medium tracking-wide text-emerald-200/65">
-              Drag to orbit · Globe ↔ Parking halo
+              Connected - Alive.
             </span>
           </div>
 
