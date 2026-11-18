@@ -340,17 +340,23 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     setDraft(old=>[...old,{plate:'',zone:zone,bay:'',xParking:false,confidence:'Manual'}]);
     setStatus('review',100,'Manual review mode: enter the registration and exact bay for every vehicle, then verify and apply.');
   };
-  const showSelectedFile=(e:ChangeEvent<HTMLInputElement>)=>{
-    const file=e.currentTarget.files?.[0];
-    if(!file){setStatus('idle',0,'No file selected. Choose an Excel workbook or photo.');return;}
+  const receiveFile=(file:File|undefined, source:string)=>{
+    if(!file){
+      setStatus('error',0,source+': Android did not provide a file. Use the Files app / Downloads, or paste the OCR rows below.');
+      return;
+    }
     selectedFileRef.current=file;
     setSelectedFileName(file.name);
     setLastFile(file.name);setLastFileSize(file.size);
-    setStatus('idle',0,'Selected '+file.name+'. Tap Read selected file to start processing.');
+    setStatus('preparing',2,source+': received '+file.name+' ('+Math.ceil(file.size/1024)+' KB). Beginning local read…');
+    void ingest(file);
   };
-  const ingest=async()=>{
+  const showSelectedFile=(e:ChangeEvent<HTMLInputElement>)=>{
+    receiveFile(e.currentTarget.files?.[0],'File picker');
+  };
+  const ingest=async(selected?:File)=>{
     if(readingRef.current)return;
-    const file=selectedFileRef.current ?? fileInputRef.current?.files?.[0];
+    const file=selected ?? selectedFileRef.current ?? fileInputRef.current?.files?.[0];
     if(!file){
       setStatus('error',0,'No file is selected. Tap Choose file, select the workbook, then Read selected file.');
       return;
@@ -430,7 +436,13 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       setStatus('error',0,'Import stopped: '+message+'. No parking changes were made. Retry or paste OCR results manually.');
       setUploadError(message);toast.error(message);
     }
-    finally{readingRef.current=false;setReading(false);setScanProgress('');recordActivity('File read process ended. Current result is shown above.');}
+    finally{
+      readingRef.current=false;setReading(false);setScanProgress('');
+      // Reset only the native input; retain the File object separately for retry.
+      // Android can clear its native input after picker/DOM events.
+      if(fileInputRef.current)fileInputRef.current.value='';
+      recordActivity('File read process ended. Current result is shown above.');
+    }
   };
   const resolveBay=(row:Draft)=>{
     if(row.zone==='Unassigned Bay')return undefined;
@@ -499,7 +511,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       setUploadError(message);setStatus('error',15,'Update failed: '+message+'. No successful cloud save confirmed.');
     } finally {setApplying(false);}
   };
-  return <Card><CardHeader><CardTitle>Multi-area Parking Sheet Bulk Import · Status v5</CardTitle>
+  return <Card><CardHeader><CardTitle>Multi-area Parking Sheet Bulk Import · Status v6</CardTitle>
     <CardDescription>Admin and Supervisor only. Accommodation A/B/C, Reception R01–R91 and other configured parking zones. Review every proposed movement before saving.</CardDescription>
     </CardHeader><CardContent className="space-y-3">
     <div className="flex flex-wrap items-center gap-3">
@@ -519,10 +531,17 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         <label htmlFor="vplm-parking-file" className="text-sm font-semibold">Select parking file (Android / Excel / Photo)</label>
         <input id="vplm-parking-file" ref={fileInputRef} type="file" className="block w-full max-w-full rounded-md border border-primary bg-background p-2 text-sm"
           accept=".xlsx,.csv,image/png,image/jpeg,image/webp,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          onChange={showSelectedFile} disabled={reading||applying} aria-label="Upload parking sheet" />
-        <p role="status" className="text-xs font-medium">{selectedFileName ? 'Selected: '+selectedFileName : 'No file selected yet. Choose the file from Android Downloads or Files first.'}</p>
+          onChange={showSelectedFile}
+          onInput={e=>{const file=e.currentTarget.files?.[0];
+            if(file && file!==selectedFileRef.current)receiveFile(file,'Android input');}}
+          disabled={reading||applying} aria-label="Upload parking sheet" />
+        <p role="status" className="text-xs font-medium">{selectedFileName ? 'Received: '+selectedFileName : 'No file received. Choose the file from Android Files / Downloads.'}</p>
+        <div className="rounded-md border border-dashed p-3 text-xs" onDragOver={e=>e.preventDefault()}
+          onDrop={e=>{e.preventDefault();receiveFile(e.dataTransfer.files?.[0],'Drag and drop');}}>
+          You can also drag an Excel, CSV or photo file here from a desktop.
+        </div>
         <Button type="button" onClick={()=>void ingest()} disabled={reading||applying}>
-          {reading?'Reading selected file…':'Read selected file'}
+          {reading?'Reading selected file…':'Retry reading selected file'}
         </Button>
       </div>
       <Button type="button" variant="outline" onClick={startManualReview} disabled={disabled||reading||applying}>Add vehicle manually to review</Button>
@@ -537,7 +556,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     <p className="text-xs text-muted-foreground">Other parking areas remain available in normal Assignment and Transfer. Each bulk import affects only the selected area.</p>
     <p className="text-xs text-muted-foreground">Password-protected workbooks require an unprotected XLSX/CSV copy.</p>
     <section role="status" aria-live="polite" className="space-y-2 rounded-md border-2 border-primary/50 p-3" data-import-version="ocr-status-v3">
-      <p className="text-xs font-semibold">OCR importer diagnostics v3 · read/review can run while cloud saving is temporarily unavailable.</p>
+      <p className="text-xs font-semibold">Import diagnostics v6 · file reading starts automatically when Android returns a file.</p>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm font-semibold">Import status: {{
           idle:'Ready',preparing:'Preparing file',recognizing:'OCR in progress',review:'Ready for review',
