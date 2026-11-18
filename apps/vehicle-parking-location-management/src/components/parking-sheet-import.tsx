@@ -120,7 +120,7 @@ async function xlsxMembers(buffer: ArrayBuffer): Promise<Map<string,string>> {
   }
   return members;
 }
-async function parseTemplateXlsx(file: File, selectedZone: string): Promise<Draft[]> {
+async function parseTemplateXlsx(file: File): Promise<Draft[]> {
   const members=await xlsxMembers(await file.arrayBuffer());
   const sharedXml=members.get('xl/sharedStrings.xml');
   const xmlParser=new DOMParser();
@@ -191,9 +191,7 @@ async function parseTemplateXlsx(file: File, selectedZone: string): Promise<Draf
         if(!isPlate(plate)||!/^\d{1,3}$/.test(slot)){
           throw new Error('Invalid vehicle or parking slot on Excel row '+line.getAttribute('r')+'. Please correct the workbook.');
         }
-        const num=Number(slot);
-        // The combined accommodation register covers A 1-46, B 47-90 and C 91-107.
-        // Other ranges use the administrator's chosen source zone.
+        // Map each accommodation registration from its bay number.
         output.push(accommodationDraft(plate,slot,'Excel row '+line.getAttribute('r')));
       }
       if(!output.length)throw new Error('The two-column Excel sheet contains no vehicle entries.');
@@ -340,7 +338,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         setStatus('review',100,imported.length+' combined A/B/C CSV entries ready to review.');
       }else if(/\.xlsx$/i.test(file.name)){
         setStatus('preparing',30,'Reading Excel workbook locally…');
-        const imported=await parseTemplateXlsx(file,zone);
+        const imported=await parseTemplateXlsx(file);
         setDraft(imported.map(row=>accommodationDraft(row.plate,row.bay,row.confidence||'Excel')));
         setStatus('review',100,imported.length+' combined A/B/C Excel entries ready to review.');
       }else if(file.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(file.name)){
