@@ -29,13 +29,14 @@ Deno.serve(async req=>{
     if(memberError)return reply({error:'Could not verify permissions.'},503);
     if(!member||!['Administrator','Supervisor'].includes(String(member.role)))
       return reply({error:'Admin or Supervisor permission required.'},403);
-    const input=await req.json() as {image?:unknown;mimeType?:unknown;zone?:unknown};
+    const input=await req.json() as {image?:unknown;mimeType?:unknown;zone?:unknown;area?:unknown};
     const image=typeof input.image==='string'?input.image:'';
     const mimeType=typeof input.mimeType==='string'?input.mimeType:'';
     const zone=typeof input.zone==='string'?input.zone:'';
+    const area=typeof input.area==='string'?input.area:zone;
     if(!['image/jpeg','image/png','image/webp'].includes(mimeType) || image.length>5600000 ||
       !/^[A-Za-z0-9+/]+=*$/.test(image)||!image)return reply({error:'Valid image smaller than 4 MB required.'},400);
-    if(zone.length>80)return reply({error:'Invalid parking zone.'},400);
+    if(zone.length>80||area.length>80)return reply({error:'Invalid parking area.'},400);
     const apiKey=Deno.env.get('GEMINI_API_KEY');
     if(!apiKey)return reply({error:'GEMINI_API_KEY is not configured. Please use Excel/CSV import.'},503);
     // Fixed bounded model list: a single slow custom model must never make the
@@ -46,17 +47,23 @@ Deno.serve(async req=>{
     // Compact line records avoid the large repeated JSON keys that caused truncated
     // model responses on full parking sheets. Reject incomplete output, never partially import.
     const instruction = [
-      'Read this VPLM handwritten parking sheet. Output ONLY one line per clearly readable vehicle.',
+      'Read this printed VPLM parking sheet with handwritten vehicle registrations. Output ONLY one line per clearly readable vehicle.',
+      'There are several adjacent BAY and VEHICLE NUMBER column pairs. Each registration belongs to its own immediately adjacent bay label; do not assign a number using another column.',
+      'Accommodation sheet has A01–A46, B47–B90, C91–C107, and a separate extra vehicle column for X Parking next to the same bay. Emit TWO lines with same bay only when two separate registrations are clearly present, and mark the extra column X=YES.',
+      'Reception sheet has R01–R91 split across four side-by-side BAY / VEHICLE NUMBER pairs. No Reception X Parking. Use the R bay from the same pair.',
+      'A section labeled MANUAL ENTRY below Reception or other sheets has registration numbers but NO confirmed bay: assign Unassigned Bay and blank BAY.',
+      'Blank cells, dashes and empty spaces do not represent vehicles. Ignore dates, printed bay labels, totals, annotations and T/Q symbols after registration digits.',
+      'Do not invent or guess uncertain handwriting; omit unreadable numbers. All results require manual review before parking updates.',
       'Each line has exactly five pipe-separated fields: PLATE|ZONE|BAY|X|CONFIDENCE.',
       'Example: 123456|A|24|NO|high and 987654|A|24|YES|medium.',
       'PLATE is the handwritten registration, not the printed bay identifier. Keep leading zeros.',
-      'ZONE is the parking zone; use the requested zone unless the sheet clearly states another.',
+      'ZONE is A, B, C for accommodation bays; Reception for R numbered bays; Unassigned Bay for manual entries; otherwise the requested area.',
       'BAY is its printed bay number, or blank for a manually entered unassigned vehicle.',
       'X must be YES only for a registration written in the X Parking column; otherwise NO.',
       'CONFIDENCE must be high, medium, or low. Skip unreadable plates; never guess digits.',
       'MANUAL ENTRY registrations must use zone Unassigned Bay, blank bay and NO for X.',
       'Never output headings, dates, explanations, markdown, JSON or blank lines.',
-      'Requested sheet zone: ' + zone
+      'Selected parking area: ' + area + '. Requested default zone: ' + zone
     ].join(' ');
     const requestBody=JSON.stringify({contents:[{role:'user',parts:[{text:instruction},
       {inlineData:{mimeType,data:image}}]}],
@@ -106,7 +113,7 @@ Deno.serve(async req=>{
     if(rows.length>300) {
       return reply({error:'Too many registrations in one upload. Split the photo into two parts. No parking data was changed.'},422);
     }
-    return reply({rows});
+    return reply({rows,area});
   }catch(error){
     console.error('Parking sheet reader failed:',error instanceof Error?error.message:'Unknown');
     return reply({error:'Could not read the parking photograph.'},500);
