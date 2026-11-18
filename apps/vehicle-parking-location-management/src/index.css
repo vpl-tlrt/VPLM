@@ -921,6 +921,86 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
     .garage-kpi-connected .garage-kpi-content::after,
     .garage-kpi-connected::before { animation: none !important; transition: none !important; }
   }
+  /* TEST: OriginKit Pixel Arc-inspired halftone rings. CSS-only to avoid a
+     permanent WebGL render loop on Android; respects occupancy color classes. */
+  .garage-kpi-pixel-arc {
+    position: absolute;
+    z-index: 0;
+    right: -3.1rem;
+    bottom: -4.4rem;
+    width: 12rem;
+    height: 12rem;
+    border-radius: 50%;
+    pointer-events: none;
+    opacity: 0.69;
+    background-image: radial-gradient(circle, rgb(255 255 255 / 70%) 1.05px, transparent 1.65px);
+    background-size: 10px 10px;
+    -webkit-mask-image: radial-gradient(circle, transparent 0 27%, black 29% 58%, transparent 61% 100%);
+    mask-image: radial-gradient(circle, transparent 0 27%, black 29% 58%, transparent 61% 100%);
+    transform-origin: 50% 50%;
+    animation: vplm-pixel-arc-orbit 22s linear infinite;
+  }
+  .garage-kpi-pixel-arc::after {
+    content: "";
+    position: absolute;
+    inset: 16%;
+    border-radius: 50%;
+    border: 1px dashed rgb(255 255 255 / 24%);
+  }
+  .garage-kpi-not-live .garage-kpi-pixel-arc { animation-play-state: paused; opacity: 0.32; }
+  .garage-kpi-details, .garage-kpi-toolbar { position: relative; z-index: 2; }
+  @keyframes vplm-pixel-arc-orbit {
+    from { transform: rotate(0deg) scale(0.98); }
+    to { transform: rotate(360deg) scale(0.98); }
+  }
+
+  /* TEST: miniature spherical globe for the *existing* cloud sync button.
+     Keeps the click target, title, connectivity state and sync() callback. */
+  .vplm-cloud-globe-button { display: inline-flex; align-items: center; gap: 0.5rem; min-width: 2.75rem; min-height: 2.75rem; }
+  .vplm-cloud-globe {
+    position: relative;
+    display: inline-block;
+    flex: none;
+    width: 1.65rem;
+    height: 1.65rem;
+    border-radius: 50%;
+    overflow: hidden;
+    background: radial-gradient(circle at 30% 24%, #d3fbff 0%, #4dbfcf 18%, #1d8dbf 44%, #09446e 75%, #052438 100%);
+    border: 1px solid rgb(255 255 255 / 65%);
+    box-shadow: inset -5px -3px 7px rgb(0 0 0 / 45%), inset 3px 2px 4px rgb(255 255 255 / 25%), 0 0 8px rgb(53 215 244 / 35%);
+  }
+  .vplm-cloud-globe-grid {
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 300%;
+    height: 100%;
+    opacity: 0.8;
+    border-radius: 45%;
+    background-image:
+      repeating-linear-gradient(90deg, transparent 0 9px, rgb(215 252 255 / 57%) 10px, transparent 11px),
+      repeating-linear-gradient(0deg, transparent 0 7px, rgb(215 252 255 / 35%) 8px, transparent 9px),
+      radial-gradient(ellipse at 46% 50%, rgb(55 236 210 / 54%) 0 16%, transparent 18%),
+      radial-gradient(ellipse at 65% 38%, rgb(44 213 167 / 54%) 0 12%, transparent 15%);
+    animation: vplm-cloud-globe-spin 7s linear infinite;
+  }
+  .vplm-cloud-globe-shine {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: radial-gradient(circle at 28% 26%, rgb(255 255 255 / 75%), transparent 35%),
+      linear-gradient(95deg, transparent 45%, rgb(0 0 0 / 25%) 98%);
+    pointer-events: none;
+  }
+  .cloud-globe-disconnected .vplm-cloud-globe { filter: grayscale(0.8); box-shadow: inset -4px -3px 6px rgb(0 0 0 / 45%); }
+  .cloud-globe-disconnected .vplm-cloud-globe-grid { animation-play-state: paused; }
+  @keyframes vplm-cloud-globe-spin {
+    from { transform: translateX(0); }
+    to { transform: translateX(33.333%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .garage-kpi-pixel-arc, .vplm-cloud-globe-grid { animation: none !important; }
+  }
   .garage-kpi-icon { display: none; }
   .zone-navigation { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.65rem; }
   .zone-navigation-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--border); border-radius: 0.9rem; padding: 0.8rem 0.9rem; background: var(--card); color: var(--card-foreground); text-align: left; box-shadow: 0 10px 24px -22px var(--foreground); transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
