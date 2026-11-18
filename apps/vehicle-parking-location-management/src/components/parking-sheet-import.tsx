@@ -8,17 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 type Draft = { plate: string; zone: string; bay: string; xParking: boolean; confidence?: string };
 const normalize = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '');
-const asZone = (v: string) => {
-  const normalized = v.toLowerCase().replace(/[^a-z0-9]+/g, '');
-  return ({acczonea:'A', zonea:'A', a:'A', acczoneb:'B', zoneb:'B', b:'B',
-    acczonec:'C', zonec:'C', c:'C', workshop:'Workshop', workshopbay:'Workshop',
-    reception:'Reception', receptionparking:'Reception',
-    treception:'Toyota Reception', toyotareception:'Toyota Reception',
-    lreception:'Lexus Reception', lexusreception:'Lexus Reception',
-    washingarea:'Washing Area', bp1:'BP1', bp2:'BP2', bp3:'BP3',
-    workshopcentrebay:'Workshop Centre Bay', managerparking:'Manager Parking',
-    unassigned:'Unassigned Bay', unassignedbay:'Unassigned Bay' } as Record<string,string>)[normalized] ?? v;
-};
 const isPlate = (v: string) => /^[A-Z0-9]{3,20}$/.test(normalize(v));
 const ACC_ZONES=['A','B','C'] as const;
 const accommodationZone=(bay:string):'A'|'B'|'C'|undefined=>{
@@ -76,7 +65,8 @@ const csvRows = (text: string): Draft[] => {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   return lines.slice(1).map(line => {
     const fields = line.split(',').map(v => v.trim().replace(/^"|"$/g,''));
-    return { plate:fields[0] || '',zone:asZone(fields[1] || 'Unassigned Bay'),bay:fields[2] || '',
+    const bay=fields.length>=3 ? fields[2] : fields[1];
+    return { plate:fields[0] || '',zone:accommodationZone(bay||'')||'A',bay:bay||'',
       xParking:/^(x|yes|true|1)$/i.test(fields[3] || '') };
   }).filter(r => r.plate);
 };
