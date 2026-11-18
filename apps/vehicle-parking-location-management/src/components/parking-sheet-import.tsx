@@ -17,7 +17,7 @@ const accommodationZone=(bay:string):'A'|'B'|'C'|undefined=>{
 };
 const accommodationDraft=(plate:string,bay:string,confidence:string):Draft=>{
   const rawBay=bay.trim().toUpperCase();
-  const prefixed=rawBay.match(/^([ABC])[-\\s]?(\\d{1,3})$/);
+  const prefixed=rawBay.match(/^([ABC])[-\s]?(\d{1,3})$/);
   const numericBay=prefixed?prefixed[2]:rawBay;
   const zone=accommodationZone(numericBay);
   if(!zone || (prefixed && prefixed[1]!==zone))
@@ -25,6 +25,21 @@ const accommodationDraft=(plate:string,bay:string,confidence:string):Draft=>{
   return {plate:normalize(plate),zone,bay:String(Number(numericBay)),xParking:false,confidence};
 };
 
+type ImportArea = string;
+const areaDraft=(plate:string,bay:string,confidence:string,area:ImportArea,xParking=false,manual=false):Draft=>{
+  const clean=normalize(plate);
+  if(manual||area==='Unassigned Bay')return {plate:clean,zone:'Unassigned Bay',bay:'',xParking:false,confidence};
+  if(area==='Accommodation')return {...accommodationDraft(plate,bay,confidence),xParking};
+  const raw=bay.trim().toUpperCase();
+  if(area==='Reception'||area==='Workshop'){
+    const match=area==='Reception'?raw.match(/^R?[-\s]?(\d{1,3})$/):raw.match(/^W?[-\s]?(\d{1,3})$/);
+    if(!match)throw new Error('Invalid '+area+' bay '+bay+'. Use '+(area==='Reception'?'R01':'W01')+' or a number.');
+    const num=Number(match[1]);
+    if(num<1||(area==='Reception'&&num>91))throw new Error('Invalid '+area+' bay '+bay+'.');
+    return {plate:clean,zone:area,bay:String(num),xParking:false,confidence};
+  }
+  return {plate:clean,zone:area,bay:raw,xParking:false,confidence};
+};
 type ScannedRegion = { label: string; image: string };
 async function imageToRegions(file: File, mode: 'sections'|'single'): Promise<ScannedRegion[]> {
   const bitmap = await createImageBitmap(file);
@@ -114,7 +129,7 @@ async function xlsxMembers(buffer: ArrayBuffer): Promise<Map<string,string>> {
   }
   return members;
 }
-async function parseTemplateXlsx(file: File): Promise<Draft[]> {
+async function parseTemplateXlsx(file: File, area:ImportArea): Promise<Draft[]> {
   const members=await xlsxMembers(await file.arrayBuffer());
   const sharedXml=members.get('xl/sharedStrings.xml');
   const xmlParser=new DOMParser();
@@ -150,8 +165,7 @@ async function parseTemplateXlsx(file: File): Promise<Draft[]> {
           throw new Error('Check Sorted by Bay row '+row.getAttribute('r')+': invalid vehicle number or bay. No data was changed.');
         }
         const n=Number(bay);
-        if(n<1||n>107)throw new Error('Accommodation bay '+bay+' is outside the supported 1–107 range.');
-        output.push(accommodationDraft(plate,bay,'Sorted by Bay · row '+row.getAttribute('r')));
+        output.push(areaDraft(plate,bay,'Sorted by Bay · row '+row.getAttribute('r'),area));
       }
       if(!output.length)throw new Error('Sorted by Bay has no vehicle entries.');
       return output;
@@ -186,7 +200,7 @@ async function parseTemplateXlsx(file: File): Promise<Draft[]> {
           throw new Error('Invalid vehicle or parking slot on Excel row '+line.getAttribute('r')+'. Please correct the workbook.');
         }
         // Map each accommodation registration from its bay number.
-        output.push(accommodationDraft(plate,slot,'Excel row '+line.getAttribute('r')));
+        output.push(areaDraft(plate,slot,'Excel row '+line.getAttribute('r'),area));
       }
       if(!output.length)throw new Error('The two-column Excel sheet contains no vehicle entries.');
       return output;
@@ -251,7 +265,11 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   const [pastedText,setPastedText]=useState('');
   const [completeZone,setCompleteZone]=useState(false);
   const [reviewedSuggestions,setReviewedSuggestions]=useState<Set<number>>(new Set());
-  const zone='A'; // OCR fallback; final zones are always determined by bay number.
+  const [importArea,setImportArea]=useState<ImportArea>('Accommodation');
+  const availableAreas=['Accommodation','Reception','Workshop',...new Set(locations.map(l=>l.zone).filter(z=>!['A','B','C','Reception','Workshop','Unassigned Bay'].includes(z)))];
+  const zone=importArea==='Accommodation'?'A':importArea;
+  const selectArea=(area:string)=>{setImportArea(area);setDraft([]);setConfirmed(false);setCompleteZone(false);setReviewedSuggestions(new Set());
+    setStatus('idle',0,'Selected '+area+'. Choose the matching parking sheet to continue.');};
   const [reading,setReading]=useState(false);
   const [applying,setApplying]=useState(false);
   const [progress,setProgress]=useState(0);
@@ -274,32 +292,35 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   const [uploadError,setUploadError]=useState('');
   const [moveOccupants,setMoveOccupants]=useState(true);
   const [confirmed,setConfirmed]=useState(false);
-  const zoneNames:string[]=[...ACC_ZONES];
+  const zoneNames:string[]=importArea==='Accommodation'?[...ACC_ZONES]:[importArea];
   const update=(i:number,patch:Partial<Draft>)=>{setDraft(old=>old.map((row,j)=>i===j?{...row,...patch}:row));setConfirmed(false);setReviewedSuggestions(old=>{const n=new Set(old);n.delete(i);return n;});};
   const parseCopiedList=()=>{
-    try {
-      const lines=pastedText.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
+    try{
+      const lines=pastedText.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
       const result:Draft[]=[];
       for(const line of lines){
-        if (/vehicle\s*(number|no)|parking\s*(slot|bay)/i.test(line))continue;
-        const parts=line.split(/[\t,;|]+|\s+/).map(v=>v.trim()).filter(Boolean);
-        if(parts.length!==2)throw new Error('Unrecognized row: '+line.slice(0,80)+'. Use A13 243382 or 243382 13.');
-        const bayPattern=/^(?:[ABC][-\s]?)?\d{1,3}$/i;
-        const firstIsBay=bayPattern.test(parts[0]);
-        const secondIsBay=bayPattern.test(parts[1]);
-        if(firstIsBay===secondIsBay)throw new Error('Ambiguous row: '+line.slice(0,80)+'. Use a zone prefix such as A13 or a clearly identified vehicle/bay column.');
-        const bay=firstIsBay?parts[0]:parts[1];
-        const plate=firstIsBay?parts[1]:parts[0];
-        if(!isPlate(plate))throw new Error('Invalid registration in row: '+line.slice(0,80));
-        result.push(accommodationDraft(plate,bay,'Copied OCR'));
+        if(/vehicle\s*(number|no)|parking\s*(slot|bay)/i.test(line))continue;
+        const parts=line.split(/[\t,;|]+|\s+/).filter(Boolean);
+        if(parts.length<2||parts.length>3)throw new Error('Invalid pasted row: '+line);
+        if(/^(MANUAL|UNASSIGNED)$/i.test(parts[0])){
+          result.push(areaDraft(parts[1],'','Manual',importArea,false,true));continue;
+        }
+        const hasX=/^X$/i.test(parts[2]||'');
+        if(parts.length===3&&!hasX)throw new Error('Only X is allowed as a third column: '+line);
+        const pattern=importArea==='Accommodation'?/^(?:[ABC][-\s]?)?\d{1,3}$/i:
+          importArea==='Reception'?/^(?:R[-\s]?)?\d{1,3}$/i:
+          importArea==='Workshop'?/^(?:W[-\s]?)?\d{1,3}$/i:/^\d{1,3}$/;
+        const a=pattern.test(parts[0]),b=pattern.test(parts[1]);
+        const max=importArea==='Accommodation'?107:importArea==='Reception'?91:200;
+        const first=a&&!b || a&&b&&Number(parts[0])<=max&&Number(parts[1])>max;
+        const second=b&&!a || a&&b&&Number(parts[1])<=max&&Number(parts[0])>max;
+        if(!first&&!second)throw new Error('Ambiguous row: '+line+'. Use R24 / A13 / W10 as a bay label.');
+        result.push(areaDraft(first?parts[1]:parts[0],first?parts[0]:parts[1],'Copied list',importArea,hasX));
       }
-      if(!result.length)throw new Error('Paste vehicle registrations and parking bays first.');
-      setDraft(result);setScanIncomplete(false);setUploadError('');setConfirmed(false);setCompleteZone(false);
-      setReviewedSuggestions(new Set());setMoveOccupants(true);
-      setStatus('review',100,result.length+' pasted rows ready. Check duplicate bays and vehicle matches before applying.');
-    } catch(error){
-      setStatus('error',0,error instanceof Error?error.message:'Could not parse pasted rows.');
-    }
+      if(!result.length)throw new Error('No vehicle rows found.');
+      setDraft(result);setScanIncomplete(false);setUploadError('');setConfirmed(false);setCompleteZone(false);setReviewedSuggestions(new Set());
+      setStatus('review',100,result.length+' '+importArea+' rows ready for review. No changes saved.');
+    }catch(e){const message=e instanceof Error?e.message:'Could not parse rows.';setStatus('error',0,message);setUploadError(message);}
   };
   const startManualReview=()=>{
     if(reading||disabled)return;
@@ -307,8 +328,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     setScanIncomplete(false);
     setUploadError('');
     setConfirmed(false);
-    setDraft(old=>old.length ? [...old,{plate:'',zone:'A',bay:'',xParking:false,confidence:'Manual'}] :
-      [{plate:'',zone:'A',bay:'',xParking:false,confidence:'Manual'}]);
+    setDraft(old=>[...old,{plate:'',zone:zone,bay:'',xParking:false,confidence:'Manual'}]);
     setStatus('review',100,'Manual review mode: enter the registration and exact bay for every vehicle, then verify and apply.');
   };
   const showSelectedFile=(e:ChangeEvent<HTMLInputElement>)=>{
@@ -336,13 +356,13 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       if(/\.csv$/i.test(file.name)){
         const imported=csvRows(await file.text());
         if(!imported.length)throw new Error('No vehicle registration rows found in the CSV.');
-        setDraft(imported.map(row=>accommodationDraft(row.plate,row.bay,'CSV')));
-        setStatus('review',100,imported.length+' combined A/B/C CSV entries ready to review.');
+        setDraft(imported.map(row=>areaDraft(row.plate,row.bay,'CSV',importArea,row.xParking,row.zone==='Unassigned Bay'&&!row.bay)));
+        setStatus('review',100,imported.length+' '+importArea+' CSV rows ready to review.');
       }else if(/\.xlsx$/i.test(file.name)){
         setStatus('preparing',30,'Reading Excel workbook locally…');
-        const imported=await parseTemplateXlsx(file);
-        setDraft(imported.map(row=>accommodationDraft(row.plate,row.bay,row.confidence||'Excel')));
-        setStatus('review',100,imported.length+' combined A/B/C Excel entries ready to review.');
+        const imported=await parseTemplateXlsx(file,importArea);
+        setDraft(imported.map(row=>areaDraft(row.plate,row.bay,row.confidence||'Excel',importArea,row.xParking,row.zone==='Unassigned Bay')));
+        setStatus('review',100,imported.length+' '+importArea+' Excel rows ready to review.');
       }else if(file.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(file.name)){
         if(!supabase)throw new Error('AI scanning requires a live cloud connection.');
         if(file.size>18*1024*1024)throw new Error('Photo too large. Use an image smaller than 18 MB.');
@@ -359,7 +379,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
           setScanProgress('OCR service processing '+region.label+' ('+(i+1)+'/'+regions.length+'). Waiting for response…');
           setStatus('recognizing',20+Math.round(i/regions.length*70),'OCR processing '+region.label+' ('+(i+1)+'/'+regions.length+').');
           const {data,error}=await supabase.functions.invoke('parking-sheet-ocr',{
-            body:{image:region.image,mimeType:'image/jpeg',zone},
+            body:{image:region.image,mimeType:'image/jpeg',zone,area:importArea},
             signal:AbortSignal.timeout(50000)
           });
           if(error){
@@ -376,7 +396,8 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
           if(data?.error)throw new Error(region.label+': '+String(data.error));
           if(!Array.isArray(data?.rows))throw new Error(region.label+': Image scanner returned an invalid result.');
           collected.push(...(data.rows as Array<{plate:string;zone?:string;bay?:string;xParking?:boolean;confidence?:string}>)
-            .map(item=>accommodationDraft(String(item.plate||''),String(item.bay||''),item.confidence||'OCR')));
+            .map(item=>areaDraft(String(item.plate||''),String(item.bay||''),item.confidence||'OCR',importArea,
+              Boolean(item.xParking),String(item.zone||'').toLowerCase().includes('unassigned')));
           // Surface each completed section immediately instead of making the user
           // wait for every section; never save anything until the review is approved.
           for(const row of collected){
@@ -409,7 +430,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         isLiveGarageContainer(loc)))?.id;
   };
   const activeInZone=vehicles.filter(v=>v.status!=='Delivered' && v.status!=='Released' &&
-    locations.some(loc=>ACC_ZONES.some(z=>z===loc.zone) && parkingRecordKey(loc.id)===parkingRecordKey(v.currentLocationId)));
+    locations.some(loc=>(importArea==='Accommodation'?ACC_ZONES.some(z=>z===loc.zone):loc.zone===importArea) && parkingRecordKey(loc.id)===parkingRecordKey(v.currentLocationId)));
   const normalizedPlates=new Set(draft.map(r=>normalize(r.plate)));
   const missingFromZone=activeInZone.filter(v=>!normalizedPlates.has(normalize(v.plateNumber)));
   const similarity=(a:string,b:string)=>{
@@ -449,10 +470,10 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     if(disabled||applying||!confirmed||invalid.length||scanIncomplete||reading||!draft.length)return;
     if(unresolvedMatches)return toast.error('Review every possible OCR match first.');
     const additions=completeZone ? missingFromZone.map(v=>({plate:normalize(v.plateNumber)})) : [];
-    if(completeZone && draft.some(row=>!ACC_ZONES.some(z=>z===row.zone)))return toast.error('Only Accommodation A/B/C can be reconciled.');
+    if(completeZone && draft.some(row=>row.zone!=='Unassigned Bay'&&!zoneNames.includes(row.zone)))return toast.error('Rows outside selected import area.');
     const rows=[...draft.map(row=>({plate:normalize(row.plate),bayId:resolveBay(row),xParking:row.xParking})),...additions];
     if(completeZone && !window.confirm('COMPLETE ZONE CONFIRMATION: Move '+missingFromZone.length+
-      ' vehicles missing from combined Accommodation A/B/C to Unassigned Bay, in addition to the '+draft.length+
+      ' vehicles missing from '+importArea+' to Unassigned Bay, in addition to the '+draft.length+
       ' reviewed entries? This requires a verified complete zone list.'))return;
     setApplying(true);setUploadError('');
     setStatus('applying',15,'Validating parking changes and active requests against MAIN…');
@@ -469,11 +490,16 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       setUploadError(message);setStatus('error',15,'Update failed: '+message+'. No successful cloud save confirmed.');
     } finally {setApplying(false);}
   };
-  return <Card><CardHeader><CardTitle>Accommodation A + B + C Parking Import · Status v4</CardTitle>
-    <CardDescription>Admin and Supervisor only. Combined A/B/C register: bay 1–46 → A, 47–90 → B, 91–107 → C. Review before updating MAIN.</CardDescription>
+  return <Card><CardHeader><CardTitle>Multi-area Parking Sheet Bulk Import · Status v5</CardTitle>
+    <CardDescription>Admin and Supervisor only. Accommodation A/B/C, Reception R01–R91 and other configured parking zones. Review every proposed movement before saving.</CardDescription>
     </CardHeader><CardContent className="space-y-3">
     <div className="flex flex-wrap items-center gap-3">
-      <p className="text-sm font-medium">Area: Accommodation Zones A, B and C combined · zone identified automatically by bay number</p>
+      <label className="text-sm font-medium">Parking area
+        <select className="ml-2 max-w-full rounded border bg-background p-2" value={importArea} onChange={e=>selectArea(e.target.value)}>
+          {availableAreas.map(a=><option key={a} value={a}>{a==='Accommodation'?'Accommodation A/B/C combined':parkingZoneLabel(a)}</option>)}
+        </select>
+      </label>
+      <p className="text-xs text-muted-foreground">{importArea==='Accommodation'?'A01–A46 / B47–B90 / C91–C107, including X Parking.':importArea==='Reception'?'Reception R01–R91; manual entries move to Unassigned Bay.':'Only the selected parking area will be reconciled.'}</p>
       <label className="text-sm">Photo scanning
         <select className="ml-2 rounded border p-2" value={scanMode} onChange={e=>setScanMode(e.target.value as 'sections'|'single')}>
           <option value="sections">Read in sections (recommended)</option>
@@ -499,7 +525,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         onChange={e=>setPastedText(e.target.value)} placeholder={'Vehicle Number    Parking Slot\\n106699    1\\n116905    7'} />
       <Button type="button" variant="outline" disabled={reading||applying||!pastedText.trim()} onClick={parseCopiedList}>Review pasted rows</Button>
     </div>
-    <p className="text-xs text-muted-foreground">This bulk importer covers Accommodation A/B/C only. Reception, Workshop, BP zones and all other parking areas remain available in the normal Vehicle Assignment below.</p>
+    <p className="text-xs text-muted-foreground">Other parking areas remain available in normal Assignment and Transfer. Each bulk import affects only the selected area.</p>
     <p className="text-xs text-muted-foreground">Password-protected workbooks require an unprotected XLSX/CSV copy.</p>
     <section role="status" aria-live="polite" className="space-y-2 rounded-md border-2 border-primary/50 p-3" data-import-version="ocr-status-v3">
       <p className="text-xs font-semibold">OCR importer diagnostics v3 · read/review can run while cloud saving is temporarily unavailable.</p>
@@ -530,7 +556,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     {uploadError&&<p role="alert" className="rounded border border-red-400 bg-red-950/20 p-3 text-sm text-red-600 dark:text-red-300">{uploadError} {draft.length>0?'These partial readings are shown for review only; import is disabled until a complete rescan.':'Existing parking records remain unchanged.'}</p>}
     {draft.length===0 && !reading && <p className="text-sm text-muted-foreground">No registrations are ready for review yet. Upload a completed sheet, use Excel/CSV, or select Add vehicle manually to review. Nothing is saved until approved.</p>}
     {draft.length>0&&<>
-      <p className="text-sm font-medium" id="parking-import-review">Step 2 — Review {draft.length} combined Accommodation A/B/C registrations. {invalid.length} require correction. Duplicate readings must be corrected or removed. Entries with no known parking bay must use Unassigned Bay.</p>
+      <p className="text-sm font-medium" id="parking-import-review">Step 2 — Review {draft.length} {importArea} registrations. {invalid.length} require correction. Duplicate readings must be corrected or removed. Entries with no known parking bay must use Unassigned Bay.</p>
       {duplicateSlots.size>0&&<p role="alert" className="rounded border border-amber-500 p-3 text-sm font-medium">
         {duplicateSlots.size} duplicated parking position(s) need review. Check OCR readings and choose a valid X Parking position if appropriate, correct the bay, or move the extra vehicle to Unassigned Bay. Unsafe assignments are blocked.
       </p>}
@@ -540,7 +566,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         </tr></thead><tbody>{draft.map((row,i)=><tr key={i} className="border-t">
           <td className="p-1"><input className="w-28 rounded border p-2" value={row.plate} onChange={e=>update(i,{plate:e.target.value})}/></td>
           <td className="p-1">{parkingZoneLabel(row.zone)}</td>
-          <td className="p-1"><input className="w-16 rounded border p-2" value={row.bay} placeholder="1–107" onChange={e=>update(i,{bay:e.target.value,zone:accommodationZone(e.target.value)||row.zone})}/></td>
+          <td className="p-1"><input className="w-16 rounded border p-2" value={row.bay} placeholder="Bay / none" onChange={e=>update(i,{bay:e.target.value,zone:importArea==='Accommodation'?accommodationZone(e.target.value)||row.zone:row.zone})}/></td>
           <td className="p-1"><input type="checkbox" checked={row.xParking} onChange={e=>update(i,{xParking:e.target.checked})}/></td>
           <td className="p-1">{row.confidence||'Review'}</td>
           <td className="p-1"><button type="button" onClick={()=>{setDraft(old=>old.filter((_,j)=>i!==j));setConfirmed(false);}}>Remove</button></td>
@@ -566,9 +592,9 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         {destinationOccupants.length>0&&<p>Occupied destination vehicles for proposed relocation: {Array.from(new Set(destinationOccupants.map(item=>item.plateNumber))).join(', ')}</p>}
         <label className="flex items-start gap-2">
           <input type="checkbox" checked={completeZone} onChange={e=>{setCompleteZone(e.target.checked);setConfirmed(false);}} />
-          <span><strong>Complete A/B/C reconciliation</strong> — I confirm this list contains every vehicle parked across A, B and C combined. Propose moving unlisted vehicles to Unassigned Bay.</span>
+          <span><strong>Complete selected-area reconciliation</strong> — I confirm this is the complete list for {importArea}, not a partial photograph. Propose moving unlisted vehicles to Unassigned Bay.</span>
         </label>
-        <p>{missingFromZone.length} currently parked vehicle(s) across Accommodation A/B/C do not appear in this list. {completeZone?'These will be added to the transfer proposal.':'These will NOT be moved.'}</p>
+        <p>{missingFromZone.length} currently parked vehicle(s) in {importArea} do not appear in this list. {completeZone?'These will be added to the transfer proposal.':'These will NOT be moved.'}</p>
         {completeZone&&missingFromZone.length>0&&<p className="break-words font-mono text-xs">Missing: {missingFromZone.map(item=>item.plateNumber).join(', ')}</p>}
 
       </div>
