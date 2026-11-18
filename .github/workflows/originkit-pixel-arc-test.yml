@@ -26,7 +26,7 @@ jobs:
       - name: Install authentic OriginKit data-pixel-arc
         env:
           ORIGINKIT_API_KEY: ${{ secrets.ORIGINKIT_API_KEY }}
-        run: npx --yes originkit@latest add data-pixel-arc --path src/components/originkit
+        run: npx --yes originkit@latest add data-pixel-arc --prompt --path src/components/originkit
       - name: Build TEST
         run: npm run build
       - name: Commit real component to TEST only
