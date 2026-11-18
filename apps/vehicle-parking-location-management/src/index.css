@@ -877,6 +877,50 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   .garage-kpi-details { display: flex; flex: 1; flex-direction: column; justify-content: flex-end; gap: 0.15rem; padding: 1.05rem 0.8rem 0.85rem; }
   .garage-kpi-label { font-size: 0.76rem; font-weight: 600; opacity: 0.88; line-height: 1.25; }
   .garage-kpi-value { font-size: clamp(1.65rem, 3vw, 2.15rem); font-weight: 800; line-height: 1.08; font-variant-numeric: tabular-nums; letter-spacing: -0.025em; }
+  /* Live KPI animation stays cosmetic: sync state, not animation, determines status. */
+  .garage-kpi { transition: background 450ms ease, border-color 450ms ease, box-shadow 400ms ease; }
+  .garage-kpi-connected { box-shadow: 0 9px 24px -18px var(--kpi-start), inset 0 1px 0 rgb(255 255 255 / 16%); }
+  .garage-kpi-not-live { filter: saturate(0.66); }
+  .garage-kpi-live { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .garage-kpi-status-dot {
+    display: inline-block;
+    width: 0.43rem;
+    height: 0.43rem;
+    flex: none;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 2px rgb(255 255 255 / 18%);
+    opacity: 0.9;
+  }
+  .garage-kpi-connected .garage-kpi-status-dot { animation: vplm-kpi-live-pulse 2.8s ease-in-out infinite; }
+  .garage-kpi-content::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(105deg, transparent 0%, transparent 37%, rgb(255 255 255 / 0.11) 49%, transparent 61%, transparent 100%);
+    transform: translateX(-135%);
+  }
+  .garage-kpi-connected .garage-kpi-content::after { animation: vplm-kpi-light-pass 9s ease-in-out infinite; }
+  .garage-kpi-connected::before { animation: vplm-kpi-arc-breathe 6s ease-in-out infinite; }
+  @keyframes vplm-kpi-live-pulse {
+    0%, 100% { opacity: 0.88; box-shadow: 0 0 0 2px rgb(255 255 255 / 18%); }
+    50% { opacity: 1; box-shadow: 0 0 0 5px rgb(255 255 255 / 10%); }
+  }
+  @keyframes vplm-kpi-light-pass {
+    0%, 18% { transform: translateX(-135%); }
+    45%, 100% { transform: translateX(135%); }
+  }
+  @keyframes vplm-kpi-arc-breathe {
+    0%, 100% { opacity: 0.8; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.07); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .garage-kpi, .garage-kpi-connected .garage-kpi-status-dot,
+    .garage-kpi-connected .garage-kpi-content::after,
+    .garage-kpi-connected::before { animation: none !important; transition: none !important; }
+  }
   .garage-kpi-icon { display: none; }
   .zone-navigation { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.65rem; }
   .zone-navigation-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--border); border-radius: 0.9rem; padding: 0.8rem 0.9rem; background: var(--card); color: var(--card-foreground); text-align: left; box-shadow: 0 10px 24px -22px var(--foreground); transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
