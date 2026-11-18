@@ -1803,3 +1803,21 @@ body.neumorphism-mode .garage-kpi::after { background: linear-gradient(90deg, tr
 @media (prefers-reduced-transparency: reduce) {
   body.neumorphism-mode .garage-kpi { backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
+
+
+/* MAIN: remove decorative KPI layers that cause overlapping background boxes.
+   The glass card, header, live status and OriginKit WebGL Pixel Arc remain. */
+.garage-kpi::before,
+.garage-kpi::after,
+.garage-kpi-content::after,
+body.neumorphism-mode .garage-kpi::before,
+body.neumorphism-mode .garage-kpi::after,
+body.neumorphism-mode .garage-kpi-content::after {
+  content: none !important;
+  display: none !important;
+}
+.garage-kpi-originkit-layer {
+  background: transparent !important;
+  border-radius: inherit;
+  overflow: hidden;
+}
