@@ -30,81 +30,44 @@ const smoothstep = (a: number, b: number, x: number) => {
 
 function drawVplmLogo(
   ctx: CanvasRenderingContext2D,
-  cx: number, cy: number, size: number, opacity: number,
+  cx: number, cy: number, height: number, opacity: number,
 ) {
+  // The supplied VPLM artwork is portrait-oriented. Keep the actual
+  // proportions and separate the linework from the turquoise parking P.
+  // All paths are transparent: no white image rectangle, backing circle or glow.
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.scale(size / 1000, size / 1000);
+  ctx.scale(height / 1338, height / 1338);
+  ctx.translate(-512, -669);
   ctx.globalAlpha = opacity;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
+  ctx.lineCap = 'square';
+  ctx.lineJoin = 'miter';
+  ctx.strokeStyle = '#dbfff0';
+  ctx.lineWidth = 39;
+  const stroke = (path: string) => ctx.stroke(new Path2D(path));
 
-  const drawOutline = () => {
-    ctx.beginPath();
-    ctx.arc(0, -145, 392, -Math.PI * 0.1, Math.PI * 1.12);
-    ctx.stroke();
+  // Outer parking orbit (top of the original mark, deliberately open at base).
+  stroke('M 225 745 C 131 587 135 386 237 249 C 331 116 479 77 601 95 C 812 125 947 282 954 480 C 958 594 927 698 857 783');
+  // Rounded, inward-facing parking P: one clean continuous line.
+  stroke('M 381 595 L 381 462 C 381 355 458 287 557 287 C 655 287 739 356 739 461 C 739 563 660 640 556 640 L 322 640 L 179 876');
+  // Connected route / parking-bay lines and two peaks at the right.
+  stroke('M 380 708 L 380 948 L 560 1256 L 741 948');
+  stroke('M 506 650 L 506 872 L 941 872 L 793 695 L 731 774 L 687 716 L 582 871');
+  stroke('M 283 793 L 378 940');
+  // Route arrow; drawn independently so it remains crisp when fading.
+  ctx.fillStyle = '#dbfff0';
+  ctx.beginPath();
+  ctx.moveTo(741, 948);
+  ctx.lineTo(661, 972);
+  ctx.lineTo(723, 1018);
+  ctx.closePath();
+  ctx.fill();
 
-    ctx.beginPath();
-    ctx.moveTo(-182, 170);
-    ctx.lineTo(-182, -120);
-    ctx.arc(0, -120, 182, Math.PI, Math.PI * 2);
-    ctx.lineTo(0, 170);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(-360, 170);
-    ctx.lineTo(-222, -8);
-    ctx.lineTo(-34, -8);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(-138, 28);
-    ctx.lineTo(-138, 458);
-    ctx.lineTo(0, 690);
-    ctx.lineTo(138, 458);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(-10, 170);
-    ctx.lineTo(410, 170);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(96, 170);
-    ctx.lineTo(225, 12);
-    ctx.lineTo(305, 92);
-    ctx.lineTo(392, -16);
-    ctx.lineTo(485, 120);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(205, 555);
-    ctx.lineTo(330, 415);
-    ctx.moveTo(330, 415);
-    ctx.lineTo(321, 532);
-    ctx.moveTo(330, 415);
-    ctx.lineTo(220, 468);
-    ctx.stroke();
-  };
-
-  ctx.strokeStyle = 'rgba(84,232,146,0.22)';
-  ctx.lineWidth = 48;
-  ctx.shadowColor = 'rgba(84,232,146,0.22)';
-  ctx.shadowBlur = 22;
-  drawOutline();
-
-  ctx.strokeStyle = 'rgba(219,255,228,0.88)';
-  ctx.lineWidth = 32;
-  ctx.shadowBlur = 0;
-  drawOutline();
-
+  ctx.fillStyle = '#25c7bc';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = '700 260px Inter, Arial, sans-serif';
-  ctx.fillStyle = 'rgba(18,96,56,0.28)';
-  ctx.fillText('P', 10, -36);
-  ctx.fillStyle = 'rgba(108,255,188,0.95)';
-  ctx.fillText('P', 0, -44);
+  ctx.font = '700 256px Inter, Arial, sans-serif';
+  ctx.fillText('P', 554, 478);
   ctx.restore();
 }
 
@@ -193,20 +156,13 @@ export function LoginBrandOrbit() {
         ctx.arc(p.x, p.y, rad, 0, Math.PI * 2);
         ctx.fill();
       }
-      // Fade the transparent logo in as the full globe forms, then out as
-      // the particles collapse into the parking-bay ring. Leave drag intact.
-      const logoPresence = smoothstep(0.12, 0.96, 1 - collapse);
-      const logoOpacity = logoPresence * 0.94;
-      if (logoOpacity > 0.015) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(centerX, centerY - radius * 0.02, radius * 1.01, 0, Math.PI * 2);
-        ctx.clip();
-        drawVplmLogo(
-          ctx, centerX, centerY + radius * 0.025,
-          radius * (1.34 + logoPresence * 0.08), logoOpacity,
-        );
-        ctx.restore();
+      // The logo belongs to the RING moment only. As soon as the dots
+      // expand back to a globe the mark fades away, then stays invisible.
+      // Both directions use the same collapse value: no phase mismatch.
+      const logoPresence = smoothstep(0.90, 0.985, collapse);
+      if (logoPresence > 0.015) {
+        // Keep the portrait logo centered and fully inside the halo.
+        drawVplmLogo(ctx, centerX, centerY, radius * 1.66, logoPresence * 0.96);
       }
       raf = window.requestAnimationFrame(draw);
     };
@@ -224,7 +180,7 @@ export function LoginBrandOrbit() {
     <canvas
       ref={canvasRef}
       role="img"
-      aria-label="Interactive VPLM globe transforming into a parking halo, with the VPLM logo appearing inside the globe; drag to orbit"
+      aria-label="Interactive VPLM globe transforming into a parking halo, with the VPLM logo briefly appearing when the dots form a ring; drag to orbit"
       className="absolute inset-0 h-full w-full cursor-grab touch-none active:cursor-grabbing"
     />
   );
