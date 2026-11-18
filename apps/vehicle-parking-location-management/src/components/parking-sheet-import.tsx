@@ -262,7 +262,6 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   const [draft,setDraft]=useState<Draft[]>([]);
   const fileInputRef=useRef<HTMLInputElement>(null);
   const photoInputRef=useRef<HTMLInputElement>(null);
-  const pickerOpenedRef=useRef(false);
   const selectedFileRef=useRef<File|null>(null);
   const [selectedFileName,setSelectedFileName]=useState('');
   const readingRef=useRef(false);
@@ -355,16 +354,10 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     void ingest(file);
   };
   const showSelectedFile=(e:ChangeEvent<HTMLInputElement>)=>{
-    pickerOpenedRef.current=false;
     receiveFile(e.currentTarget.files?.[0],'File picker');
   };
   const markPickerOpened=(kind:string)=>{
-    pickerOpenedRef.current=true;
     setStatus('idle',0,kind+' picker opened. Select one file and confirm with the Android Select button.');
-  };
-  const onPickerCancel=()=>{
-    pickerOpenedRef.current=false;
-    setStatus('error',0,'Android picker closed without returning a file. No cloud request was sent. Try selecting a local file through Files / Downloads.');
   };
   const ingest=async(selected?:File)=>{
     if(readingRef.current)return;
@@ -544,13 +537,13 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         <label htmlFor="vplm-parking-file" className="text-sm font-semibold">1. Choose Excel / CSV document</label>
         <input id="vplm-parking-file" ref={fileInputRef} type="file" className="block w-full max-w-full rounded-md border border-primary bg-background p-2 text-sm"
           accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
-          onClick={()=>markPickerOpened('Document')} onCancel={onPickerCancel} onChange={showSelectedFile}
+          onClick={()=>markPickerOpened('Document')} onChange={showSelectedFile}
           onInput={e=>{const file=e.currentTarget.files?.[0];if(file && file!==selectedFileRef.current)receiveFile(file,'Document input');}}
           disabled={reading||applying} aria-label="Upload Excel or CSV parking register" />
         <label htmlFor="vplm-parking-photo" className="text-sm font-semibold">2. Or choose parking photograph</label>
         <input id="vplm-parking-photo" ref={photoInputRef} type="file" className="block w-full max-w-full rounded-md border border-primary bg-background p-2 text-sm"
           accept="image/jpeg,image/png,image/webp,image/*"
-          onClick={()=>markPickerOpened('Photo')} onCancel={onPickerCancel} onChange={showSelectedFile}
+          onClick={()=>markPickerOpened('Photo')} onChange={showSelectedFile}
           onInput={e=>{const file=e.currentTarget.files?.[0];if(file && file!==selectedFileRef.current)receiveFile(file,'Photo input');}}
           disabled={reading||applying} aria-label="Upload parking register photograph" />
         <p role="status" className="text-xs font-medium">{selectedFileName ? 'Received: '+selectedFileName : 'No file received. Choose the file from Android Files / Downloads.'}</p>
