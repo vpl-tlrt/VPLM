@@ -241,6 +241,8 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
 }){
   const [draft,setDraft]=useState<Draft[]>([]);
   const fileInputRef=useRef<HTMLInputElement>(null);
+  const selectedFileRef=useRef<File|null>(null);
+  const [selectedFileName,setSelectedFileName]=useState('');
   const readingRef=useRef(false);
   const [pastedText,setPastedText]=useState('');
   const [completeZone,setCompleteZone]=useState(false);
@@ -304,12 +306,14 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   const showSelectedFile=(e:ChangeEvent<HTMLInputElement>)=>{
     const file=e.currentTarget.files?.[0];
     if(!file){setStatus('idle',0,'No file selected. Choose an Excel workbook or photo.');return;}
+    selectedFileRef.current=file;
+    setSelectedFileName(file.name);
     setLastFile(file.name);setLastFileSize(file.size);
     setStatus('idle',0,'Selected '+file.name+'. Tap Read selected file to start processing.');
   };
   const ingest=async()=>{
     if(readingRef.current)return;
-    const file=fileInputRef.current?.files?.[0];
+    const file=selectedFileRef.current ?? fileInputRef.current?.files?.[0];
     if(!file){
       setStatus('error',0,'No file is selected. Tap Choose file, select the workbook, then Read selected file.');
       return;
@@ -473,13 +477,22 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         <input id="vplm-parking-file" ref={fileInputRef} type="file" className="block w-full max-w-full rounded-md border border-primary bg-background p-2 text-sm"
           accept=".xlsx,.csv,image/png,image/jpeg,image/webp,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           onChange={showSelectedFile} disabled={reading||applying} aria-label="Upload parking sheet" />
+        <p role="status" className="text-xs font-medium">{selectedFileName ? 'Selected: '+selectedFileName : 'No file selected yet. Choose the file from Android Downloads or Files first.'}</p>
         <Button type="button" onClick={()=>void ingest()} disabled={reading||applying}>
           {reading?'Reading selected file…':'Read selected file'}
         </Button>
       </div>
       <Button type="button" variant="outline" onClick={startManualReview} disabled={disabled||reading||applying}>Add vehicle manually to review</Button>
     </div>
-    <p className="text-xs text-muted-foreground">Password-protected Excel workbooks are not readable. Use an unprotected .xlsx/CSV copy. File selection should immediately show the filename in the status panel.</p>
+    <div className="space-y-2 rounded border p-3">
+      <p className="text-sm font-semibold">Alternative: paste copied OCR / Excel rows</p>
+      <p className="text-xs text-muted-foreground">If Android does not select the Excel file, copy the vehicle number and bay columns from Excel and paste here (one row per line). No cloud save occurs until review and confirmation.</p>
+      <textarea aria-label="Paste accommodation vehicle number and bay rows" className="min-h-24 w-full rounded border bg-background p-2 font-mono text-sm" value={pastedText}
+        onChange={e=>setPastedText(e.target.value)} placeholder={'Vehicle Number    Parking Slot\\n106699    1\\n116905    7'} />
+      <Button type="button" variant="outline" disabled={reading||applying||!pastedText.trim()} onClick={parseCopiedList}>Review pasted rows</Button>
+    </div>
+    <p className="text-xs text-muted-foreground">This bulk importer covers Accommodation A/B/C only. Reception, Workshop, BP zones and all other parking areas remain available in the normal Vehicle Assignment below.</p>
+    <p className="text-xs text-muted-foreground">Password-protected workbooks require an unprotected XLSX/CSV copy.</p>
     <section role="status" aria-live="polite" className="space-y-2 rounded-md border-2 border-primary/50 p-3" data-import-version="ocr-status-v3">
       <p className="text-xs font-semibold">OCR importer diagnostics v3 · read/review can run while cloud saving is temporarily unavailable.</p>
       <div className="flex flex-wrap items-center justify-between gap-2">
