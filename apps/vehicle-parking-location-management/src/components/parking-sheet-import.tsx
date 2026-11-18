@@ -26,20 +26,30 @@ const accommodationDraft=(plate:string,bay:string,confidence:string):Draft=>{
 };
 
 type ImportArea = string;
-const areaDraft=(plate:string,bay:string,confidence:string,area:ImportArea,xParking=false,manual=false):Draft=>{
+const RECEPTION_MANAGER='Reception + Manager Parking';
+const allowedZones=(area:ImportArea):string[]=>area==='Accommodation'?[...ACC_ZONES]:
+  area===RECEPTION_MANAGER?['Reception','Manager Parking']:[area];
+const areaDraft=(plate:string,bay:string,confidence:string,area:ImportArea,xParking=false,manual=false,reportedZone=''):Draft=>{
   const clean=normalize(plate);
   if(manual||area==='Unassigned Bay')return {plate:clean,zone:'Unassigned Bay',bay:'',xParking:false,confidence};
   if(area==='Accommodation')return {...accommodationDraft(plate,bay,confidence),xParking};
   const raw=bay.trim().toUpperCase();
-  if(area==='Reception'||area==='Workshop'){
-    const match=area==='Reception'?raw.match(/^R?[-\s]?(\d{1,3})$/):raw.match(/^W?[-\s]?(\d{1,3})$/);
-    if(xParking)throw new Error('X Parking is not configured for '+area+'. Review this row instead of placing it in a regular bay.');
-    if(!match)throw new Error('Invalid '+area+' bay '+bay+'. Use '+(area==='Reception'?'R01':'W01')+' or a number.');
-    const num=Number(match[1]);
-    if(num<1||(area==='Reception'&&num>91))throw new Error('Invalid '+area+' bay '+bay+'.');
-    return {plate:clean,zone:area,bay:String(num),xParking:false,confidence};
+  const reported=reportedZone.trim().toLowerCase();
+  if(area===RECEPTION_MANAGER && (reported==='manager parking'||reported==='manager'||raw==='MANAGER')){
+    if(xParking)throw new Error('Manager Parking does not have X positions.');
+    if(raw && raw!=='MANAGER')throw new Error('Manager Parking has no numbered bays: '+bay+'. Review the OCR row.');
+    return {plate:clean,zone:'Manager Parking',bay:'',xParking:false,confidence};
   }
-  return {plate:clean,zone:area,bay:raw,xParking:false,confidence};
+  const destinationArea=area===RECEPTION_MANAGER?'Reception':area;
+  if(destinationArea==='Reception'||destinationArea==='Workshop'){
+    const match=destinationArea==='Reception'?raw.match(/^R?[-\s]?(\d{1,3})$/):raw.match(/^W?[-\s]?(\d{1,3})$/);
+    if(xParking)throw new Error('X Parking is not configured for '+destinationArea+'. Review this row instead of placing it in a regular bay.');
+    if(!match)throw new Error('Invalid '+destinationArea+' bay '+bay+'. Use '+(destinationArea==='Reception'?'R01':'W01')+' or a number.');
+    const num=Number(match[1]);
+    if(num<1||(destinationArea==='Reception'&&num>91))throw new Error('Invalid '+destinationArea+' bay '+bay+'.');
+    return {plate:clean,zone:destinationArea,bay:String(num),xParking:false,confidence};
+  }
+  return {plate:clean,zone:destinationArea,bay:raw,xParking:false,confidence};
 };
 type ScannedRegion = { label: string; image: string };
 async function imageToRegions(file: File, mode: 'sections'|'single'): Promise<ScannedRegion[]> {
@@ -269,8 +279,8 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   const [completeZone,setCompleteZone]=useState(false);
   const [reviewedSuggestions,setReviewedSuggestions]=useState<Set<number>>(new Set());
   const [importArea,setImportArea]=useState<ImportArea>('Accommodation');
-  const availableAreas=['Accommodation','Reception','Workshop',...new Set(locations.map(l=>l.zone).filter(z=>!['A','B','C','Reception','Workshop','Unassigned Bay'].includes(z)))];
-  const zone=importArea==='Accommodation'?'A':importArea;
+  const availableAreas=['Accommodation',RECEPTION_MANAGER,'Workshop',...new Set(locations.map(l=>l.zone).filter(z=>!['A','B','C','Reception','Manager Parking','Workshop','Unassigned Bay'].includes(z)))];
+  const zone=importArea==='Accommodation'?'A':importArea===RECEPTION_MANAGER?'Reception':importArea;
   const selectArea=(area:string)=>{
     if(reading||applying)return;
     selectedFileRef.current=null;
@@ -303,7 +313,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   const [uploadError,setUploadError]=useState('');
   const [moveOccupants,setMoveOccupants]=useState(true);
   const [confirmed,setConfirmed]=useState(false);
-  const zoneNames:string[]=importArea==='Accommodation'?[...ACC_ZONES]:[importArea];
+  const zoneNames:string[]=allowedZones(importArea);
   const update=(i:number,patch:Partial<Draft>)=>{setDraft(old=>old.map((row,j)=>i===j?{...row,...patch}:row));setConfirmed(false);setReviewedSuggestions(old=>{const n=new Set(old);n.delete(i);return n;});};
   const parseCopiedList=()=>{
     try{
@@ -316,13 +326,16 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         if(/^(MANUAL|UNASSIGNED)$/i.test(parts[0])){
           result.push(areaDraft(parts[1],'','Manual',importArea,false,true));continue;
         }
+        if(importArea===RECEPTION_MANAGER && /^(MANAGER|MANAGER-PARKING)$/i.test(parts[0])){
+          result.push(areaDraft(parts[1],'','Manager Parking',importArea,false,false,'Manager Parking'));continue;
+        }
         const hasX=/^X$/i.test(parts[2]||'');
         if(parts.length===3&&!hasX)throw new Error('Only X is allowed as a third column: '+line);
         const pattern=importArea==='Accommodation'?/^(?:[ABC][-\s]?)?\d{1,3}$/i:
-          importArea==='Reception'?/^(?:R[-\s]?)?\d{1,3}$/i:
+          importArea===RECEPTION_MANAGER? /^(?:R[-\s]?)?\d{1,3}$/i : importArea==='Reception'?/^(?:R[-\s]?)?\d{1,3}$/i:
           importArea==='Workshop'?/^(?:W[-\s]?)?\d{1,3}$/i:/^\d{1,3}$/;
         const a=pattern.test(parts[0]),b=pattern.test(parts[1]);
-        const max=importArea==='Accommodation'?107:importArea==='Reception'?91:200;
+        const max=importArea==='Accommodation'?107:importArea===RECEPTION_MANAGER||importArea==='Reception'?91:200;
         const first=a&&!b || a&&b&&Number(parts[0])<=max&&Number(parts[1])>max;
         const second=b&&!a || a&&b&&Number(parts[1])<=max&&Number(parts[0])>max;
         if(!first&&!second)throw new Error('Ambiguous row: '+line+'. Use R24 / A13 / W10 as a bay label.');
@@ -376,12 +389,12 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       if(/\.csv$/i.test(file.name)){
         const imported=csvRows(await file.text());
         if(!imported.length)throw new Error('No vehicle registration rows found in the CSV.');
-        setDraft(imported.map(row=>areaDraft(row.plate,row.bay,'CSV',importArea,row.xParking,row.zone==='Unassigned Bay'&&!row.bay)));
+        setDraft(imported.map(row=>areaDraft(row.plate,row.bay,'CSV',importArea,row.xParking,row.zone==='Unassigned Bay'&&!row.bay,row.zone)));
         setStatus('review',100,imported.length+' '+importArea+' CSV rows ready to review.');
       }else if(/\.xlsx$/i.test(file.name)){
         setStatus('preparing',30,'Reading Excel workbook locally…');
         const imported=await parseTemplateXlsx(file,importArea);
-        setDraft(imported.map(row=>areaDraft(row.plate,row.bay,row.confidence||'Excel',importArea,row.xParking,row.zone==='Unassigned Bay')));
+        setDraft(imported.map(row=>areaDraft(row.plate,row.bay,row.confidence||'Excel',importArea,row.xParking,row.zone==='Unassigned Bay',row.zone)));
         setStatus('review',100,imported.length+' '+importArea+' Excel rows ready to review.');
       }else if(file.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(file.name)){
         if(!supabase)throw new Error('AI scanning requires a live cloud connection.');
@@ -417,7 +430,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
           if(!Array.isArray(data?.rows))throw new Error(region.label+': Image scanner returned an invalid result.');
           collected.push(...(data.rows as Array<{plate:string;zone?:string;bay?:string;xParking?:boolean;confidence?:string}>)
             .map(item=>areaDraft(String(item.plate||''),String(item.bay||''),item.confidence||'OCR',importArea,
-              Boolean(item.xParking),String(item.zone||'').toLowerCase().includes('unassigned'))));
+              Boolean(item.xParking),String(item.zone||'').toLowerCase().includes('unassigned'),String(item.zone||''))));
           // Surface each completed section immediately instead of making the user
           // wait for every section; never save anything until the review is approved.
           for(const row of collected){
@@ -457,7 +470,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         isLiveGarageContainer(loc)))?.id;
   };
   const activeInZone=vehicles.filter(v=>v.status!=='Delivered' && v.status!=='Released' &&
-    locations.some(loc=>(importArea==='Accommodation'?ACC_ZONES.some(z=>z===loc.zone):loc.zone===importArea) && parkingRecordKey(loc.id)===parkingRecordKey(v.currentLocationId)));
+    locations.some(loc=>zoneNames.includes(loc.zone) && parkingRecordKey(loc.id)===parkingRecordKey(v.currentLocationId)));
   const normalizedPlates=new Set(draft.map(r=>normalize(r.plate)));
   const missingFromZone=activeInZone.filter(v=>!normalizedPlates.has(normalize(v.plateNumber)));
   // For OCR registration suggestions compare digit positions, not edit distance:
@@ -553,7 +566,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
           {availableAreas.map(a=><option key={a} value={a}>{a==='Accommodation'?'Accommodation A/B/C combined':parkingZoneLabel(a)}</option>)}
         </select>
       </label>
-      <p className="text-xs text-muted-foreground">{importArea==='Accommodation'?'A01–A46 / B47–B90 / C91–C107, including X Parking.':importArea==='Reception'?'Reception R01–R91; manual entries move to Unassigned Bay.':'Only the selected parking area will be reconciled.'}</p>
+      <p className="text-xs text-muted-foreground">{importArea==='Accommodation'?'A01–A46 / B47–B90 / C91–C107, including X Parking.':importArea===RECEPTION_MANAGER?'Reception R01–R91 plus separately labelled Manager Parking vehicles (unnumbered container, 25 capacity). Manual entries go to Unassigned Bay.':'Only the selected parking area will be reconciled.'}</p>
       <label className="text-sm">Photo scanning
         <select className="ml-2 rounded border p-2" value={scanMode} onChange={e=>setScanMode(e.target.value as 'sections'|'single')}>
           <option value="sections">Read in sections (recommended)</option>
