@@ -30,6 +30,10 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
   const [frame, setFrame] = useState(0);
   const [imageFailed, setImageFailed] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [mobile, setMobile] = useState(false);
+  const [mobileDock, setMobileDock] = useState<{ x: number; y: number } | null>(null);
+  const [mobileReturn, setMobileReturn] = useState<'idle' | 'running' | 'peek'>('idle');
+  const returnStarted = useRef(false);
   const [lookDirection, setLookDirection] = useState<number | null>(null);
   const [transformationFrame, setTransformationFrame] = useState(awake ? 7 : 0);
   const transformationProgress = useRef(awake ? 7 : 0);
@@ -49,6 +53,46 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
   }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)');
+    const update = () => setMobile(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  // The AI header is the landing point. Keep the anchor synchronized with
+  // orientation changes and the mobile browser's dynamic viewport.
+  useEffect(() => {
+    if (!mobile || !awake) return;
+    const updateDock = () => {
+      const panel = document.getElementById('vplm-ai-panel');
+      const rect = panel?.getBoundingClientRect();
+      if (rect) setMobileDock({ x: rect.left + 15, y: rect.top + 9 });
+    };
+    updateDock();
+    window.addEventListener('resize', updateDock);
+    return () => window.removeEventListener('resize', updateDock);
+  }, [mobile, awake]);
+
+  useEffect(() => {
+    if (!awake || !mobile) {
+      returnStarted.current = false;
+      setMobileReturn('idle');
+      if (!awake) setPosition(null);
+      return;
+    }
+    if (transforming || !transformationReady || !mobileDock || returnStarted.current) return;
+    returnStarted.current = true;
+    if (reducedMotion) {
+      setMobileReturn('peek');
+      return;
+    }
+    setMobileReturn('running');
+    const finishRun = window.setTimeout(() => setMobileReturn('peek'), 950);
+    return () => window.clearTimeout(finishRun);
+  }, [awake, mobile, transforming, transformationReady, mobileDock, reducedMotion]);
 
   useEffect(() => {
     const fit = () => setPosition(current => current && ({
@@ -126,6 +170,7 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
   }, [awake, busy, reducedMotion, transforming]);
 
   const start = (event: PointerEvent<HTMLButtonElement>) => {
+    if (mobile && mobileReturn !== 'idle') return;
     if (event.button !== 0) return;
     setLookDirection(null);
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, originX: currentPosition.x, originY: currentPosition.y, moved: false };
@@ -151,6 +196,10 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
+  const returningToAssistant = mobile && awake && mobileReturn !== 'idle' && mobileDock;
+  const peek = returningToAssistant && mobileReturn === 'peek';
+  const displayMood: Mood = returningToAssistant && mobileReturn === 'running' ? 'running-left' : mood;
+
   return (
     <button
       id="vplm-supra-launcher"
@@ -158,14 +207,27 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
       type="button"
       aria-label={awake ? 'Close Ask VPLM AI' : 'Open Ask VPLM AI'}
       aria-expanded={awake}
-      title="Supra Bot · Drag to move · Tap to chat with Ask VPLM AI"
+      title={peek ? 'Supra Bot · Tap to close VPLM AI' : 'Supra Bot · Drag to move · Tap to chat with Ask VPLM AI'}
       onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } onToggle(); }}
       onPointerDown={start}
       onPointerMove={move}
       onPointerUp={finish}
       onPointerCancel={finish}
       className="pointer-events-auto fixed z-[110] flex touch-none select-none flex-col items-center border-0 bg-transparent p-0 text-foreground shadow-none outline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"
-      style={{ left: currentPosition.x, top: currentPosition.y, width: WIDTH, cursor: drag.current?.moved ? 'grabbing' : 'grab' }}
+      style={{
+        left: returningToAssistant ? mobileDock.x : currentPosition.x,
+        top: returningToAssistant ? mobileDock.y : currentPosition.y,
+        width: WIDTH,
+        height: peek ? 92 : undefined,
+        overflow: peek ? 'hidden' : 'visible',
+        alignItems: 'flex-start',
+        transform: peek ? 'scale(0.36)' : undefined,
+        transformOrigin: 'top left',
+        transition: returningToAssistant && !reducedMotion
+          ? 'left 950ms cubic-bezier(.2,.7,.2,1), top 950ms cubic-bezier(.2,.7,.2,1), transform 240ms ease'
+          : undefined,
+        cursor: peek ? 'pointer' : drag.current?.moved ? 'grabbing' : 'grab',
+      }}
     >
       {imageFailed ? (
         <span className="flex items-center justify-center text-5xl" style={{ width: WIDTH, height: HEIGHT }} aria-hidden="true">🤖</span>
@@ -181,7 +243,7 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
               ? `-${Math.floor(transformationFrame) * WIDTH}px 0px`
               : reducedMotion ? '0px 0px' : lookDirection !== null
               ? `-${(lookDirection % 8) * WIDTH}px -${(9 + Math.floor(lookDirection / 8)) * HEIGHT}px`
-              : `-${(frame % STATES[mood][1]) * WIDTH}px -${STATES[mood][0] * HEIGHT}px`,
+              : `-${(frame % STATES[displayMood][1]) * WIDTH}px -${STATES[displayMood][0] * HEIGHT}px`,
             backgroundRepeat: 'no-repeat',
             imageRendering: 'auto',
             filter: 'drop-shadow(0 5px 5px rgba(0,0,0,.32))',
@@ -209,7 +271,7 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
       )}
       <img src={SHEET} alt="" className="hidden" onError={() => setImageFailed(true)} />
       <img src={transformationSheet} alt="" className="hidden" onLoad={() => setTransformationReady(true)} onError={() => setTransformationFailed(true)} />
-      <span className="whitespace-nowrap rounded-full border border-cyan-400/60 bg-slate-950/90 px-2.5 py-1 text-[11px] font-bold text-white shadow-lg">
+      <span className={`${peek ? 'hidden' : ''} whitespace-nowrap rounded-full border border-cyan-400/60 bg-slate-950/90 px-2.5 py-1 text-[11px] font-bold text-white shadow-lg`}>
         {transforming ? 'Transforming…' : busy ? 'AI working' : awake ? 'AI awake' : 'Ask VPLM AI'}
       </span>
     </button>
