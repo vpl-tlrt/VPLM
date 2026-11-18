@@ -97,9 +97,9 @@ export function LoginBrandOrbit() {
       for (const p of pts) {
         const depth = (p.z + 1) / 2;
         const rad = Math.max(0.6, (0.72 + depth * 1.05) * p.w);
-        // Cool cyan with a faint soft-gold highlight: complements the dark login UI.
+        // Emerald shades match the existing sign-in button and dark green login surface.
         const alpha = (0.22 + 0.65 * depth) * (collapse > 0.9 ? 0.96 : 1);
-        ctx.fillStyle = depth > 0.62 ? `rgba(123,238,235,${alpha})` : `rgba(47,151,172,${alpha})`;
+        ctx.fillStyle = depth > 0.62 ? `rgba(128,245,175,${alpha})` : `rgba(32,164,107,${alpha})`;
         ctx.beginPath();
         ctx.arc(p.x, p.y, rad, 0, Math.PI * 2);
         ctx.fill();
