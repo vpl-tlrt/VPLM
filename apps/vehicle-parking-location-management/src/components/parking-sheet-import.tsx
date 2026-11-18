@@ -33,6 +33,7 @@ const areaDraft=(plate:string,bay:string,confidence:string,area:ImportArea,xPark
   const raw=bay.trim().toUpperCase();
   if(area==='Reception'||area==='Workshop'){
     const match=area==='Reception'?raw.match(/^R?[-\s]?(\d{1,3})$/):raw.match(/^W?[-\s]?(\d{1,3})$/);
+    if(xParking)throw new Error('X Parking is not configured for '+area+'. Review this row instead of placing it in a regular bay.');
     if(!match)throw new Error('Invalid '+area+' bay '+bay+'. Use '+(area==='Reception'?'R01':'W01')+' or a number.');
     const num=Number(match[1]);
     if(num<1||(area==='Reception'&&num>91))throw new Error('Invalid '+area+' bay '+bay+'.');
@@ -269,8 +270,15 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   const [importArea,setImportArea]=useState<ImportArea>('Accommodation');
   const availableAreas=['Accommodation','Reception','Workshop',...new Set(locations.map(l=>l.zone).filter(z=>!['A','B','C','Reception','Workshop','Unassigned Bay'].includes(z)))];
   const zone=importArea==='Accommodation'?'A':importArea;
-  const selectArea=(area:string)=>{setImportArea(area);setDraft([]);setConfirmed(false);setCompleteZone(false);setReviewedSuggestions(new Set());
-    setStatus('idle',0,'Selected '+area+'. Choose the matching parking sheet to continue.');};
+  const selectArea=(area:string)=>{
+    if(reading||applying)return;
+    selectedFileRef.current=null;
+    if(fileInputRef.current)fileInputRef.current.value='';
+    setSelectedFileName('');setLastFile('');setLastFileSize(null);setPastedText('');
+    setImportArea(area);setDraft([]);setConfirmed(false);setCompleteZone(false);
+    setScanIncomplete(false);setUploadError('');setReviewedSuggestions(new Set());
+    setStatus('idle',0,'Selected '+area+'. Choose a new matching parking sheet to continue.');
+  };
   const [reading,setReading]=useState(false);
   const [applying,setApplying]=useState(false);
   const [progress,setProgress]=useState(0);
