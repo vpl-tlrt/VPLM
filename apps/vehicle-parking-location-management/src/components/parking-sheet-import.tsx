@@ -460,21 +460,23 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     locations.some(loc=>(importArea==='Accommodation'?ACC_ZONES.some(z=>z===loc.zone):loc.zone===importArea) && parkingRecordKey(loc.id)===parkingRecordKey(v.currentLocationId)));
   const normalizedPlates=new Set(draft.map(r=>normalize(r.plate)));
   const missingFromZone=activeInZone.filter(v=>!normalizedPlates.has(normalize(v.plateNumber)));
-  const similarity=(a:string,b:string)=>{
-    if(a===b)return 0;
-    const d=Array.from({length:b.length+1},(_,i)=>i);
-    for(let i=1;i<=a.length;i++){
-      let prev=d[0];d[0]=i;
-      for(let j=1;j<=b.length;j++){const saved=d[j];d[j]=Math.min(d[j]+1,d[j-1]+1,prev+(a[i-1]===b[j-1]?0:1));prev=saved;}
-    }
-    return d[b.length];
+  // For OCR registration suggestions compare digit positions, not edit distance:
+  // require at least 3 unchanged digits and at most 3 changed digits.
+  // Do not suggest matches across different registration lengths or letter prefixes.
+  const digitDifference=(a:string,b:string):number|null=>{
+    if(a===b || a.length!==b.length || a.length<4 || !/^\\d+$/.test(a) || !/^\\d+$/.test(b))return null;
+    let changed=0;
+    for(let i=0;i<a.length;i++)if(a[i]!==b[i])changed++;
+    return changed>0 && changed<=3 && a.length-changed>=3 ? changed : null;
   };
   const suggestions=draft.map(row=>{
     const p=normalize(row.plate);
     const exact=vehicles.filter(v=>normalize(v.plateNumber)===p && v.status!=='Delivered');
     if(exact.length)return {exact,similar:[] as Vehicle[]};
-    const similar=vehicles.filter(v=>v.status!=='Delivered' && similarity(p,normalize(v.plateNumber))<=2)
-      .sort((a,b)=>similarity(p,normalize(a.plateNumber))-similarity(p,normalize(b.plateNumber))).slice(0,5);
+    const similar=vehicles.filter(v=>v.status!=='Delivered' &&
+      digitDifference(p,normalize(v.plateNumber))!==null)
+      .sort((a,b)=>(digitDifference(p,normalize(a.plateNumber))??99)-
+        (digitDifference(p,normalize(b.plateNumber))??99)).slice(0,5);
     return {exact,similar};
   });
   const unresolvedMatches=suggestions.some((s,i)=>s.similar.length>0 && !reviewedSuggestions.has(i));
@@ -612,6 +614,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         </tr>)}</tbody></table></div>
       <div className="space-y-3 rounded-md border p-3 text-sm">
         <p className="font-semibold">Live parking reconciliation preview</p>
+        <p className="text-xs text-muted-foreground">Possible matches: same-length numbers with at least 3 digits matching in the same positions and no more than 3 different digits. Every suggestion requires manual confirmation.</p>
         <p>{suggestions.filter(item=>item.exact.length>0).length} exact registrations · {suggestions.filter(item=>item.similar.length>0).length} possible OCR mismatches · {new Set(destinationOccupants.map(item=>item.id)).size} destination occupants not on the list</p>
         {suggestions.map((entry,i)=>entry.similar.length>0&&<div key={i} className="flex flex-wrap items-center gap-2 rounded border p-2">
           <span className="font-mono font-semibold">OCR: {draft[i].plate}</span>
