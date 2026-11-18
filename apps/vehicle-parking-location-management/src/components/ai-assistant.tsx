@@ -708,7 +708,7 @@ export default function AiAssistant({
         >
           <header className="flex items-center justify-between gap-3 border-b border-border bg-primary px-4 py-3 text-primary-foreground">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-foreground/15">
+              <span className={`flex h-10 w-10 items-center justify-center rounded-xl bg-primary-foreground/15 ${launcherVisible ? "max-md:invisible" : ""}`}>
                 <Bot size={22} aria-hidden="true" />
               </span>
               <div>
