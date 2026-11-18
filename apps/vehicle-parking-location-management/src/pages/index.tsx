@@ -106,38 +106,38 @@ function AuthScreen() {
         className="grid w-full max-w-4xl overflow-hidden rounded-3xl border border-border bg-card text-card-foreground shadow-2xl md:grid-cols-[1.05fr_0.95fr]"
       >
         {/* Left branding: interactive sphere-to-halo animation. Auth remains separate. */}
-        <div className="relative hidden min-h-[590px] flex-col overflow-hidden bg-[#0d1b23] px-8 pb-8 pt-8 text-slate-100 md:flex">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_42%,rgba(21,105,117,0.20),transparent_67%),linear-gradient(150deg,#122b31_0%,#0b1722_72%,#101c2b_100%)]" />
+        <div className="relative hidden min-h-[590px] flex-col overflow-hidden bg-card px-8 pb-8 pt-8 text-card-foreground md:flex">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_42%,rgba(30,177,108,0.07),transparent_67%)]" />
           <div className="pointer-events-none relative z-10 flex items-center gap-3">
-            <div className="grid size-11 place-items-center rounded-2xl border border-cyan-300/25 bg-cyan-300/10 text-cyan-200">
+            <div className="grid size-11 place-items-center rounded-2xl border border-emerald-300/20 bg-emerald-400/10 text-emerald-200">
               <CarFront className="size-6" />
             </div>
             <div>
-              <p className="font-bold tracking-wide text-slate-50">Vehicle Parking</p>
-              <p className="text-sm text-slate-300">Location Management</p>
+              <p className="font-bold tracking-wide text-foreground">Vehicle Parking</p>
+              <p className="text-sm text-muted-foreground">Location Management</p>
             </div>
           </div>
 
           {/* Keep this layer interactive: drag/flick to orbit, no UI controls over canvas. */}
           <div className="relative z-10 mt-2 min-h-[295px] flex-1">
             <LoginBrandOrbit />
-            <span className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-cyan-200/15 bg-slate-950/40 px-3 py-1 text-[10px] font-medium tracking-wide text-cyan-100/65">
+            <span className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-emerald-300/15 bg-slate-950/40 px-3 py-1 text-[10px] font-medium tracking-wide text-emerald-200/65">
               Drag to orbit · Globe ↔ Parking halo
             </span>
           </div>
 
           {/* Smaller and lower as requested. */}
           <div className="pointer-events-none relative z-10 mt-auto space-y-2 pb-5">
-            <ShieldCheck className="size-6 text-cyan-200/90" />
-            <h1 className="max-w-sm text-xl font-semibold leading-snug tracking-tight text-slate-50">
+            <ShieldCheck className="size-6 text-emerald-200/90" />
+            <h1 className="max-w-sm text-xl font-semibold leading-snug tracking-tight text-foreground">
               Workshop operations, securely connected.
             </h1>
-            <p className="max-w-sm text-xs leading-relaxed text-slate-300">
+            <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
               Sign in to manage vehicle locations, bay assignments, reservations, and road tests.
             </p>
           </div>
-          <div className="pointer-events-none relative z-10 flex items-center gap-2 rounded-lg border border-cyan-200/15 bg-slate-950/50 px-3 py-2 font-mono text-[11px] text-cyan-100/80">
-            <span className="text-cyan-300">&gt;_</span>
+          <div className="pointer-events-none relative z-10 flex items-center gap-2 rounded-lg border border-emerald-300/15 bg-slate-950/50 px-3 py-2 font-mono text-[11px] text-emerald-200/80">
+            <span className="text-emerald-300">&gt;_</span>
             <span>Developed under AAM Small Group Activity - 2026</span>
           </div>
         </div>
