@@ -1,5 +1,6 @@
 import { findActivePickup, loadPickupVehicleLocation, pickupLocationWarning, pickupParkingNotice } from '@/lib/pickup-request-data';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { BookOpen, Bot, CarFront, CircleParking, Maximize2, Minimize2, LoaderCircle, MapPin, MoveRight, Route, Search, Send, Sparkles, X } from 'lucide-react';
 import { mapParkingLocationId, supportsXParkingLocation, type Movement, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
 import { parseAssistantBay } from '@/lib/assistant-bay';
@@ -699,7 +700,9 @@ export default function AiAssistant({
     }
   };
 
-  return (
+  // Mount at the document root so transformed or scrolling dashboard ancestors
+  // cannot trap the fixed mobile overlay inside their containing block.
+  return createPortal(
     <div className={fullScreenAi && open ? "pointer-events-none fixed inset-0 z-[100] flex items-stretch justify-center" : "pointer-events-none fixed inset-x-2 bottom-2 top-2 z-[100] flex min-h-0 items-end justify-end sm:inset-x-3 sm:bottom-3 sm:top-3 md:inset-x-auto md:bottom-5 md:right-5 md:top-5"}>
       {open && (
         <section id="vplm-ai-panel"
@@ -908,6 +911,7 @@ export default function AiAssistant({
         </section>
       )}
       {launcherVisible && <VplmCodexPet awake={open} busy={busy} onToggle={() => onOpenChange(!open)} />}
-    </div>
+    </div>,
+    document.body,
   );
 }
