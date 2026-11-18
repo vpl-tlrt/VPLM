@@ -23,6 +23,8 @@ import { VehicleOverviewDialog } from '@/components/vehicle-overview-dialog';
 import { VehicleModelManagement } from '@/components/vehicle-model-management';
 import AiAssistant from '@/components/ai-assistant';
 import { ParkingSheetImport } from '@/components/parking-sheet-import';
+import { DataPixelGlobe } from '@/components/data-pixel-globe';
+import DataPixelArc from '@/components/originkit/ui/data-pixel-arc';
 import { planParkingBatch, type ParkingImportRow } from '@/lib/parking-batch';
 import { emptyVehicleForm, VehicleFormFields, vehicleColorClass, type VehicleFormData } from '@/components/vehicle-form-fields';
 import { loadBayManagementState, saveBayManagementState, type BayAuditEntry, type BayMaintenance, type BayReservation, xParkingSlotId } from '@/lib/bay-management-data';
@@ -908,7 +910,10 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
               {guestPreview && <Badge variant="secondary" className="shrink-0 border border-amber-500/60 bg-amber-100 font-black text-amber-950">GUEST PREVIEW · NO CLOUD SAVES</Badge>}
               <div className="hidden text-right xl:block"><p className="text-sm font-semibold"><LiveClock formatString="EEE, d MMM" /></p><p className="text-xs text-muted-foreground"><LiveClock formatString="HH:mm:ss" /></p></div>
               {otherSessions > 0 && <span className="hidden rounded-lg border px-2 py-1 text-xs text-muted-foreground sm:inline-flex" title="This account is signed in on more than one tab or device. Concurrent changes are checked before saving.">{otherSessions} other session{otherSessions === 1 ? '' : 's'}</span>}
-              <Button variant={isOnline && syncState !== 'error' ? 'default' : 'secondary'} size="sm" className="rounded-xl" onClick={() => void sync(true)} aria-label={`Data storage status: ${syncLabel}`} title={localGuest || guestPreview ? 'Guest changes are not uploaded.' : lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Click to sync workspace data'}><span className="live-dot" /><span className="hidden lg:inline">{syncLabel}</span></Button>
+              <Button variant="ghost" size="sm" className={`vplm-cloud-globe-button ${isOnline && syncState !== 'error' ? 'cloud-globe-online' : 'cloud-globe-disconnected'}`} onClick={() => void sync(true)} aria-label={`Data storage status: ${syncLabel}. Tap to synchronize.`} title={localGuest || guestPreview ? 'Guest changes are not uploaded.' : lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Click to sync workspace data'}>
+                 <DataPixelGlobe connected={isOnline && syncState !== 'error' && syncState !== 'syncing'} size={36} dotColor="#334155" arcColor="#2563eb" rotationSpeed={1.7} density={220} />
+                 <span className="hidden lg:inline">{syncLabel}</span>
+               </Button>
               <Button variant="outline" size="icon" className="rounded-xl" onClick={handleNotificationClick} onDoubleClick={(event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault()} aria-label={`Notifications. Sound ${soundEnabled ? 'on' : 'off'}. Double-click to toggle sound.`} title={`Notification sound ${soundEnabled ? 'on' : 'off'} · double-click to toggle`}>{soundEnabled ? <Bell /> : <BellOff />}</Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1172,6 +1177,14 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
   const dashboardSyncTitle=dashboardLastSyncAt?
     'Last successful sync: '+new Date(dashboardLastSyncAt).toLocaleString() :
     'No successful cloud sync confirmed';
+  const kpiPixelColor = (usageClass: string): string => ({
+    'usage-green': '#23efaa',
+    'usage-teal': '#33d8ca',
+    'usage-yellow-gold': '#ffd276',
+    'usage-cyan-aqua': '#6ce6ff',
+    'usage-lavender-pink': '#f6a3e1',
+    'usage-coral-red': '#ff917e',
+  } as Record<string, string>)[usageClass] ?? '#8be9ff';
   const countedBayTotal = locations.filter((item: ParkingLocation) => item.zone !== 'Unassigned Bay').length;
   const totalBays = Math.max(countedBayTotal, 1);
   const stats = [
@@ -1346,6 +1359,13 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
         {stats.map(({ label, value, icon: Icon, percent }) =>
           <Card key={label} className={`garage-kpi ${dashboardConnected ? 'garage-kpi-connected' : 'garage-kpi-not-live'} ${label === 'Vacant' ? vacantColorClass(percent, value) : utilizationColorClass(percent)}`}>
             <CardContent className="garage-kpi-content">
+              <div className="garage-kpi-originkit-layer" aria-hidden="true">
+                <DataPixelArc background="#030308" baseColor={kpiPixelColor(label === 'Vacant' ? vacantColorClass(percent, value) : utilizationColorClass(percent))}
+                  accentColor={kpiPixelColor(label === 'Vacant' ? vacantColorClass(percent, value) : utilizationColorClass(percent))}
+                  highlight="#ffffff" density={89} dotSize={69} speed={65} hover={0}
+                  arc={{ center: 80, drop: 0, thickness: 44, falloff: 600 }}
+                  style={{ width: '100%', height: '100%', minWidth: 0, minHeight: 0 }} />
+              </div>
               <div className="garage-kpi-toolbar">
                 <Icon className="garage-kpi-toolbar-icon" aria-hidden="true" />
                 <span className="garage-kpi-live" title={dashboardSyncTitle}><span className="garage-kpi-status-dot" aria-hidden="true" />{dashboardLiveLabel}</span>
@@ -1358,6 +1378,13 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
           </Card>)}
         <Card className={`garage-kpi garage-kpi-utilization ${dashboardConnected ? 'garage-kpi-connected' : 'garage-kpi-not-live'} ${utilizationColorClass(utilization)}`}>
           <CardContent className="garage-kpi-content">
+              <div className="garage-kpi-originkit-layer" aria-hidden="true">
+                <DataPixelArc background="#030308" baseColor={kpiPixelColor(utilizationColorClass(utilization))}
+                  accentColor={kpiPixelColor(utilizationColorClass(utilization))}
+                  highlight="#ffffff" density={89} dotSize={69} speed={65} hover={0}
+                  arc={{ center: 80, drop: 0, thickness: 44, falloff: 600 }}
+                  style={{ width: '100%', height: '100%', minWidth: 0, minHeight: 0 }} />
+              </div>
             <div className="garage-kpi-toolbar">
               <Gauge className="garage-kpi-toolbar-icon" aria-hidden="true" />
               <span className="garage-kpi-live">Live status</span>
