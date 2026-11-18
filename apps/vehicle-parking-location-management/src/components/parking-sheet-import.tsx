@@ -85,8 +85,9 @@ const csvRows = (text: string): Draft[] => {
   return lines.slice(1).map(line => {
     const fields = line.split(',').map(v => v.trim().replace(/^"|"$/g,''));
     const bay=fields.length>=3 ? fields[2] : fields[1];
-    return { plate:fields[0] || '',zone:accommodationZone(bay||'')||'A',bay:bay||'',
-      xParking:/^(x|yes|true|1)$/i.test(fields[3] || '') };
+    const isManual=/^(manual|unassigned)$/i.test(bay||'');
+    return { plate:fields[0] || '',zone:isManual?'Unassigned Bay':accommodationZone(bay||'')||'A',
+      bay:isManual?'':bay||'',xParking:/^(x|yes|true|1)$/i.test(fields[3] || '') };
   }).filter(r => r.plate);
 };
 
@@ -161,7 +162,7 @@ async function parseTemplateXlsx(file: File, area:ImportArea): Promise<Draft[]> 
       for(const row of allRows.slice(headIndex+1)){
         const cells=readRow(row), plate=normalize((cells.get('C')||'').trim()),bay=(cells.get('B')||'').trim();
         if(!plate&&!bay)continue;
-        if(!isPlate(plate)||!/^[0-9]{1,3}$/.test(bay)){
+        if(!isPlate(plate)||(!/^(?:[A-Z][-\s]?)?\d{1,3}$/i.test(bay) && !(area!=='Accommodation'&&bay===''))){
           throw new Error('Check Sorted by Bay row '+row.getAttribute('r')+': invalid vehicle number or bay. No data was changed.');
         }
         const n=Number(bay);
@@ -196,7 +197,7 @@ async function parseTemplateXlsx(file: File, area:ImportArea): Promise<Draft[]> 
         const plate=normalize((cells.get('A')||'').trim());
         const slot=(cells.get('B')||'').trim();
         if(!plate && !slot)continue;
-        if(!isPlate(plate)||!/^\d{1,3}$/.test(slot)){
+        if(!isPlate(plate)||(!/^(?:[A-Z][-\s]?)?\d{1,3}$/i.test(slot) && !(area!=='Accommodation'&&slot===''))){
           throw new Error('Invalid vehicle or parking slot on Excel row '+line.getAttribute('r')+'. Please correct the workbook.');
         }
         // Map each accommodation registration from its bay number.
@@ -460,7 +461,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   });
   const duplicatePlates=new Set(draft.filter((row,i)=>draft.some((other,j)=>j!==i &&
     normalize(other.plate)===normalize(row.plate))).map(row=>normalize(row.plate)));
-  const targetPositions=draft.map(row=>row.zone==='Unassigned Bay'?'':(resolveBay(row)||'invalid')+':'+(row.xParking?'X':'regular'));
+  const targetPositions=draft.map(row=>row.zone==='Unassigned Bay'||(!row.bay&&isLiveGarageContainer(locations.find(loc=>loc.id===resolveBay(row))))?'':(resolveBay(row)||'invalid')+':'+(row.xParking?'X':'regular'));
   const duplicateSlots=new Set(targetPositions.filter((key,i)=>key && targetPositions.some((other,j)=>j!==i&&other===key)));
   const invalid=draft.filter((row,i)=>!isPlate(row.plate) || duplicatePlates.has(normalize(row.plate)) ||
     duplicateSlots.has(targetPositions[i]) ||
