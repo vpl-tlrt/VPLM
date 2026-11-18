@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 import { isLiveGarageContainer, parkingZoneLabel, parkingRecordKey, supportsXParkingLocation, type ParkingLocation, type Vehicle } from '@/lib/parking-data';
@@ -116,6 +116,44 @@ async function parseTemplateXlsx(file: File, selectedZone: string): Promise<Draf
   const shared=sharedXml?Array.from(xmlParser.parseFromString(sharedXml,'application/xml').getElementsByTagName('si'))
     .map(si=>si.textContent||''):[];
   const output: Draft[]=[];
+  // Accommodation OCR transcriptions: title/summary rows followed by
+  // S.No. | Bay Number | Vehicle Number | Sheet Column | Sheet Row.
+  const sortedSheet=members.get('xl/worksheets/sheet1.xml');
+  if(sortedSheet){
+    const xml=xmlParser.parseFromString(sortedSheet,'application/xml');
+    const allRows=Array.from(xml.getElementsByTagName('row'));
+    const readRow=(row:Element)=>{
+      const cells=new Map<string,string>();
+      for(const cell of Array.from(row.getElementsByTagName('c'))){
+        const col=(cell.getAttribute('r')||'').replace(/[0-9]/g,'');
+        const value=cell.getElementsByTagName('v')[0]?.textContent||'';
+        const inline=cell.getElementsByTagName('is')[0]?.textContent||'';
+        cells.set(col,cell.getAttribute('t')==='s'?(shared[Number(value)]||''):
+          cell.getAttribute('t')==='inlineStr'?inline:value);
+      }
+      return cells;
+    };
+    const headIndex=allRows.findIndex(row=>{
+      const cells=readRow(row);
+      return /bay\s*number/i.test(cells.get('B')||'') && /vehicle\s*number/i.test(cells.get('C')||'');
+    });
+    if(headIndex>=0){
+      for(const row of allRows.slice(headIndex+1)){
+        const cells=readRow(row), plate=normalize((cells.get('C')||'').trim()),bay=(cells.get('B')||'').trim();
+        if(!plate&&!bay)continue;
+        if(!isPlate(plate)||!/^[0-9]{1,3}$/.test(bay)){
+          throw new Error('Check Sorted by Bay row '+row.getAttribute('r')+': invalid vehicle number or bay. No data was changed.');
+        }
+        const n=Number(bay);
+        if(n<1||n>107)throw new Error('Accommodation bay '+bay+' is outside the supported 1–107 range.');
+        const mappedZone=n<=46?'A':n<=90?'B':'C';
+        output.push({plate,zone:mappedZone,bay,xParking:false,
+          confidence:'Sorted by Bay · row '+row.getAttribute('r')});
+      }
+      if(!output.length)throw new Error('Sorted by Bay has no vehicle entries.');
+      return output;
+    }
+  }
   // Copilot and ordinary Excel exports often contain two columns instead of the
   // seven-sheet VPLM printable template. Detect that layout by its header.
   const rawFirst=members.get('xl/worksheets/sheet1.xml');
@@ -206,6 +244,8 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   locations: ParkingLocation[]; vehicles: Vehicle[]; onApply:(rows:ParkingImportRow[],relocateOccupants:boolean)=>boolean|Promise<boolean>; disabled?:boolean;
 }){
   const [draft,setDraft]=useState<Draft[]>([]);
+  const fileInputRef=useRef<HTMLInputElement>(null);
+  const readingRef=useRef(false);
   const [pastedText,setPastedText]=useState('');
   const [completeZone,setCompleteZone]=useState(false);
   const [reviewedSuggestions,setReviewedSuggestions]=useState<Set<number>>(new Set());
@@ -265,10 +305,20 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       [{plate:'',zone,bay:'',xParking:false,confidence:'Manual'}]);
     setStatus('review',100,'Manual review mode: enter the registration and exact bay for every vehicle, then verify and apply.');
   };
-  const ingest=async(e:ChangeEvent<HTMLInputElement>)=>{
-    const file=e.target.files?.[0];
-    if(!file){setStatus('idle',0,'No file was selected by Android. Choose an Excel workbook or photo again.');return;}
-    e.target.value='';
+  const showSelectedFile=(e:ChangeEvent<HTMLInputElement>)=>{
+    const file=e.currentTarget.files?.[0];
+    if(!file){setStatus('idle',0,'No file selected. Choose an Excel workbook or photo.');return;}
+    setLastFile(file.name);setLastFileSize(file.size);
+    setStatus('idle',0,'Selected '+file.name+'. Tap Read selected file to start processing.');
+  };
+  const ingest=async()=>{
+    if(readingRef.current)return;
+    const file=fileInputRef.current?.files?.[0];
+    if(!file){
+      setStatus('error',0,'No file is selected. Tap Choose file, select the workbook, then Read selected file.');
+      return;
+    }
+    readingRef.current=true;
     setLastFileSize(file.size);
     recordActivity('File selected: '+file.name+' ('+Math.ceil(file.size/1024)+' KB).');
     setReading(true);setConfirmed(false);setUploadError('');setDraft([]);setScanProgress('');
@@ -341,7 +391,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       setStatus('error',0,'Import stopped: '+message+'. No parking changes were made. Retry or paste OCR results manually.');
       setUploadError(message);toast.error(message);
     }
-    finally{setReading(false);setScanProgress('');recordActivity('File read process ended. Current result is shown above.');}
+    finally{readingRef.current=false;setReading(false);setScanProgress('');recordActivity('File read process ended. Current result is shown above.');}
   };
   const resolveBay=(row:Draft)=>{
     if(row.zone==='Unassigned Bay')return undefined;
@@ -426,10 +476,12 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       </label>
       <div className="flex min-w-0 flex-col gap-1">
         <label htmlFor="vplm-parking-file" className="text-sm font-semibold">Select parking file (Android / Excel / Photo)</label>
-        <input id="vplm-parking-file" type="file" className="block w-full max-w-full rounded-md border border-primary bg-background p-2 text-sm"
+        <input id="vplm-parking-file" ref={fileInputRef} type="file" className="block w-full max-w-full rounded-md border border-primary bg-background p-2 text-sm"
           accept=".xlsx,.csv,image/png,image/jpeg,image/webp,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          onClick={()=>{if(!reading&&!applying)setStatus('idle',0,'File picker opened. Select the XLSX workbook or a photo.');}}
-          onChange={e=>void ingest(e)} disabled={reading||applying} aria-label="Upload parking sheet" />
+          onChange={showSelectedFile} disabled={reading||applying} aria-label="Upload parking sheet" />
+        <Button type="button" onClick={()=>void ingest()} disabled={reading||applying}>
+          {reading?'Reading selected file…':'Read selected file'}
+        </Button>
       </div>
       <Button type="button" variant="outline" onClick={startManualReview} disabled={disabled||reading||applying}>Add vehicle manually to review</Button>
     </div>
