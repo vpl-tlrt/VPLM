@@ -33,7 +33,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/vehicle-parking-location-management/src/components/originkit apps/vehicle-parking-location-management/package.json apps/vehicle-parking-location-management/package-lock.json
+          git add src/components/originkit package.json package-lock.json
           if ! git diff --cached --quiet; then
             git commit -m "TEST: install actual OriginKit Data Pixel Arc source"
             git push origin HEAD:test/originkit-pixel-arc-cloud-globe-20261118
