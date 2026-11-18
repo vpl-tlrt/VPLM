@@ -1,9 +1,10 @@
 import { RequestWorkspaceAccess } from '@/components/workspace-access-requests';
 import { LoginBrandOrbit } from '@/components/login-brand-orbit';
+import { VplmLogo } from '@/components/vplm-logo';
 import { setGuestWorkspace, setOnlineOnlyWorkspace } from '@/lib/local-storage-scope';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { CarFront, Lock, ShieldCheck, UserRound } from 'lucide-react';
+import { Lock, ShieldCheck, UserRound } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ParkingApp } from '@/components/parking-app';
 import { Button } from '@/components/ui/button';
@@ -110,7 +111,7 @@ function AuthScreen() {
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_42%,rgba(30,177,108,0.07),transparent_67%)]" />
           <div className="pointer-events-none relative z-10 flex items-center gap-3">
             <div className="grid size-11 place-items-center rounded-2xl border border-emerald-300/20 bg-emerald-400/10 text-emerald-200">
-              <CarFront className="size-6" />
+              <VplmLogo className="h-8 w-7" />
             </div>
             <div>
               <p className="font-bold tracking-wide text-foreground">Vehicle Parking</p>
@@ -146,7 +147,7 @@ function AuthScreen() {
         <div className="p-6 sm:p-10">
           <div className="mb-8 flex items-center gap-3 md:hidden">
             <div className="grid size-11 place-items-center rounded-2xl bg-primary text-primary-foreground">
-              <CarFront className="size-6" />
+              <VplmLogo className="h-8 w-7" />
             </div>
             <div>
               <p className="font-bold">Vehicle Parking</p>
