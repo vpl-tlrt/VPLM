@@ -76,9 +76,9 @@ const createParkingLayout = (): ParkingLocation[] => {
     lane: 'Container',
     section: 'Live Parking Garage',
     direction: 'Two-way',
-    capacity: name === 'Manager Parking' ? 10 : 15,
+    capacity: name === 'Manager Parking' ? 25 : 15,
     status: 'Available',
-    remarks: name === 'Workshop Centre Bay' ? 'Urgent / Top Priority Vehicles Only; no bay number.' : name === 'Manager Parking' ? 'Manager Parking · 10 spaces; no bay numbers.' : 'Live Parking Garage container; no bay number.',
+    remarks: name === 'Workshop Centre Bay' ? 'Urgent / Top Priority Vehicles Only; no bay number.' : name === 'Manager Parking' ? 'Manager Parking · 25 spaces; no bay numbers.' : 'Live Parking Garage container; no bay number.',
   }));
 
   const unassignedSlots: ParkingLocation[] = Array.from({ length: 200 }, (_, index) => ({
