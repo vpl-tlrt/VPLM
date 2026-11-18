@@ -191,6 +191,16 @@ function __OriginkitBase_DataPixelArc(props: DataPixelArcProps) {
     // pins a control forever.
     const arc_ = { ...ARC_DEFAULTS, ...(arc || {}) }
 
+    // Follow VPLM's second, light UI without recreating the WebGL context.
+    const [lightUi, setLightUi] = React.useState(false)
+    useEffect(() => {
+        const syncTheme = () => setLightUi(document.body.classList.contains("neumorphism-mode"))
+        syncTheme()
+        const observer = new MutationObserver(syncTheme)
+        observer.observe(document.body, { attributes: true, attributeFilter: ["class"] })
+        return () => observer.disconnect()
+    }, [])
+
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const ptrRef = useRef({ tx: -1, ty: -1, x: -1, y: -1 })
     const sizeRef = useRef({ w: 0, h: 0 })
@@ -200,10 +210,10 @@ function __OriginkitBase_DataPixelArc(props: DataPixelArcProps) {
     // the effect deps would rebuild the GL context on every colour tweak.
     const vRef = useRef<Record<string, number | string>>({})
     vRef.current = {
-        bg: background,
-        base: baseColor,
-        accent: accentColor,
-        high: highlight,
+        bg: lightUi ? "#edf0f5" : background,
+        base: lightUi ? "#88a7d0" : baseColor,
+        accent: lightUi ? "#ff8b90" : accentColor,
+        high: lightUi ? "#ffffff" : highlight,
         density: Math.round(clampN(num(density, 100), 24, 260)),
         dotSize: clampN(num(dotSize, 88), 20, 100) / 100,
         speed: clampN(num(speed, 50), 0, 100) / 50,
