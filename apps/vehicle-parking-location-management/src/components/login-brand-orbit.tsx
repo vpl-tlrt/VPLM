@@ -19,6 +19,95 @@ const ease = (t: number) => {
   return r * r * (3 - 2 * r);
 };
 
+
+/** Transparent VPLM mark, drawn directly over the animated globe.
+ * The appearance follows the sphere-to-halo collapse factor.
+ */
+const smoothstep = (a: number, b: number, x: number) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+function drawVplmLogo(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, size: number, opacity: number,
+) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(size / 1000, size / 1000);
+  ctx.globalAlpha = opacity;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  const drawOutline = () => {
+    ctx.beginPath();
+    ctx.arc(0, -145, 392, -Math.PI * 0.1, Math.PI * 1.12);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(-182, 170);
+    ctx.lineTo(-182, -120);
+    ctx.arc(0, -120, 182, Math.PI, Math.PI * 2);
+    ctx.lineTo(0, 170);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(-360, 170);
+    ctx.lineTo(-222, -8);
+    ctx.lineTo(-34, -8);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(-138, 28);
+    ctx.lineTo(-138, 458);
+    ctx.lineTo(0, 690);
+    ctx.lineTo(138, 458);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(-10, 170);
+    ctx.lineTo(410, 170);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(96, 170);
+    ctx.lineTo(225, 12);
+    ctx.lineTo(305, 92);
+    ctx.lineTo(392, -16);
+    ctx.lineTo(485, 120);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(205, 555);
+    ctx.lineTo(330, 415);
+    ctx.moveTo(330, 415);
+    ctx.lineTo(321, 532);
+    ctx.moveTo(330, 415);
+    ctx.lineTo(220, 468);
+    ctx.stroke();
+  };
+
+  ctx.strokeStyle = 'rgba(84,232,146,0.22)';
+  ctx.lineWidth = 48;
+  ctx.shadowColor = 'rgba(84,232,146,0.22)';
+  ctx.shadowBlur = 22;
+  drawOutline();
+
+  ctx.strokeStyle = 'rgba(219,255,228,0.88)';
+  ctx.lineWidth = 32;
+  ctx.shadowBlur = 0;
+  drawOutline();
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '700 260px Inter, Arial, sans-serif';
+  ctx.fillStyle = 'rgba(18,96,56,0.28)';
+  ctx.fillText('P', 10, -36);
+  ctx.fillStyle = 'rgba(108,255,188,0.95)';
+  ctx.fillText('P', 0, -44);
+  ctx.restore();
+}
+
 export function LoginBrandOrbit() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -104,6 +193,21 @@ export function LoginBrandOrbit() {
         ctx.arc(p.x, p.y, rad, 0, Math.PI * 2);
         ctx.fill();
       }
+      // Fade the transparent logo in as the full globe forms, then out as
+      // the particles collapse into the parking-bay ring. Leave drag intact.
+      const logoPresence = smoothstep(0.12, 0.96, 1 - collapse);
+      const logoOpacity = logoPresence * 0.94;
+      if (logoOpacity > 0.015) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(centerX, centerY - radius * 0.02, radius * 1.01, 0, Math.PI * 2);
+        ctx.clip();
+        drawVplmLogo(
+          ctx, centerX, centerY + radius * 0.025,
+          radius * (1.34 + logoPresence * 0.08), logoOpacity,
+        );
+        ctx.restore();
+      }
       raf = window.requestAnimationFrame(draw);
     };
     raf = window.requestAnimationFrame(draw);
@@ -120,7 +224,7 @@ export function LoginBrandOrbit() {
     <canvas
       ref={canvasRef}
       role="img"
-      aria-label="Interactive VPLM animated parking zone globe transforming into a bay halo; drag to orbit"
+      aria-label="Interactive VPLM globe transforming into a parking halo, with the VPLM logo appearing inside the globe; drag to orbit"
       className="absolute inset-0 h-full w-full cursor-grab touch-none active:cursor-grabbing"
     />
   );
