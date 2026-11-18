@@ -9,7 +9,7 @@ export interface Vehicle { id: string; vehicleId: string; plateNumber: string; v
 export const supportsXParkingLocation = (location?: ParkingLocation): boolean => {
   if (!location) return false;
   const bayNumber = Number(location.bayNumber);
-  return (location.zone === 'A' && bayNumber >= 24 && bayNumber <= 46)
+  return (location.zone === 'A' && bayNumber >= 1 && bayNumber <= 46)
     || (location.zone === 'B' && bayNumber >= 47 && bayNumber <= 90)
     || (location.zone === 'C' && bayNumber >= 91 && bayNumber <= 107);
 };
