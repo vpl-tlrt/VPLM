@@ -178,7 +178,7 @@ export function DataPixelGlobe({
       document.removeEventListener('visibilitychange', visibility);
       reducedMotion.removeEventListener('change', requestFrame);
     };
-  }, []);
+  }, [connected]);
 
   // Globe itself is decorative; the wrapping cloud button remains the accessible control.
   const style = {
