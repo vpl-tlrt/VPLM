@@ -162,7 +162,7 @@ export function LoginBrandOrbit() {
       const logoPresence = smoothstep(0.90, 0.985, collapse);
       if (logoPresence > 0.015) {
         // Keep the portrait logo centered and fully inside the halo.
-        drawVplmLogo(ctx, centerX, centerY, radius * 1.66, logoPresence * 0.96);
+        drawVplmLogo(ctx, centerX, centerY, radius * 0.83, logoPresence * 0.96);
       }
       raf = window.requestAnimationFrame(draw);
     };
