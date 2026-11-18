@@ -464,7 +464,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   // require at least 3 unchanged digits and at most 3 changed digits.
   // Do not suggest matches across different registration lengths or letter prefixes.
   const digitDifference=(a:string,b:string):number|null=>{
-    if(a===b || a.length!==b.length || a.length<4 || !/^\\d+$/.test(a) || !/^\\d+$/.test(b))return null;
+    if(a===b || a.length!==b.length || a.length<4 || !/^[0-9]+$/.test(a) || !/^[0-9]+$/.test(b))return null;
     let changed=0;
     for(let i=0;i<a.length;i++)if(a[i]!==b[i])changed++;
     return changed>0 && changed<=3 && a.length-changed>=3 ? changed : null;
