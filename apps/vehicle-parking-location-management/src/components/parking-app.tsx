@@ -23,6 +23,7 @@ import { VehicleOverviewDialog } from '@/components/vehicle-overview-dialog';
 import { VehicleModelManagement } from '@/components/vehicle-model-management';
 import AiAssistant from '@/components/ai-assistant';
 import { ParkingSheetImport } from '@/components/parking-sheet-import';
+import DataPixelArc from '@/components/originkit/ui/data-pixel-arc';
 import { planParkingBatch, type ParkingImportRow } from '@/lib/parking-batch';
 import { emptyVehicleForm, VehicleFormFields, vehicleColorClass, type VehicleFormData } from '@/components/vehicle-form-fields';
 import { loadBayManagementState, saveBayManagementState, type BayAuditEntry, type BayMaintenance, type BayReservation, xParkingSlotId } from '@/lib/bay-management-data';
@@ -1349,6 +1350,12 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
         {stats.map(({ label, value, icon: Icon, percent }) =>
           <Card key={label} className={`garage-kpi ${dashboardConnected ? 'garage-kpi-connected' : 'garage-kpi-not-live'} ${label === 'Vacant' ? vacantColorClass(percent, value) : utilizationColorClass(percent)}`}>
             <CardContent className="garage-kpi-content">
+              {dashboardConnected && <div className="garage-kpi-originkit-layer" aria-hidden="true">
+                <DataPixelArc background="#071a2c" baseColor="#ffffff" accentColor="#b8f7ff" highlight="#ffffff"
+                  density={89} dotSize={69} speed={65} hover={0}
+                  arc={{ center: 80, drop: 0, thickness: 44, falloff: 600 }}
+                  style={{ width: '100%', height: '100%', minWidth: 0, minHeight: 0 }} />
+              </div>}
               <div className="garage-kpi-toolbar">
                 <Icon className="garage-kpi-toolbar-icon" aria-hidden="true" />
                 <span className="garage-kpi-live" title={dashboardSyncTitle}><span className="garage-kpi-status-dot" aria-hidden="true" />{dashboardLiveLabel}</span>
@@ -1361,6 +1368,12 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
           </Card>)}
         <Card className={`garage-kpi garage-kpi-utilization ${dashboardConnected ? 'garage-kpi-connected' : 'garage-kpi-not-live'} ${utilizationColorClass(utilization)}`}>
           <CardContent className="garage-kpi-content">
+              {dashboardConnected && <div className="garage-kpi-originkit-layer" aria-hidden="true">
+                <DataPixelArc background="#071a2c" baseColor="#ffffff" accentColor="#b8f7ff" highlight="#ffffff"
+                  density={89} dotSize={69} speed={65} hover={0}
+                  arc={{ center: 80, drop: 0, thickness: 44, falloff: 600 }}
+                  style={{ width: '100%', height: '100%', minWidth: 0, minHeight: 0 }} />
+              </div>}
             <div className="garage-kpi-toolbar">
               <Gauge className="garage-kpi-toolbar-icon" aria-hidden="true" />
               <span className="garage-kpi-live">Live status</span>
