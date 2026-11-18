@@ -398,7 +398,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
           if(!Array.isArray(data?.rows))throw new Error(region.label+': Image scanner returned an invalid result.');
           collected.push(...(data.rows as Array<{plate:string;zone?:string;bay?:string;xParking?:boolean;confidence?:string}>)
             .map(item=>areaDraft(String(item.plate||''),String(item.bay||''),item.confidence||'OCR',importArea,
-              Boolean(item.xParking),String(item.zone||'').toLowerCase().includes('unassigned')));
+              Boolean(item.xParking),String(item.zone||'').toLowerCase().includes('unassigned'))));
           // Surface each completed section immediately instead of making the user
           // wait for every section; never save anything until the review is approved.
           for(const row of collected){
