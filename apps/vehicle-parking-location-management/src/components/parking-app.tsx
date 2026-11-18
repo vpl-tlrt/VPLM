@@ -24,6 +24,7 @@ import { VehicleModelManagement } from '@/components/vehicle-model-management';
 import AiAssistant from '@/components/ai-assistant';
 import { ParkingSheetImport } from '@/components/parking-sheet-import';
 import { DataPixelGlobe } from '@/components/data-pixel-globe';
+import { VplmLogo } from '@/components/vplm-logo';
 import DataPixelArc from '@/components/originkit/ui/data-pixel-arc';
 import { planParkingBatch, type ParkingImportRow } from '@/lib/parking-batch';
 import { emptyVehicleForm, VehicleFormFields, vehicleColorClass, type VehicleFormData } from '@/components/vehicle-form-fields';
@@ -881,7 +882,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
                   </nav>
                 </SheetContent>
               </Sheet>
-              <button type="button" aria-label="Go to home page" onClick={() => setScreen('dashboard')} className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-md"><CarFront className="h-6 w-6" /></button>
+              <button type="button" aria-label="Go to home page" onClick={() => setScreen('dashboard')} className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-md"><VplmLogo className="h-8 w-7" /></button>
               {!localGuest && <Button id="vplm-ai-header-toggle" type="button"
                 variant={aiLauncherVisible ? 'default' : 'outline'} size="sm"
                 className="h-11 shrink-0 gap-1 rounded-xl px-2 sm:px-3"
@@ -1036,7 +1037,7 @@ function LiveClock({ formatString }: { formatString: string }) {
   return <>{format(now, formatString)}</>;
 }
 
-function Brand({ onHome }: { onHome: () => void }) { return <button type="button" aria-label="Go to home page" onClick={onHome} className="flex h-20 w-full items-center gap-3 border-b px-5 text-left"><div className="grid h-10 w-10 place-items-center rounded-lg bg-primary text-primary-foreground"><CarFront /></div><div><p className="font-bold">Vehicle Parking</p><p className="text-xs text-muted-foreground">Location Management</p></div></button>; }
+function Brand({ onHome }: { onHome: () => void }) { return <button type="button" aria-label="Go to home page" onClick={onHome} className="flex h-20 w-full items-center gap-3 border-b px-5 text-left"><div className="grid h-10 w-10 place-items-center rounded-lg bg-primary text-primary-foreground"><VplmLogo className="h-8 w-7" /></div><div><p className="font-bold">Vehicle Parking</p><p className="text-xs text-muted-foreground">Location Management</p></div></button>; }
 
 type AnalysisMatch = { plateNumber: string; bayLabel: string; locationId: string; confidence: number };
 
