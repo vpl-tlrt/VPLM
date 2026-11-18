@@ -75,7 +75,8 @@ void main(){
   float probe = (1.0 - smoothstep(0.0, 1.0, distance(vec2(x, y), uPtr) / max(uReach, 1.0))) * uHover;
   i = clamp(i + probe * 0.45, 0.0, 1.2);
 
-  vec3 col = uBg;
+  vec3 col = vec3(0.0);
+  float opacity = 0.0;
   if (i > 0.01) {
     // ADDED, not multiplied: the wave can lift a cell above the band envelope
     float wave1 = sin(nx * 4.0 - uTime * 1.5) * 0.1;
@@ -92,10 +93,12 @@ void main(){
       float core = i * i * i;
       float mid = pow(i, 1.5);
       vec3 ink = uBase * i * 0.35 + uAccent * mid * 0.95 + uHigh * core * 0.35;
-      col = mix(uBg, clamp(ink, 0.0, 1.0), cov * i);
+      col = clamp(ink, 0.0, 1.0);
+      opacity = cov * i;
     }
   }
-  gl_FragColor = vec4(col, 1.0);
+  // Transparent outside the actual pixel cells: the KPI glass is the sole card surface.
+  gl_FragColor = vec4(col, opacity);
 }
 `
 
@@ -227,7 +230,7 @@ function __OriginkitBase_DataPixelArc(props: DataPixelArcProps) {
     useEffect(() => {
         const canvas = canvasRef.current
         if (!canvas) return
-        const gl = canvas.getContext("webgl", { alpha: false, antialias: false, depth: false })
+        const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: false, antialias: false, depth: false })
         if (!gl) {
             console.error("DataPixelArc: WebGL unavailable")
             return
@@ -348,7 +351,7 @@ function __OriginkitBase_DataPixelArc(props: DataPixelArcProps) {
             style={{
                 position: "relative",
                 overflow: "hidden",
-                background,
+                background: "transparent",
                 minWidth: 1200,
                 minHeight: 800,
                 width: typeof width === "number" && width > 0 ? width : "100%",
