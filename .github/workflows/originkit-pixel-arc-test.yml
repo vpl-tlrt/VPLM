@@ -1,0 +1,40 @@
+name: Install actual OriginKit Data Pixel Arc (TEST only)
+on:
+  push:
+    branches: [test/originkit-pixel-arc-cloud-globe-20261118]
+    paths: [.github/workflows/originkit-pixel-arc-test.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/vehicle-parking-location-management
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/vehicle-parking-location-management/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Install authentic OriginKit data-pixel-arc
+        env:
+          ORIGINKIT_API_KEY: ${{ secrets.ORIGINKIT_API_KEY }}
+        run: npx --yes originkit@latest add data-pixel-arc --path src/components/originkit
+      - name: Build TEST
+        run: npm run build
+      - name: Commit real component to TEST only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/vehicle-parking-location-management/src/components/originkit apps/vehicle-parking-location-management/package.json apps/vehicle-parking-location-management/package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "TEST: install actual OriginKit Data Pixel Arc source"
+            git push origin HEAD:test/originkit-pixel-arc-cloud-globe-20261118
+          fi
