@@ -80,7 +80,7 @@ export function VplmCodexPet({ awake, busy = false, onToggle }: { awake: boolean
     if (!awake || !mobile) {
       returnStarted.current = false;
       setMobileReturn('idle');
-      if (!awake) setPosition(null);
+      if (!awake && mobile) setPosition(null);
       return;
     }
     if (transforming || !transformationReady || !mobileDock || returnStarted.current) return;
