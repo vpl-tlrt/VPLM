@@ -473,10 +473,18 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     const p=normalize(row.plate);
     const exact=vehicles.filter(v=>normalize(v.plateNumber)===p && v.status!=='Delivered');
     if(exact.length)return {exact,similar:[] as Vehicle[]};
-    const similar=vehicles.filter(v=>v.status!=='Delivered' &&
-      digitDifference(p,normalize(v.plateNumber))!==null)
-      .sort((a,b)=>(digitDifference(p,normalize(a.plateNumber))??99)-
-        (digitDifference(p,normalize(b.plateNumber))??99)).slice(0,5);
+    // High-confidence OCR is not a reason to interrupt 100+ legitimate assignments.
+    // Only ask for a possible-match decision on uncertain readings: low confidence,
+    // or medium confidence with a particularly close (one-character) candidate.
+    const confidence=(row.confidence||'').toLowerCase();
+    const uncertain=confidence==='low'||confidence==='medium';
+    if(!uncertain)return {exact,similar:[] as Vehicle[]};
+    const similar=vehicles.filter(v=>{
+      if(v.status==='Delivered')return false;
+      const difference=digitDifference(p,normalize(v.plateNumber));
+      return difference!==null && (confidence==='low'||difference<=1);
+    }).sort((a,b)=>(digitDifference(p,normalize(a.plateNumber))??99)-
+      (digitDifference(p,normalize(b.plateNumber))??99)).slice(0,5);
     return {exact,similar};
   });
   const unresolvedMatches=suggestions.some((s,i)=>s.similar.length>0 && !reviewedSuggestions.has(i));
@@ -491,10 +499,27 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     normalize(other.plate)===normalize(row.plate))).map(row=>normalize(row.plate)));
   const targetPositions=draft.map(row=>row.zone==='Unassigned Bay'||(!row.bay&&isLiveGarageContainer(locations.find(loc=>loc.id===resolveBay(row))))?'':(resolveBay(row)||'invalid')+':'+(row.xParking?'X':'regular'));
   const duplicateSlots=new Set(targetPositions.filter((key,i)=>key && targetPositions.some((other,j)=>j!==i&&other===key)));
-  const invalid=draft.filter((row,i)=>!isPlate(row.plate) || duplicatePlates.has(normalize(row.plate)) ||
-    duplicateSlots.has(targetPositions[i]) ||
-    (row.zone!=='Unassigned Bay' && (!zoneNames.includes(row.zone) || !resolveBay(row))) ||
-    (row.xParking && !supportsXParkingLocation(locations.find(loc=>loc.id===resolveBay(row)))));
+  const invalidReasons=(row:Draft,i:number):string[]=>{
+    const problems:string[]=[];
+    if(!isPlate(row.plate))problems.push('Registration number is missing or invalid');
+    if(duplicatePlates.has(normalize(row.plate)))problems.push('Duplicate registration in this import');
+    if(duplicateSlots.has(targetPositions[i]))problems.push('Duplicate regular/X parking position');
+    if(row.zone!=='Unassigned Bay' && (!zoneNames.includes(row.zone)||!resolveBay(row)))
+      problems.push('Parking bay not found in selected area');
+    if(row.xParking && !supportsXParkingLocation(locations.find(loc=>loc.id===resolveBay(row))))
+      problems.push('X Parking is not supported at this bay');
+    return problems;
+  };
+  const invalidIndices=draft.map((row,i)=>invalidReasons(row,i).length?i:-1).filter(i=>i>=0);
+  const invalid=draft.filter((_,i)=>invalidIndices.includes(i));
+  const excludeInvalidRows=()=>{
+    if(!invalidIndices.length)return;
+    if(!window.confirm('Exclude '+invalidIndices.length+' invalid rows from this import? These vehicles will NOT be assigned or transferred. Complete-area reconciliation will be switched OFF.'))return;
+    const blocked=new Set(invalidIndices);
+    setDraft(old=>old.filter((_,i)=>!blocked.has(i)));
+    setCompleteZone(false);setConfirmed(false);setReviewedSuggestions(new Set());
+    setStatus('review',100,'Excluded '+blocked.size+' invalid rows. Review remaining assignments and confirm again. Complete-area reconciliation is OFF.');
+  };
   const apply=async()=>{
     if(disabled||applying||!confirmed||invalid.length||scanIncomplete||reading||!draft.length)return;
     if(unresolvedMatches)return toast.error('Review every possible OCR match first.');
@@ -519,7 +544,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       setUploadError(message);setStatus('error',15,'Update failed: '+message+'. No successful cloud save confirmed.');
     } finally {setApplying(false);}
   };
-  return <Card><CardHeader><CardTitle>Multi-area Parking Sheet Bulk Import · Status v7</CardTitle>
+  return <Card><CardHeader><CardTitle>Multi-area Parking Sheet Bulk Import · Status v8</CardTitle>
     <CardDescription>Admin and Supervisor only. Accommodation A/B/C, Reception R01–R91 and other configured parking zones. Review every proposed movement before saving.</CardDescription>
     </CardHeader><CardContent className="space-y-3">
     <div className="flex flex-wrap items-center gap-3">
@@ -597,7 +622,18 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     {uploadError&&<p role="alert" className="rounded border border-red-400 bg-red-950/20 p-3 text-sm text-red-600 dark:text-red-300">{uploadError} {draft.length>0?'These partial readings are shown for review only; import is disabled until a complete rescan.':'Existing parking records remain unchanged.'}</p>}
     {draft.length===0 && !reading && <p className="text-sm text-muted-foreground">No registrations are ready for review yet. Upload a completed sheet, use Excel/CSV, or select Add vehicle manually to review. Nothing is saved until approved.</p>}
     {draft.length>0&&<>
-      <p className="text-sm font-medium" id="parking-import-review">Step 2 — Review {draft.length} {importArea} registrations. {invalid.length} require correction. Duplicate readings must be corrected or removed. Entries with no known parking bay must use Unassigned Bay.</p>
+      <p className="text-sm font-medium" id="parking-import-review">Step 2 — Review {draft.length} {importArea} registrations. {invalid.length} require correction. Only uncertain OCR readings require possible-match review.</p>
+      {invalidIndices.length>0&&<div className="space-y-2 rounded-md border border-amber-500 p-3 text-sm" role="alert">
+        <p className="font-semibold">{invalidIndices.length} rows currently block Apply. Correct their registration, bay or X position, or exclude only those rows.</p>
+        <div className="max-h-48 space-y-1 overflow-y-auto">
+          {invalidIndices.map(i=><p key={i} className="font-mono">Row {i+1}: {draft[i].plate||'(blank)'} — {parkingZoneLabel(draft[i].zone)} {draft[i].bay||'no bay'}: {invalidReasons(draft[i],i).join('; ')}</p>)}
+        </div>
+        <Button type="button" variant="outline" disabled={reading||applying} onClick={excludeInvalidRows}>
+          Exclude {invalidIndices.length} invalid rows from this batch
+        </Button>
+        <p className="text-xs">Excluded rows will not be saved. This also turns off complete-area reconciliation so omitted vehicles are not moved accidentally.</p>
+      </div> 
+      {unresolvedMatches&&<p role="alert" className="text-sm font-medium">Review the uncertain OCR match suggestions below to enable Apply.</p>}
       {duplicateSlots.size>0&&<p role="alert" className="rounded border border-amber-500 p-3 text-sm font-medium">
         {duplicateSlots.size} duplicated parking position(s) need review. Check OCR readings and choose a valid X Parking position if appropriate, correct the bay, or move the extra vehicle to Unassigned Bay. Unsafe assignments are blocked.
       </p>}
@@ -614,7 +650,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
         </tr>)}</tbody></table></div>
       <div className="space-y-3 rounded-md border p-3 text-sm">
         <p className="font-semibold">Live parking reconciliation preview</p>
-        <p className="text-xs text-muted-foreground">Possible matches: same-length numbers with at least 3 digits matching in the same positions and no more than 3 different digits. Every suggestion requires manual confirmation.</p>
+        <p className="text-xs text-muted-foreground">Possible matches appear only for low-confidence OCR, or medium-confidence OCR with a one-digit difference. High-confidence readings proceed without suggestions. Suggested matches still require confirmation.</p>
         <p>{suggestions.filter(item=>item.exact.length>0).length} exact registrations · {suggestions.filter(item=>item.similar.length>0).length} possible OCR mismatches · {new Set(destinationOccupants.map(item=>item.id)).size} destination occupants not on the list</p>
         {suggestions.map((entry,i)=>entry.similar.length>0&&<div key={i} className="flex flex-wrap items-center gap-2 rounded border p-2">
           <span className="font-mono font-semibold">OCR: {draft[i].plate}</span>
