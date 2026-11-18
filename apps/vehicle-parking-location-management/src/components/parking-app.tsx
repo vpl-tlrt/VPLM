@@ -23,6 +23,7 @@ import { VehicleOverviewDialog } from '@/components/vehicle-overview-dialog';
 import { VehicleModelManagement } from '@/components/vehicle-model-management';
 import AiAssistant from '@/components/ai-assistant';
 import { ParkingSheetImport } from '@/components/parking-sheet-import';
+import { DataPixelGlobe } from '@/components/data-pixel-globe';
 import DataPixelArc from '@/components/originkit/ui/data-pixel-arc';
 import { planParkingBatch, type ParkingImportRow } from '@/lib/parking-batch';
 import { emptyVehicleForm, VehicleFormFields, vehicleColorClass, type VehicleFormData } from '@/components/vehicle-form-fields';
@@ -910,7 +911,7 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
               <div className="hidden text-right xl:block"><p className="text-sm font-semibold"><LiveClock formatString="EEE, d MMM" /></p><p className="text-xs text-muted-foreground"><LiveClock formatString="HH:mm:ss" /></p></div>
               {otherSessions > 0 && <span className="hidden rounded-lg border px-2 py-1 text-xs text-muted-foreground sm:inline-flex" title="This account is signed in on more than one tab or device. Concurrent changes are checked before saving.">{otherSessions} other session{otherSessions === 1 ? '' : 's'}</span>}
               <Button variant={isOnline && syncState !== 'error' ? 'default' : 'secondary'} size="sm" className={`vplm-cloud-globe-button rounded-xl ${isOnline && syncState !== 'error' ? 'cloud-globe-online' : 'cloud-globe-disconnected'}`} onClick={() => void sync(true)} aria-label={`Data storage status: ${syncLabel}. Tap to synchronize.`} title={localGuest || guestPreview ? 'Guest changes are not uploaded.' : lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Click to sync workspace data'}>
-                 <span className="vplm-cloud-globe" aria-hidden="true"><span className="vplm-cloud-globe-grid" /><span className="vplm-cloud-globe-shine" /></span>
+                 <DataPixelGlobe connected={isOnline && syncState !== 'error' && syncState !== 'syncing'} size={32} dotColor="#334155" arcColor="#2563eb" rotationSpeed={1} density={260} />
                  <span className="hidden lg:inline">{syncLabel}</span>
                </Button>
               <Button variant="outline" size="icon" className="rounded-xl" onClick={handleNotificationClick} onDoubleClick={(event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault()} aria-label={`Notifications. Sound ${soundEnabled ? 'on' : 'off'}. Double-click to toggle sound.`} title={`Notification sound ${soundEnabled ? 'on' : 'off'} · double-click to toggle`}>{soundEnabled ? <Bell /> : <BellOff />}</Button>
