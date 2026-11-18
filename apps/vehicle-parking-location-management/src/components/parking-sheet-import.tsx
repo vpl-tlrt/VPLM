@@ -473,6 +473,10 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     locations.some(loc=>zoneNames.includes(loc.zone) && parkingRecordKey(loc.id)===parkingRecordKey(v.currentLocationId)));
   const normalizedPlates=new Set(draft.map(r=>normalize(r.plate)));
   const missingFromZone=activeInZone.filter(v=>!normalizedPlates.has(normalize(v.plateNumber)));
+  const existingManagerCount=vehicles.filter(v=>v.status!=='Delivered' && v.status!=='Released' &&
+    locations.some(loc=>loc.zone==='Manager Parking' &&
+      parkingRecordKey(loc.id)===parkingRecordKey(v.currentLocationId))).length;
+  const importedManagerCount=draft.filter(row=>row.zone==='Manager Parking').length;
   // For OCR registration suggestions compare digit positions, not edit distance:
   // require at least 3 unchanged digits and at most 3 changed digits.
   // Do not suggest matches across different registration lengths or letter prefixes.
@@ -537,7 +541,10 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
     if(disabled||applying||!confirmed||invalid.length||scanIncomplete||reading||!draft.length)return;
     if(unresolvedMatches)return toast.error('Review every possible OCR match first.');
     const additions=completeZone ? missingFromZone.map(v=>({plate:normalize(v.plateNumber)})) : [];
-    if(completeZone && draft.some(row=>row.zone!=='Unassigned Bay'&&!zoneNames.includes(row.zone)))return toast.error('Rows outside selected import area.');
+    if(completeZone && draft.some(row=>row.zone!=='Unassigned Bay'&&!zoneNames.includes(row.zone)))
+      return toast.error('Rows outside selected import area.');
+    if(completeZone && importArea===RECEPTION_MANAGER && existingManagerCount>0 && importedManagerCount===0)
+      return toast.error('Complete-area reconciliation cannot clear Manager Parking from a Reception-only sheet. Import a complete Manager Parking register or turn off Complete selected-area reconciliation.');
     const rows=[...draft.map(row=>({plate:normalize(row.plate),bayId:resolveBay(row),xParking:row.xParking})),...additions];
     if(completeZone && !window.confirm('COMPLETE ZONE CONFIRMATION: Move '+missingFromZone.length+
       ' vehicles missing from '+importArea+' to Unassigned Bay, in addition to the '+draft.length+
@@ -557,7 +564,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
       setUploadError(message);setStatus('error',15,'Update failed: '+message+'. No successful cloud save confirmed.');
     } finally {setApplying(false);}
   };
-  return <Card><CardHeader><CardTitle>Multi-area Parking Sheet Bulk Import · Status v8</CardTitle>
+  return <Card><CardHeader><CardTitle>Multi-area Parking Sheet Bulk Import · Status v9</CardTitle>
     <CardDescription>Admin and Supervisor only. Accommodation A/B/C, Reception R01–R91 and other configured parking zones. Review every proposed movement before saving.</CardDescription>
     </CardHeader><CardContent className="space-y-3">
     <div className="flex flex-wrap items-center gap-3">
@@ -655,8 +662,17 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
           <th className="p-2">Vehicle</th><th className="p-2">Zone</th><th className="p-2">Bay</th><th className="p-2">X</th><th className="p-2">Reading</th><th className="p-2"></th>
         </tr></thead><tbody>{draft.map((row,i)=><tr key={i} className="border-t">
           <td className="p-1"><input className="w-28 rounded border p-2" value={row.plate} onChange={e=>update(i,{plate:e.target.value})}/></td>
-          <td className="p-1">{parkingZoneLabel(row.zone)}</td>
-          <td className="p-1"><input className="w-16 rounded border p-2" value={row.bay} placeholder="Bay / none" onChange={e=>update(i,{bay:e.target.value,zone:importArea==='Accommodation'?accommodationZone(e.target.value)||row.zone:row.zone})}/></td>
+          <td className="p-1">{importArea===RECEPTION_MANAGER ?
+             <select className="max-w-44 rounded border bg-background p-2" aria-label={'Destination for '+row.plate}
+               value={row.zone} onChange={e=>update(i,{
+                 zone:e.target.value,bay:e.target.value==='Reception'?row.bay:'',
+                 xParking:false
+               })}>
+               <option value="Reception">Reception Parking</option>
+               <option value="Manager Parking">Manager Parking (no bay)</option>
+               <option value="Unassigned Bay">Unassigned Bay</option>
+             </select> : parkingZoneLabel(row.zone)}</td>
+          <td className="p-1"><input className="w-16 rounded border p-2" value={row.bay} disabled={row.zone==='Manager Parking'||row.zone==='Unassigned Bay'} placeholder="Bay / none" onChange={e=>update(i,{bay:e.target.value,zone:importArea==='Accommodation'?accommodationZone(e.target.value)||row.zone:row.zone})}/></td>
           <td className="p-1"><input type="checkbox" checked={row.xParking} onChange={e=>update(i,{xParking:e.target.checked})}/></td>
           <td className="p-1">{row.confidence||'Review'}</td>
           <td className="p-1"><button type="button" onClick={()=>{setDraft(old=>old.filter((_,j)=>i!==j));setConfirmed(false);}}>Remove</button></td>
@@ -685,6 +701,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
           <input type="checkbox" checked={completeZone} onChange={e=>{setCompleteZone(e.target.checked);setConfirmed(false);}} />
           <span><strong>Complete selected-area reconciliation</strong> — I confirm this is the complete list for {importArea}, not a partial photograph. Propose moving unlisted vehicles to Unassigned Bay.</span>
         </label>
+        {importArea===RECEPTION_MANAGER&&<p>Manager Parking: {existingManagerCount} currently parked · {importedManagerCount} entries in this import · 25 maximum capacity. R78–R83 remain Reception bays.</p>}
         <p>{missingFromZone.length} currently parked vehicle(s) in {importArea} do not appear in this list. {completeZone?'These will be added to the transfer proposal.':'These will NOT be moved.'}</p>
         {completeZone&&missingFromZone.length>0&&<p className="break-words font-mono text-xs">Missing: {missingFromZone.map(item=>item.plateNumber).join(', ')}</p>}
 
