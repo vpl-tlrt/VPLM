@@ -1169,7 +1169,6 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
     { label: 'Total bays', value: countedBayTotal, icon: CircleParking, percent: utilization },
     { label: 'Vacant', value: available, icon: MapPin, percent: Math.round((available / totalBays) * 100) },
     { label: 'Occupied', value: occupied, icon: CarFront, percent: utilization },
-    { label: 'Reserved', value: reserved, icon: CalendarDays, percent: Math.round((reserved / totalBays) * 100) },
   ];
 
 
@@ -1335,8 +1334,31 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
         <div><p className="technical-label flex items-center gap-2"><span className="live-dot" /> Live yard overview</p><h2 className="text-2xl font-black">Parking operations</h2></div>
       </div>
       {!openedParkingZone && <div className="garage-kpi-grid">
-        {stats.map(({ label, value, icon: Icon, percent }) => <Card key={label} className={`garage-kpi ${label === 'Vacant' ? vacantColorClass(percent, value) : utilizationColorClass(percent)}`}><CardContent className="flex flex-col p-4"><p className="text-sm font-semibold">{label}</p><div className="flex items-end justify-between"><motion.p key={value} initial={{ opacity: 0, scale: 0.82 }} animate={{ opacity: 1, scale: 1 }} className="text-3xl font-black">{value}</motion.p><div className="garage-kpi-icon"><Icon /></div></div></CardContent></Card>)}
-        <Card className={`garage-kpi garage-kpi-utilization ${utilizationColorClass(utilization)}`}><CardContent className="flex flex-col p-4"><p className="text-sm font-semibold">Utilization</p><div className="flex items-end justify-between"><motion.p key={utilization} initial={{ opacity: 0, scale: 0.82 }} animate={{ opacity: 1, scale: 1 }} className="text-3xl font-black">{utilization}%</motion.p><div className="garage-kpi-icon"><Gauge /></div></div></CardContent></Card>
+        {stats.map(({ label, value, icon: Icon, percent }) =>
+          <Card key={label} className={`garage-kpi ${label === 'Vacant' ? vacantColorClass(percent, value) : utilizationColorClass(percent)}`}>
+            <CardContent className="garage-kpi-content">
+              <div className="garage-kpi-toolbar">
+                <Icon className="garage-kpi-toolbar-icon" aria-hidden="true" />
+                <span className="garage-kpi-live">Live status</span>
+              </div>
+              <div className="garage-kpi-details">
+                <p className="garage-kpi-label">{label}</p>
+                <motion.p key={value} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="garage-kpi-value">{value}</motion.p>
+              </div>
+            </CardContent>
+          </Card>)}
+        <Card className={`garage-kpi garage-kpi-utilization ${utilizationColorClass(utilization)}`}>
+          <CardContent className="garage-kpi-content">
+            <div className="garage-kpi-toolbar">
+              <Gauge className="garage-kpi-toolbar-icon" aria-hidden="true" />
+              <span className="garage-kpi-live">Live status</span>
+            </div>
+            <div className="garage-kpi-details">
+              <p className="garage-kpi-label">Utilization</p>
+              <motion.p key={utilization} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="garage-kpi-value">{utilization}%</motion.p>
+            </div>
+          </CardContent>
+        </Card>
       </div>}
       <div className="grid gap-3 lg:grid-cols-5">
         {!openedParkingZone && <Card className="occupancy-shimmer lg:col-span-3"><CardHeader><div className="flex items-end justify-between"><div><CardTitle>Parking utilization</CardTitle><CardDescription>Real-time occupied bays across the facility</CardDescription></div><strong className="text-3xl">{utilization}%</strong></div></CardHeader><CardContent><Progress value={utilization} /><p className="mt-3 text-sm text-muted-foreground">Operational warning at 80% occupancy</p></CardContent></Card>}
