@@ -16,9 +16,13 @@ const accommodationZone=(bay:string):'A'|'B'|'C'|undefined=>{
   return n>=1&&n<=46?'A':n>=47&&n<=90?'B':n>=91&&n<=107?'C':undefined;
 };
 const accommodationDraft=(plate:string,bay:string,confidence:string):Draft=>{
-  const zone=accommodationZone(bay);
-  if(!zone)throw new Error('Invalid Accommodation A/B/C bay '+bay+'. Must be 1–107.');
-  return {plate:normalize(plate),zone,bay:String(Number(bay)),xParking:false,confidence};
+  const rawBay=bay.trim().toUpperCase();
+  const prefixed=rawBay.match(/^([ABC])[-\\s]?(\\d{1,3})$/);
+  const numericBay=prefixed?prefixed[2]:rawBay;
+  const zone=accommodationZone(numericBay);
+  if(!zone || (prefixed && prefixed[1]!==zone))
+    throw new Error('Invalid or mismatched accommodation bay '+bay+'. Use A1–A46, B47–B90, C91–C107, or the number alone.');
+  return {plate:normalize(plate),zone,bay:String(Number(numericBay)),xParking:false,confidence};
 };
 
 type ScannedRegion = { label: string; image: string };
@@ -273,25 +277,29 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
   const zoneNames:string[]=[...ACC_ZONES];
   const update=(i:number,patch:Partial<Draft>)=>{setDraft(old=>old.map((row,j)=>i===j?{...row,...patch}:row));setConfirmed(false);setReviewedSuggestions(old=>{const n=new Set(old);n.delete(i);return n;});};
   const parseCopiedList=()=>{
-    const lines=pastedText.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
-    const result:Draft[]=[];
-    for(const line of lines){
-      if (/vehicle\s*(number|no)|parking\s*slot/i.test(line)) continue;
-      const columns=line.split(/\t+|\s{2,}|\s*[,;|]\s*/).map(s=>s.trim()).filter(Boolean);
-      let plate=columns[0], bay=columns[1];
-      if (columns.length===1) {
-        const matched=line.match(/^([A-Z0-9-]+)\s+(\d{1,3})$/i);
-        if(matched){plate=matched[1];bay=matched[2];}
+    try {
+      const lines=pastedText.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
+      const result:Draft[]=[];
+      for(const line of lines){
+        if (/vehicle\s*(number|no)|parking\s*(slot|bay)/i.test(line))continue;
+        const parts=line.split(/[\t,;|]+|\s+/).map(v=>v.trim()).filter(Boolean);
+        if(parts.length!==2)throw new Error('Unrecognized row: '+line.slice(0,80)+'. Use A13 243382 or 243382 13.');
+        const bayPattern=/^(?:[ABC][-\s]?)?\d{1,3}$/i;
+        const firstIsBay=bayPattern.test(parts[0]);
+        const secondIsBay=bayPattern.test(parts[1]);
+        if(firstIsBay===secondIsBay)throw new Error('Ambiguous row: '+line.slice(0,80)+'. Use a zone prefix such as A13 or a clearly identified vehicle/bay column.');
+        const bay=firstIsBay?parts[0]:parts[1];
+        const plate=firstIsBay?parts[1]:parts[0];
+        if(!isPlate(plate))throw new Error('Invalid registration in row: '+line.slice(0,80));
+        result.push(accommodationDraft(plate,bay,'Copied OCR'));
       }
-      if(!plate || !bay || !/^\d+$/.test(bay)) {
-        toast.error('Unrecognized line: '+line.slice(0,60)+'. Use Vehicle Number and Parking Slot columns.');return;
-      }
-      result.push(accommodationDraft(plate,bay,'Copied OCR'));
+      if(!result.length)throw new Error('Paste vehicle registrations and parking bays first.');
+      setDraft(result);setScanIncomplete(false);setUploadError('');setConfirmed(false);setCompleteZone(false);
+      setReviewedSuggestions(new Set());setMoveOccupants(true);
+      setStatus('review',100,result.length+' pasted rows ready. Check duplicate bays and vehicle matches before applying.');
+    } catch(error){
+      setStatus('error',0,error instanceof Error?error.message:'Could not parse pasted rows.');
     }
-    if(!result.length)return toast.error('Paste vehicle numbers and parking slots first.');
-    setDraft(result);setScanIncomplete(false);setUploadError('');setConfirmed(false);setCompleteZone(false);
-    setReviewedSuggestions(new Set());setMoveOccupants(true);
-    setStatus('review',100,result.length+' copied OCR rows ready. Review matches and displaced vehicles before applying.');
   };
   const startManualReview=()=>{
     if(reading||disabled)return;
