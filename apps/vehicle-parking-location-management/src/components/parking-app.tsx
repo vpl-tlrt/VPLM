@@ -908,7 +908,10 @@ export function ParkingApp({ signedInUserId, initialCloudRevision, localGuest = 
               {guestPreview && <Badge variant="secondary" className="shrink-0 border border-amber-500/60 bg-amber-100 font-black text-amber-950">GUEST PREVIEW · NO CLOUD SAVES</Badge>}
               <div className="hidden text-right xl:block"><p className="text-sm font-semibold"><LiveClock formatString="EEE, d MMM" /></p><p className="text-xs text-muted-foreground"><LiveClock formatString="HH:mm:ss" /></p></div>
               {otherSessions > 0 && <span className="hidden rounded-lg border px-2 py-1 text-xs text-muted-foreground sm:inline-flex" title="This account is signed in on more than one tab or device. Concurrent changes are checked before saving.">{otherSessions} other session{otherSessions === 1 ? '' : 's'}</span>}
-              <Button variant={isOnline && syncState !== 'error' ? 'default' : 'secondary'} size="sm" className="rounded-xl" onClick={() => void sync(true)} aria-label={`Data storage status: ${syncLabel}`} title={localGuest || guestPreview ? 'Guest changes are not uploaded.' : lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Click to sync workspace data'}><span className="live-dot" /><span className="hidden lg:inline">{syncLabel}</span></Button>
+              <Button variant={isOnline && syncState !== 'error' ? 'default' : 'secondary'} size="sm" className={`vplm-cloud-globe-button rounded-xl ${isOnline && syncState !== 'error' ? 'cloud-globe-online' : 'cloud-globe-disconnected'}`} onClick={() => void sync(true)} aria-label={`Data storage status: ${syncLabel}. Tap to synchronize.`} title={localGuest || guestPreview ? 'Guest changes are not uploaded.' : lastSyncAt ? `Last synced ${new Date(lastSyncAt).toLocaleString()}` : 'Click to sync workspace data'}>
+                 <span className="vplm-cloud-globe" aria-hidden="true"><span className="vplm-cloud-globe-grid" /><span className="vplm-cloud-globe-shine" /></span>
+                 <span className="hidden lg:inline">{syncLabel}</span>
+               </Button>
               <Button variant="outline" size="icon" className="rounded-xl" onClick={handleNotificationClick} onDoubleClick={(event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault()} aria-label={`Notifications. Sound ${soundEnabled ? 'on' : 'off'}. Double-click to toggle sound.`} title={`Notification sound ${soundEnabled ? 'on' : 'off'} · double-click to toggle`}>{soundEnabled ? <Bell /> : <BellOff />}</Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1346,6 +1349,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
         {stats.map(({ label, value, icon: Icon, percent }) =>
           <Card key={label} className={`garage-kpi ${dashboardConnected ? 'garage-kpi-connected' : 'garage-kpi-not-live'} ${label === 'Vacant' ? vacantColorClass(percent, value) : utilizationColorClass(percent)}`}>
             <CardContent className="garage-kpi-content">
+              <span className="garage-kpi-pixel-arc" aria-hidden="true" />
               <div className="garage-kpi-toolbar">
                 <Icon className="garage-kpi-toolbar-icon" aria-hidden="true" />
                 <span className="garage-kpi-live" title={dashboardSyncTitle}><span className="garage-kpi-status-dot" aria-hidden="true" />{dashboardLiveLabel}</span>
@@ -1358,6 +1362,7 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
           </Card>)}
         <Card className={`garage-kpi garage-kpi-utilization ${dashboardConnected ? 'garage-kpi-connected' : 'garage-kpi-not-live'} ${utilizationColorClass(utilization)}`}>
           <CardContent className="garage-kpi-content">
+            <span className="garage-kpi-pixel-arc" aria-hidden="true" />
             <div className="garage-kpi-toolbar">
               <Gauge className="garage-kpi-toolbar-icon" aria-hidden="true" />
               <span className="garage-kpi-live">Live status</span>
