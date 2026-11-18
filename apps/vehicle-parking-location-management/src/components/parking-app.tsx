@@ -1349,7 +1349,6 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
         {stats.map(({ label, value, icon: Icon, percent }) =>
           <Card key={label} className={`garage-kpi ${dashboardConnected ? 'garage-kpi-connected' : 'garage-kpi-not-live'} ${label === 'Vacant' ? vacantColorClass(percent, value) : utilizationColorClass(percent)}`}>
             <CardContent className="garage-kpi-content">
-              <span className="garage-kpi-pixel-arc" aria-hidden="true" />
               <div className="garage-kpi-toolbar">
                 <Icon className="garage-kpi-toolbar-icon" aria-hidden="true" />
                 <span className="garage-kpi-live" title={dashboardSyncTitle}><span className="garage-kpi-status-dot" aria-hidden="true" />{dashboardLiveLabel}</span>
@@ -1362,7 +1361,6 @@ function Dashboard({ locations, setLocations, movements, vehicles, setVehicles, 
           </Card>)}
         <Card className={`garage-kpi garage-kpi-utilization ${dashboardConnected ? 'garage-kpi-connected' : 'garage-kpi-not-live'} ${utilizationColorClass(utilization)}`}>
           <CardContent className="garage-kpi-content">
-            <span className="garage-kpi-pixel-arc" aria-hidden="true" />
             <div className="garage-kpi-toolbar">
               <Gauge className="garage-kpi-toolbar-icon" aria-hidden="true" />
               <span className="garage-kpi-live">Live status</span>
