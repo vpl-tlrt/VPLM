@@ -921,39 +921,6 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
     .garage-kpi-connected .garage-kpi-content::after,
     .garage-kpi-connected::before { animation: none !important; transition: none !important; }
   }
-  /* TEST: OriginKit Pixel Arc-inspired halftone rings. CSS-only to avoid a
-     permanent WebGL render loop on Android; respects occupancy color classes. */
-  .garage-kpi-pixel-arc {
-    position: absolute;
-    z-index: 0;
-    right: -3.1rem;
-    bottom: -4.4rem;
-    width: 12rem;
-    height: 12rem;
-    border-radius: 50%;
-    pointer-events: none;
-    opacity: 0.69;
-    background-image: radial-gradient(circle, rgb(255 255 255 / 70%) 1.05px, transparent 1.65px);
-    background-size: 10px 10px;
-    -webkit-mask-image: radial-gradient(circle, transparent 0 27%, black 29% 58%, transparent 61% 100%);
-    mask-image: radial-gradient(circle, transparent 0 27%, black 29% 58%, transparent 61% 100%);
-    transform-origin: 50% 50%;
-    animation: vplm-pixel-arc-orbit 22s linear infinite;
-  }
-  .garage-kpi-pixel-arc::after {
-    content: "";
-    position: absolute;
-    inset: 16%;
-    border-radius: 50%;
-    border: 1px dashed rgb(255 255 255 / 24%);
-  }
-  .garage-kpi-not-live .garage-kpi-pixel-arc { animation-play-state: paused; opacity: 0.32; }
-  .garage-kpi-details, .garage-kpi-toolbar { position: relative; z-index: 2; }
-  @keyframes vplm-pixel-arc-orbit {
-    from { transform: rotate(0deg) scale(0.98); }
-    to { transform: rotate(360deg) scale(0.98); }
-  }
-
   /* TEST: miniature spherical globe for the *existing* cloud sync button.
      Keeps the click target, title, connectivity state and sync() callback. */
   .vplm-cloud-globe-button { display: inline-flex; align-items: center; gap: 0.5rem; min-width: 2.75rem; min-height: 2.75rem; }
