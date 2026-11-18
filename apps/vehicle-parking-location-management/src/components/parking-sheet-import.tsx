@@ -632,7 +632,7 @@ export function ParkingSheetImport({ locations,vehicles,onApply,disabled=false }
           Exclude {invalidIndices.length} invalid rows from this batch
         </Button>
         <p className="text-xs">Excluded rows will not be saved. This also turns off complete-area reconciliation so omitted vehicles are not moved accidentally.</p>
-      </div> 
+      </div>}
       {unresolvedMatches&&<p role="alert" className="text-sm font-medium">Review the uncertain OCR match suggestions below to enable Apply.</p>}
       {duplicateSlots.size>0&&<p role="alert" className="rounded border border-amber-500 p-3 text-sm font-medium">
         {duplicateSlots.size} duplicated parking position(s) need review. Check OCR readings and choose a valid X Parking position if appropriate, correct the bay, or move the extra vehicle to Unassigned Bay. Unsafe assignments are blocked.
