@@ -814,15 +814,70 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   }
 }
 
+  /* Responsive KPI tiles: light header band, spacious gradient and soft arc,
+     adapted from the provided dashboard reference. Existing usage classes remain
+     responsible for live occupancy colour changes. */
   .garage-kpi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
-  .garage-kpi { position: relative; overflow: hidden; border-top: 4px solid var(--usage-color, var(--primary)); background: var(--usage-color, var(--card)); color: var(--usage-foreground, var(--card-foreground)); box-shadow: 0 16px 36px -28px var(--foreground); }
-  .garage-kpi.usage-green { --usage-color: oklch(0.64 0.16 145); --usage-foreground: oklch(0.16 0.04 145); }
-  .garage-kpi.usage-teal { --usage-color: oklch(0.65 0.12 180); --usage-foreground: oklch(0.16 0.035 180); }
-  .garage-kpi.usage-yellow-gold { --usage-color: oklch(0.8 0.16 85); --usage-foreground: oklch(0.2 0.04 85); }
-  .garage-kpi.usage-cyan-aqua { --usage-color: oklch(0.78 0.12 205); --usage-foreground: oklch(0.16 0.035 205); }
-  .garage-kpi.usage-lavender-pink { --usage-color: oklch(0.76 0.13 325); --usage-foreground: oklch(0.2 0.04 325); }
-  .garage-kpi.usage-coral-red { --usage-color: oklch(0.67 0.18 28); --usage-foreground: oklch(0.98 0.01 28); }
-  .garage-kpi-icon { display: grid; width: 3rem; height: 3rem; place-items: center; border-radius: 0.9rem; border: 1px solid currentColor; background: var(--usage-foreground, var(--sidebar)); color: var(--usage-color, var(--sidebar-foreground)); box-shadow: 0 8px 18px -10px var(--foreground); }
+  .garage-kpi {
+    --kpi-start: #1789da;
+    --kpi-end: #2eb9fa;
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    min-width: 0;
+    border: 1px solid color-mix(in srgb, var(--kpi-start) 74%, white);
+    border-radius: 0.5rem;
+    background: linear-gradient(112deg, var(--kpi-start) 0%, var(--kpi-end) 100%);
+    color: #fff;
+    box-shadow: 0 4px 14px -11px rgb(0 0 0 / 38%);
+  }
+  .garage-kpi::before {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    width: 66%;
+    aspect-ratio: 1;
+    right: -22%;
+    bottom: -100%;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 13%);
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 6%);
+    pointer-events: none;
+  }
+  .garage-kpi::after {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    width: 66%;
+    height: 1px;
+    right: 0;
+    top: 39%;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 12%));
+    pointer-events: none;
+  }
+  .garage-kpi.usage-green { --kpi-start: #09835b; --kpi-end: #12ba87; }
+  .garage-kpi.usage-teal { --kpi-start: #067c82; --kpi-end: #1bc6bb; }
+  .garage-kpi.usage-yellow-gold { --kpi-start: #b55e08; --kpi-end: #e5a129; }
+  .garage-kpi.usage-cyan-aqua { --kpi-start: #087ba8; --kpi-end: #22c2d5; }
+  .garage-kpi.usage-lavender-pink { --kpi-start: #8950a5; --kpi-end: #d269a9; }
+  .garage-kpi.usage-coral-red { --kpi-start: #c23732; --kpi-end: #f76f58; }
+  .garage-kpi-content { position: relative; z-index: 1; display: flex; min-height: 8.4rem; flex-direction: column; padding: 0 !important; }
+  .garage-kpi-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+    min-height: 2.1rem;
+    padding: 0.45rem 0.8rem;
+    border-bottom: 1px solid rgb(255 255 255 / 15%);
+    background: rgb(255 255 255 / 10%);
+  }
+  .garage-kpi-toolbar-icon { width: 0.95rem; height: 0.95rem; opacity: 0.94; }
+  .garage-kpi-live { font-size: 0.66rem; font-weight: 600; opacity: 0.86; letter-spacing: 0.02em; white-space: nowrap; }
+  .garage-kpi-details { display: flex; flex: 1; flex-direction: column; justify-content: flex-end; gap: 0.15rem; padding: 1.05rem 0.8rem 0.85rem; }
+  .garage-kpi-label { font-size: 0.76rem; font-weight: 600; opacity: 0.88; line-height: 1.25; }
+  .garage-kpi-value { font-size: clamp(1.65rem, 3vw, 2.15rem); font-weight: 800; line-height: 1.08; font-variant-numeric: tabular-nums; letter-spacing: -0.025em; }
+  .garage-kpi-icon { display: none; }
   .zone-navigation { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.65rem; }
   .zone-navigation-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--border); border-radius: 0.9rem; padding: 0.8rem 0.9rem; background: var(--card); color: var(--card-foreground); text-align: left; box-shadow: 0 10px 24px -22px var(--foreground); transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
   .zone-navigation-card:hover, .zone-navigation-card-active { transform: translateY(-2px); border-color: var(--primary); box-shadow: 0 16px 28px -22px var(--primary); }
@@ -876,7 +931,7 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   .parking-road { min-height: 3rem; border-radius: 0.65rem; box-shadow: inset 0 0 0 1px var(--sidebar-border); }
   .parking-divider { height: 0.35rem; margin-block: 0.35rem; border-radius: 999px; background: repeating-linear-gradient(90deg, var(--foreground) 0 18px, transparent 18px 28px); }
   @keyframes target-pulse { from { filter: brightness(1); } to { filter: brightness(1.18); } }
-  @media (min-width: 1024px) { .garage-kpi-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+  @media (min-width: 1024px) { .garage-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
   @media (max-width: 767px) {
     .garage-map-hint { left: 0.75rem; right: auto; top: 0.75rem; }
     .garage-map-viewport { height: 68vh; min-height: 520px; }
