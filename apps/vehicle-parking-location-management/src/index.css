@@ -968,6 +968,29 @@ body.neumorphism-mode [data-slot='dropdown-menu-item'][data-highlighted] svg:not
   @media (prefers-reduced-motion: reduce) {
     .garage-kpi-pixel-arc, .vplm-cloud-globe-grid { animation: none !important; }
   }
+  /* Genuine OriginKit WebGL shader overlay, clipped to each existing gradient KPI. */
+  .garage-kpi-originkit-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    opacity: 0.42;
+    pointer-events: none;
+    border-radius: inherit;
+  }
+  .garage-kpi-originkit-layer > div {
+    min-width: 0 !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
+  .garage-kpi-toolbar, .garage-kpi-details {
+    position: relative;
+    z-index: 2;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .garage-kpi-originkit-layer { display: none; }
+  }
   .garage-kpi-icon { display: none; }
   .zone-navigation { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.65rem; }
   .zone-navigation-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--border); border-radius: 0.9rem; padding: 0.8rem 0.9rem; background: var(--card); color: var(--card-foreground); text-align: left; box-shadow: 0 10px 24px -22px var(--foreground); transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
